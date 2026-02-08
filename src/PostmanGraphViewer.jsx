@@ -990,8 +990,8 @@ const PostmanGraphViewer = () => {
       <header className="bg-slate-900/80 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-bold text-white">
           {collection
-            ? `Graph Canvas: ${collection.info?.name}`
-            : "Graph Canvas: API Collection"}
+            ? `Snap-Map: ${collection.info?.name}`
+            : "Snap-Map: API Collection"}
         </h1>
 
         <div className="flex items-center gap-4">
