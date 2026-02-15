@@ -11,6 +11,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Maximize2,
   Search,
   ChevronDown,
   Lock,
@@ -33,6 +34,7 @@ import {
   Eye,
   Terminal,
   ChevronRight,
+  Layers,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────
@@ -217,74 +219,82 @@ const GraphCard = ({ node, position, isSelected, isDragging, isHighlighted, onMo
         onMouseLeave={() => setHovered(false)}
       >
       {node.type === "root" ? (
-        <div className={`w-56 rounded-xl border-2 cursor-grab active:cursor-grabbing backdrop-blur-sm p-4 group
-          transition-all duration-300
+        <div className={`w-60 rounded-2xl cursor-grab active:cursor-grabbing backdrop-blur-sm p-4 group transition-all duration-300 relative overflow-hidden
           ${isSelected
-            ? "border-cyan-400 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-cyan-500/40"
+            ? "border-2 border-violet-400 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-violet-500/30"
             : isHighlighted
-              ? "border-cyan-500/50 bg-gradient-to-br from-slate-800/80 to-slate-900/80 shadow-lg shadow-cyan-500/20"
-              : "border-cyan-600/30 bg-gradient-to-br from-slate-800/60 to-slate-900/60 hover:border-cyan-500/60 hover:shadow-xl hover:shadow-cyan-500/15"
+              ? "border-2 border-violet-500/50 bg-gradient-to-br from-slate-800/90 to-slate-900/90 shadow-lg shadow-violet-500/15"
+              : "border border-violet-600/25 bg-gradient-to-br from-slate-800/80 to-slate-900/80 hover:border-violet-500/45 hover:shadow-xl hover:shadow-violet-500/10"
           }`}
         >
-          <div className="flex items-center gap-2 mb-2">
-            <Lock size={14} className={`flex-shrink-0 transition-colors duration-300 ${isSelected || hovered ? "text-cyan-300" : "text-cyan-500"}`} />
-            <span className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Root API</span>
+          {/* Subtle top glow line */}
+          <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-violet-500/50 to-transparent" />
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-300
+              ${isSelected ? "bg-violet-500/25 border border-violet-400/40" : "bg-violet-600/15 border border-violet-600/25 group-hover:border-violet-500/40"}`}>
+              <Lock size={13} className={`transition-colors duration-300 ${isSelected || hovered ? "text-violet-300" : "text-violet-500"}`} />
+            </div>
+            <span className="text-xs font-bold text-violet-400/80 uppercase tracking-widest">Root API</span>
           </div>
-          <h3 className="text-base font-bold text-white mb-1 group-hover:text-cyan-300 transition-colors duration-300 truncate">{node.name}</h3>
-          <p className="text-xs text-slate-500">
-            <span className="text-slate-400">{node.version}</span>
-            <span className="mx-1.5 text-slate-700">•</span>
-            <span className="text-cyan-500/80 font-semibold">{node.itemCount} Nodes</span>
-          </p>
+          <h3 className="text-base font-bold text-white mb-2.5 group-hover:text-violet-200 transition-colors duration-300 truncate leading-tight">{node.name}</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 bg-slate-800/60 border border-slate-700/40 rounded-md px-2 py-0.5 font-mono">{node.version}</span>
+            <span className="text-xs text-violet-400/70 font-semibold">{node.itemCount} nodes</span>
+          </div>
         </div>
       ) : node.type === "folder" ? (
-        <div className={`w-52 rounded-lg border-2 cursor-grab active:cursor-grabbing backdrop-blur-sm p-4 group
-          transition-all duration-300
+        <div className={`w-52 rounded-xl cursor-grab active:cursor-grabbing backdrop-blur-sm p-3.5 group transition-all duration-300
           ${isSelected
-            ? "border-cyan-400 bg-gradient-to-br from-slate-700 to-slate-800 shadow-xl shadow-cyan-500/30"
+            ? "border-2 border-indigo-400/60 bg-slate-800/95 shadow-xl shadow-indigo-500/20"
             : isHighlighted
-              ? "border-slate-500/50 bg-gradient-to-br from-slate-700/80 to-slate-800/80"
-              : "border-slate-600/30 bg-gradient-to-br from-slate-700/60 to-slate-800/60 hover:border-slate-500/60 hover:shadow-lg"
+              ? "border border-slate-500/50 bg-slate-800/80 shadow-md"
+              : "border border-slate-700/50 bg-slate-800/60 hover:border-slate-600/70 hover:bg-slate-800/80 hover:shadow-lg"
           }`}
         >
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">📁 Folder</span>
-            <span className="text-xs bg-slate-600/50 text-slate-300 px-2 py-0.5 rounded-full font-semibold">{node.itemCount}</span>
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-indigo-600/15 border border-indigo-600/25 flex items-center justify-center flex-shrink-0">
+                <Layers size={11} className="text-indigo-400" />
+              </div>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Folder</span>
+            </div>
+            <span className="text-xs bg-slate-700/60 border border-slate-600/40 text-slate-300 px-2 py-0.5 rounded-full font-bold tabular-nums">{node.itemCount}</span>
           </div>
-          <h3 className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors duration-300 truncate">{node.name}</h3>
+          <h3 className="text-sm font-semibold text-white group-hover:text-indigo-200 transition-colors duration-300 truncate">{node.name}</h3>
         </div>
       ) : (
-        <div className={`w-64 rounded-lg border-2 cursor-grab active:cursor-grabbing backdrop-blur-sm p-3 group
-          transition-all duration-300
+        <div className={`w-64 rounded-xl cursor-grab active:cursor-grabbing backdrop-blur-sm group transition-all duration-300 overflow-hidden
           ${isSelected
-            ? "border-cyan-400 bg-gradient-to-br from-slate-700 to-slate-800 shadow-xl shadow-cyan-500/30"
+            ? "border border-slate-500/50 bg-slate-800/95 shadow-xl"
             : isHighlighted
-              ? "border-slate-500/50 bg-gradient-to-br from-slate-700/80 to-slate-800/80"
-              : "border-slate-600/30 bg-gradient-to-br from-slate-700/60 to-slate-800/60 hover:border-slate-500/60 hover:shadow-lg"
+              ? "border border-slate-600/50 bg-slate-800/80 shadow-md"
+              : "border border-slate-700/40 bg-slate-800/60 hover:border-slate-600/60 hover:bg-slate-800/80 hover:shadow-lg"
           }`}
         >
-          <div className="flex items-center justify-between gap-2 mb-2">
-            {mc && (
-              <>
+          {/* Method accent bar */}
+          {mc && <div className={`h-0.5 w-full ${mc.badge}`} />}
+          <div className="p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              {mc && (
                 <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${mc.bg} ${mc.text} uppercase flex-shrink-0 transition-all duration-300 ${isSelected ? `shadow-md ${mc.glow}` : ""}`}>
                   {node.method}
                 </span>
-                <span className="text-xs text-slate-500 uppercase opacity-0 group-hover:opacity-100 transition-opacity duration-300 tracking-wider">Request</span>
-              </>
+              )}
+              <span className="text-xs text-slate-600 uppercase opacity-0 group-hover:opacity-100 transition-opacity duration-300 tracking-wider ml-auto">Request</span>
+            </div>
+            <h3 className="text-sm font-semibold text-white mb-2 group-hover:text-slate-100 transition-colors duration-300 line-clamp-2 leading-snug">{node.name}</h3>
+            {node.path && (
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs text-cyan-400/70 font-mono truncate flex-1 group-hover:text-cyan-400 transition-colors duration-300">{node.path}</p>
+                <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 p-1 hover:bg-slate-600/30 rounded flex-shrink-0">
+                  {copyDone
+                    ? <CheckCircle size={11} className="text-emerald-400" />
+                    : <Copy size={11} className="text-slate-500 hover:text-slate-300 transition-colors" />
+                  }
+                </button>
+              </div>
             )}
           </div>
-          <h3 className="text-sm font-bold text-white mb-2 group-hover:text-cyan-300 transition-colors duration-300 line-clamp-2">{node.name}</h3>
-          {node.path && (
-            <div className="flex items-center gap-1.5">
-              <p className="text-xs text-cyan-400/80 font-mono truncate flex-1 group-hover:text-cyan-400 transition-colors duration-300">{node.path}</p>
-              <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 p-1 hover:bg-slate-600/30 rounded flex-shrink-0">
-                {copyDone
-                  ? <CheckCircle size={11} className="text-emerald-400" />
-                  : <Copy size={11} className="text-slate-400 hover:text-cyan-400 transition-colors" />
-                }
-              </button>
-            </div>
-          )}
         </div>
       )}
       </div>
@@ -359,146 +369,181 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   const isValid   = jsonText.trim() && validate(jsonText);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 overflow-auto"
-      style={{ animation: "fadeIn 0.45s ease-out both" }}>
+    <div className="flex-1 flex flex-col overflow-auto" style={{ animation: "fadeIn 0.4s ease-out both" }}>
 
-      {/* Title */}
-      <div className="text-center mb-8" style={{ animation: "slideInUp 0.5s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-        <div className="text-5xl font-black bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent mb-2 tracking-tight">
-          ✨ Snap-Map
+      {/* ── Hero ── */}
+      <div className="flex-shrink-0 text-center pt-12 pb-8 px-6"
+        style={{ animation: "slideInUp 0.5s cubic-bezier(0.34,1.56,0.64,1) both" }}>
+        {/* Badge */}
+        <div className="inline-flex items-center gap-2 bg-violet-500/10 border border-violet-500/25 rounded-full px-4 py-1.5 mb-5 text-xs font-bold text-violet-300 tracking-widest uppercase">
+          <Zap size={11} className="text-violet-400" />
+          API Visualization Tool
         </div>
-        <p className="text-slate-400 text-base">Paste your JSON collection and visualize it as an interactive API graph</p>
+        <h1 className="text-6xl font-black bg-gradient-to-r from-white via-violet-200 to-indigo-300 bg-clip-text text-transparent mb-3 tracking-tight leading-none">
+          Snap-Map
+        </h1>
+        <p className="text-slate-400 text-base max-w-md mx-auto leading-relaxed">
+          Transform any JSON API collection into a beautiful, interactive graph in seconds
+        </p>
+        {/* Feature pills */}
+        <div className="flex items-center justify-center gap-2.5 mt-6 flex-wrap"
+          style={{ animation: "slideInUp 0.5s cubic-bezier(0.34,1.56,0.64,1) 60ms both" }}>
+          {[
+            { icon: <Layers size={11} />,   label: "4 Layout Modes" },
+            { icon: <Terminal size={11} />, label: "API Playground" },
+            { icon: <Search size={11} />,   label: "Search & Filter" },
+            { icon: <Share2 size={11} />,   label: "Drag & Zoom"    },
+          ].map(({ icon, label }) => (
+            <div key={label} className="flex items-center gap-1.5 bg-slate-800/60 border border-slate-700/40 rounded-full px-3 py-1.5 text-xs text-slate-400 backdrop-blur-sm">
+              <span className="text-violet-400">{icon}</span>{label}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Two-column layout */}
-      <div className="w-full max-w-5xl flex gap-4" style={{ animation: "slideInUp 0.55s cubic-bezier(0.34,1.56,0.64,1) 80ms both" }}>
+      {/* ── Editor + Upload ── */}
+      <div className="flex-shrink-0 w-full max-w-5xl mx-auto px-6 pb-10"
+        style={{ animation: "slideInUp 0.55s cubic-bezier(0.34,1.56,0.64,1) 100ms both" }}>
+        <div className="flex gap-5">
 
-        {/* ── Left: JSON Editor ── */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="bg-slate-900/60 border border-slate-700/50 rounded-xl overflow-hidden backdrop-blur-sm flex flex-col"
-            style={{ height: 380 }}>
+          {/* Left: JSON Editor */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl overflow-hidden backdrop-blur-sm flex flex-col shadow-2xl shadow-black/30"
+              style={{ height: 360 }}>
 
-            {/* Editor header bar */}
-            <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/60 border-b border-slate-700/40 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <Braces size={14} className="text-cyan-400" />
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">JSON Editor</span>
-                {isValid && (
-                  <span className="flex items-center gap-1 text-xs text-emerald-400 font-semibold"
-                    style={{ animation: "fadeIn 0.3s ease-out both" }}>
-                    <CheckCircle size={11} /> Valid
-                  </span>
-                )}
+              {/* Editor title bar — mac-style */}
+              <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/80 border-b border-slate-700/40 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-red-500/60" />
+                    <div className="w-3 h-3 rounded-full bg-amber-500/60" />
+                    <div className="w-3 h-3 rounded-full bg-emerald-500/60" />
+                  </div>
+                  <div className="w-px h-4 bg-slate-700/60" />
+                  <Braces size={13} className="text-violet-400" />
+                  <span className="text-xs font-bold text-slate-300 tracking-wide">JSON Editor</span>
+                  {isValid && (
+                    <span className="flex items-center gap-1 text-xs text-emerald-400 font-semibold"
+                      style={{ animation: "fadeIn 0.3s ease-out both" }}>
+                      <CheckCircle size={10} /> Valid
+                    </span>
+                  )}
+                  {error && (
+                    <span className="flex items-center gap-1 text-xs text-red-400 font-semibold"
+                      style={{ animation: "fadeIn 0.3s ease-out both" }}>
+                      <AlertCircle size={10} /> Error
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={handleFormat}
+                    className="px-2.5 py-1 text-xs bg-slate-700/60 hover:bg-violet-600/15 border border-slate-600/40 hover:border-violet-500/30 text-slate-400 hover:text-violet-300 rounded-md transition-all duration-200 flex items-center gap-1 font-medium">
+                    <RefreshCw size={10} className={isFormatting ? "animate-spin" : ""} /> Format
+                  </button>
+                  <button onClick={() => { setJsonText(""); setError(""); }}
+                    className="px-2.5 py-1 text-xs bg-slate-700/60 hover:bg-red-900/20 border border-slate-600/40 hover:border-red-500/30 text-slate-400 hover:text-red-300 rounded-md transition-all duration-200 font-medium">
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              {/* Textarea */}
+              <div className="flex-1 relative overflow-hidden">
+                <textarea
+                  value={jsonText}
+                  onChange={(e) => { setJsonText(e.target.value); setError(""); }}
+                  placeholder={`{\n  "info": {\n    "name": "My API Collection"\n  },\n  "item": [ ... ]\n}`}
+                  spellCheck={false}
+                  className="w-full h-full bg-transparent resize-none text-sm font-mono text-slate-300 placeholder:text-slate-700 p-4 focus:outline-none"
+                  style={{ lineHeight: "1.75" }}
+                />
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-2 bg-slate-900/50 border-t border-slate-700/30 flex items-center justify-between flex-shrink-0">
+                <span className="text-xs text-slate-600 font-mono tabular-nums">{lineCount} lines · {charCount.toLocaleString()} chars</span>
                 {error && (
-                  <span className="flex items-center gap-1 text-xs text-red-400 font-semibold"
-                    style={{ animation: "fadeIn 0.3s ease-out both" }}>
-                    <AlertCircle size={11} /> Error
+                  <span className="text-xs text-red-400 truncate max-w-xs" style={{ animation: "fadeIn 0.25s ease-out both" }}>
+                    ⚠ {error}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1">
-                <button onClick={handleFormat}
-                  className="px-2.5 py-1 text-xs bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 hover:text-white rounded transition-all duration-200 flex items-center gap-1 font-medium">
-                  <RefreshCw size={11} className={isFormatting ? "animate-spin" : ""} /> Format
-                </button>
-                <button onClick={() => { setJsonText(""); setError(""); }}
-                  className="px-2.5 py-1 text-xs bg-slate-700/50 hover:bg-red-900/30 text-slate-400 hover:text-red-300 rounded transition-all duration-200 font-medium">
-                  Clear
-                </button>
+            </div>
+          </div>
+
+          {/* Right: Upload + actions */}
+          <div className="w-60 flex flex-col gap-3 flex-shrink-0">
+            {/* Drag & drop */}
+            <div
+              className={`flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-300
+                ${isDragOver
+                  ? "border-violet-400 bg-violet-500/8 scale-[1.02] shadow-lg shadow-violet-500/15"
+                  : "border-slate-700/60 bg-slate-900/30 hover:border-slate-600/80 hover:bg-slate-800/30"
+                }`}
+              style={{ minHeight: 190 }}
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className={`p-4 rounded-2xl mb-3 transition-all duration-300 ${isDragOver ? "bg-violet-500/20 scale-110" : "bg-slate-800/60 animate-float"}`}>
+                <Upload size={26} className={`transition-colors duration-300 ${isDragOver ? "text-violet-300" : "text-slate-500"}`} />
               </div>
+              <p className={`text-sm font-semibold text-center transition-colors duration-300 ${isDragOver ? "text-violet-300" : "text-slate-400"}`}>
+                {isDragOver ? "Release to upload" : "Drop JSON file"}
+              </p>
+              <p className="text-xs text-slate-600 mt-1">or click to browse</p>
+              <input ref={fileInputRef} type="file" accept=".json" className="hidden"
+                onChange={(e) => handleFileRead(e.target.files?.[0])} />
             </div>
 
-            {/* Textarea */}
-            <div className="flex-1 relative overflow-hidden">
-              <textarea
-                value={jsonText}
-                onChange={(e) => { setJsonText(e.target.value); setError(""); }}
-                placeholder={`{\n  "info": {\n    "name": "My API Collection"\n  },\n  "item": [ ... ]\n}`}
-                spellCheck={false}
-                className="w-full h-full bg-transparent resize-none text-sm font-mono text-slate-300 placeholder:text-slate-600 p-4 focus:outline-none"
-                style={{ lineHeight: "1.7" }}
-              />
+            {/* Divider */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-slate-700/40" />
+              <span className="text-xs text-slate-600 font-medium">or</span>
+              <div className="flex-1 h-px bg-slate-700/40" />
             </div>
 
-            {/* Footer */}
-            <div className="px-4 py-2 bg-slate-800/30 border-t border-slate-700/30 flex items-center justify-between flex-shrink-0">
-              <span className="text-xs text-slate-600 font-mono">{lineCount} lines · {charCount} chars</span>
-              {error && (
-                <span className="text-xs text-red-400 truncate max-w-xs" style={{ animation: "fadeIn 0.25s ease-out both" }}>
-                  {error}
-                </span>
-              )}
+            {/* Load sample */}
+            <button onClick={onLoadSample}
+              className="w-full py-3 bg-slate-800/60 hover:bg-slate-700/70 border border-slate-700/50 hover:border-violet-500/30 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-all duration-250 active:scale-95 group">
+              <Download size={14} className="text-violet-400 group-hover:translate-y-0.5 transition-transform duration-200" />
+              Load Sample
+            </button>
+
+            {/* Supported formats */}
+            <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3.5">
+              <p className="text-xs font-bold text-slate-600 uppercase tracking-widest mb-2.5">Supports</p>
+              {[
+                { name: "Postman Collections", dot: "bg-amber-500"  },
+                { name: "OpenAPI / Swagger",   dot: "bg-blue-500"   },
+                { name: "Custom API JSON",     dot: "bg-violet-500" },
+              ].map(({ name, dot }) => (
+                <div key={name} className="flex items-center gap-2.5 py-1">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                  <span className="text-xs text-slate-500">{name}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
-        {/* ── Right: Upload zone ── */}
-        <div className="w-64 flex flex-col gap-3 flex-shrink-0">
-          {/* Drag & drop */}
-          <div
-            className={`flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed cursor-pointer transition-all duration-300 backdrop-blur-sm
-              ${isDragOver
-                ? "border-cyan-400 bg-cyan-500/10 scale-105 shadow-lg shadow-cyan-500/20"
-                : "border-slate-600/50 bg-slate-900/30 hover:border-slate-500/70 hover:bg-slate-800/30"
+        {/* Visualize button */}
+        <div className="mt-6 flex justify-center">
+          <button
+            onClick={handleVisualize}
+            disabled={!jsonText.trim()}
+            className={`px-10 py-3.5 text-sm font-bold rounded-xl flex items-center gap-2.5 transition-all duration-300 active:scale-95
+              ${jsonText.trim()
+                ? "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-lg shadow-violet-600/30 hover:shadow-xl hover:shadow-violet-500/35 hover:-translate-y-0.5"
+                : "bg-slate-800/50 text-slate-600 cursor-not-allowed border border-slate-700/30"
               }`}
-            style={{ minHeight: 200 }}
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
           >
-            <div className={`p-4 rounded-full bg-slate-800/50 mb-3 transition-all duration-300 ${isDragOver ? "scale-110" : "animate-float"}`}>
-              <Upload size={28} className={`transition-colors duration-300 ${isDragOver ? "text-cyan-300" : "text-slate-500"}`} />
-            </div>
-            <p className={`text-sm font-semibold text-center transition-colors duration-300 ${isDragOver ? "text-cyan-300" : "text-slate-400"}`}>
-              {isDragOver ? "Drop it!" : "Drop JSON file"}
-            </p>
-            <p className="text-xs text-slate-600 mt-1">or click to browse</p>
-            <input ref={fileInputRef} type="file" accept=".json" className="hidden"
-              onChange={(e) => handleFileRead(e.target.files?.[0])} />
-          </div>
-
-          {/* Divider */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1 h-px bg-slate-700/50" />
-            <span className="text-xs text-slate-600 font-medium">or</span>
-            <div className="flex-1 h-px bg-slate-700/50" />
-          </div>
-
-          {/* Load sample */}
-          <button onClick={onLoadSample}
-            className="w-full py-3 bg-slate-800/50 hover:bg-slate-700/60 border border-slate-700/50 hover:border-slate-500/70 text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-all duration-250 active:scale-95">
-            <Download size={15} />
-            Load Sample
+            <Eye size={16} className={jsonText.trim() ? "" : "opacity-40"} />
+            Visualize API
+            {jsonText.trim() && <ChevronRight size={15} className="opacity-60" />}
           </button>
-
-          {/* Tips */}
-          <div className="bg-slate-900/40 border border-slate-700/30 rounded-lg p-3 space-y-1.5">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Supports</p>
-            {["Postman Collections", "OpenAPI / Swagger", "Custom API JSON"].map((t) => (
-              <div key={t} className="flex items-center gap-2">
-                <ChevronRight size={10} className="text-cyan-500 flex-shrink-0" />
-                <span className="text-xs text-slate-500">{t}</span>
-              </div>
-            ))}
-          </div>
         </div>
-      </div>
-
-      {/* Visualize button */}
-      <div className="mt-6" style={{ animation: "slideInUp 0.55s cubic-bezier(0.34,1.56,0.64,1) 160ms both" }}>
-        <button
-          onClick={handleVisualize}
-          disabled={!jsonText.trim()}
-          className={`px-12 py-3.5 text-base font-bold rounded-xl flex items-center gap-3 transition-all duration-300 active:scale-95
-            ${jsonText.trim()
-              ? "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-600/30 hover:shadow-xl hover:shadow-cyan-500/40"
-              : "bg-slate-800/50 text-slate-600 cursor-not-allowed border border-slate-700/30"
-            }`}
-        >
-          <Eye size={18} />
-          Visualize API
-        </button>
       </div>
     </div>
   );
@@ -583,7 +628,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
 
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-700/50 flex-shrink-0 bg-slate-900/80">
-          <Terminal size={18} className="text-cyan-400" />
+          <Terminal size={18} className="text-violet-400" />
           <span className="font-bold text-white text-base">API Playground</span>
           <span className="text-slate-500 text-sm">—</span>
           <span className="text-slate-400 text-sm truncate">{node?.name}</span>
@@ -597,7 +642,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
           <select
             value={method}
             onChange={(e) => setMethod(e.target.value)}
-            className={`bg-slate-800 border border-slate-700/50 rounded-lg px-3 py-2 text-sm font-bold ${mc.text} focus:outline-none focus:border-cyan-500 flex-shrink-0 cursor-pointer transition-all duration-200`}
+            className={`bg-slate-800 border border-slate-700/50 rounded-lg px-3 py-2 text-sm font-bold ${mc.text} focus:outline-none focus:border-violet-500 flex-shrink-0 cursor-pointer transition-all duration-200`}
           >
             {methodOptions.map((m) => (
               <option key={m} value={m} className="text-white">{m}</option>
@@ -607,7 +652,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://api.example.com/endpoint"
-            className="flex-1 bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/60 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 rounded-lg px-4 py-2 text-sm text-white font-mono placeholder:text-slate-600 transition-all duration-200"
+            className="flex-1 bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/60 focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 rounded-lg px-4 py-2 text-sm text-white font-mono placeholder:text-slate-600 transition-all duration-200"
           />
           <button
             onClick={handleSend}
@@ -615,7 +660,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold transition-all duration-200 active:scale-95 flex-shrink-0
               ${loading
                 ? "bg-slate-700 text-slate-500 cursor-not-allowed"
-                : "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-600/20 hover:shadow-cyan-500/30"
+                : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-lg shadow-violet-600/20 hover:shadow-violet-500/30"
               }`}
           >
             {loading
@@ -635,7 +680,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
                   key={t}
                   onClick={() => setActiveTab(t)}
                   className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all duration-200 ${
-                    activeTab === t ? "text-cyan-400 border-b-2 border-cyan-400 bg-slate-800/30" : "text-slate-500 hover:text-slate-400"
+                    activeTab === t ? "text-violet-400 border-b-2 border-violet-400 bg-slate-800/30" : "text-slate-500 hover:text-slate-400"
                   }`}
                 >
                   {t}
@@ -667,7 +712,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
                   </div>
                 ))}
                 <button onClick={addHeader}
-                  className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-cyan-400 transition-colors duration-200 mt-2 group">
+                  className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-400 transition-colors duration-200 mt-2 group">
                   <Plus size={13} className="group-hover:rotate-90 transition-transform duration-300" />
                   Add Header
                 </button>
@@ -703,7 +748,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
             <div className="flex-1 overflow-auto p-4">
               {loading && (
                 <div className="flex flex-col items-center justify-center h-full gap-3">
-                  <RefreshCw size={28} className="text-cyan-400 animate-spin" />
+                  <RefreshCw size={28} className="text-violet-400 animate-spin" />
                   <p className="text-slate-500 text-sm">Sending request…</p>
                 </div>
               )}
@@ -738,7 +783,7 @@ const ApiPlaygroundModal = ({ node, onClose }) => {
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-slate-700/40 flex-shrink-0 bg-slate-900/50">
           <button onClick={handleCopyCurl}
-            className="flex items-center gap-2 text-xs text-slate-400 hover:text-cyan-400 transition-all duration-200 group font-mono">
+            className="flex items-center gap-2 text-xs text-slate-400 hover:text-violet-400 transition-all duration-200 group font-mono">
             {curlCopied
               ? <><CheckCircle size={13} className="text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
               : <><Copy size={13} className="group-hover:scale-110 transition-transform duration-200" /> Copy as cURL</>
@@ -803,7 +848,7 @@ const RequestDetailsPanel = ({ node, onClose, onTest }) => {
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all duration-200 ${
               activeTab === tab
-                ? "text-cyan-400 border-b-2 border-cyan-400 bg-slate-800/30"
+                ? "text-violet-400 border-b-2 border-violet-400 bg-slate-800/30"
                 : "text-slate-600 hover:text-slate-400"
             }`}
           >
@@ -827,7 +872,7 @@ const RequestDetailsPanel = ({ node, onClose, onTest }) => {
                 <div className="flex justify-between items-center mb-1.5">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Endpoint</p>
                   <button onClick={() => copyText(node.path)}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-all duration-200 hover:scale-105">
+                    className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 transition-all duration-200 hover:scale-105">
                     <Copy size={11} />{copied ? "Copied!" : "Copy"}
                   </button>
                 </div>
@@ -839,7 +884,7 @@ const RequestDetailsPanel = ({ node, onClose, onTest }) => {
 
             <div className="bg-slate-900/30 border border-slate-700/30 rounded-lg p-4 hover:border-slate-600/50 transition-colors duration-200">
               <div className="flex items-center gap-2 mb-3">
-                <Zap size={14} className="text-cyan-400 animate-pulse" />
+                <Zap size={14} className="text-violet-400 animate-pulse" />
                 <p className="text-sm font-semibold text-white">Quick Status</p>
               </div>
               {[
@@ -862,13 +907,13 @@ const RequestDetailsPanel = ({ node, onClose, onTest }) => {
               <>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex justify-between">
                   Headers
-                  <span className="text-cyan-400 bg-cyan-600/15 px-2 py-0.5 rounded-full">{node.headers.length} Active</span>
+                  <span className="text-violet-400 bg-violet-600/15 px-2 py-0.5 rounded-full">{node.headers.length} Active</span>
                 </p>
                 {node.headers.map((h, i) => (
                   <div key={i} className="bg-slate-900/30 border border-slate-700/30 rounded-lg p-3 hover:border-slate-600/50 transition-colors duration-200"
                     style={{ animation: `slideInUp 0.25s ease-out ${i*50}ms both` }}>
                     <p className="text-xs font-semibold text-slate-400 mb-0.5">{h.key}</p>
-                    <p className="text-xs text-cyan-400 font-mono break-all">{h.value}</p>
+                    <p className="text-xs text-slate-300 font-mono break-all">{h.value}</p>
                   </div>
                 ))}
               </>
@@ -885,7 +930,7 @@ const RequestDetailsPanel = ({ node, onClose, onTest }) => {
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Request Body</p>
                   <button onClick={() => copyText(JSON.stringify(node.body, null, 2))}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-all duration-200">
+                    className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 transition-all duration-200">
                     <Copy size={11} />{copied ? "Copied!" : "Copy"}
                   </button>
                 </div>
@@ -916,7 +961,7 @@ const RequestDetailsPanel = ({ node, onClose, onTest }) => {
       <div className="p-4 border-t border-slate-700/40 flex-shrink-0 bg-slate-900/60 space-y-2.5">
         <button
           onClick={onTest}
-          className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-2.5 px-4 rounded-lg transition-all duration-250 flex items-center justify-center gap-2 group hover:shadow-lg hover:shadow-cyan-500/25 active:scale-95"
+          className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 rounded-lg transition-all duration-250 flex items-center justify-center gap-2 group hover:shadow-lg hover:shadow-violet-500/25 active:scale-95"
         >
           <Play size={15} className="group-hover:translate-x-0.5 transition-transform duration-200" />
           Test in Playground
@@ -988,50 +1033,94 @@ const PostmanGraphViewer = () => {
     if (!root) return pos;
     pos[root.id] = { x: 120, y: 300 };
 
+    // Helpers — separate root's direct children into folders vs bare requests
+    const rootFolders   = nodesData.filter((n) => n.parentId === root.id && n.type === "folder");
+    const rootRequests  = nodesData.filter((n) => n.parentId === root.id && n.type === "request");
+    const isFlatCollection = rootFolders.length === 0 && rootRequests.length > 0;
+
     if (graphStyle === "tree") {
-      let y = 80;
-      nodesData.forEach((node) => {
-        if (node.parentId !== root.id || node.type !== "folder") return;
-        pos[node.id] = { x: 400, y };
-        let childY = y - 20;
-        nodesData.forEach((child) => {
-          if (child.parentId !== node.id) return;
-          pos[child.id] = { x: 720, y: childY };
-          childY += 100;
+      let y = 60;
+
+      if (isFlatCollection) {
+        // Flat: place all requests in a single column to the right of root
+        rootRequests.forEach((node) => {
+          pos[node.id] = { x: 420, y };
+          y += 100;
         });
-        const childCount = nodesData.filter((c) => c.parentId === node.id).length;
-        y += Math.max(170, childCount * 100 + 40);
-      });
+        // Re-centre root vertically
+        pos[root.id] = { x: 120, y: Math.max(0, (y - 100) / 2 - 30) };
+      } else {
+        rootFolders.forEach((node) => {
+          pos[node.id] = { x: 400, y };
+          let childY = y - 20;
+          nodesData.forEach((child) => {
+            if (child.parentId !== node.id) return;
+            pos[child.id] = { x: 720, y: childY };
+            childY += 100;
+          });
+          const childCount = nodesData.filter((c) => c.parentId === node.id).length;
+          y += Math.max(170, childCount * 100 + 40);
+        });
+        // Also position any bare requests directly on root (mixed collections)
+        rootRequests.forEach((node) => {
+          pos[node.id] = { x: 400, y };
+          y += 100;
+        });
+      }
 
     } else if (graphStyle === "flowchart") {
-      let y = 80;
-      nodesData.forEach((node) => {
-        if (node.parentId !== root.id || node.type !== "folder") return;
-        pos[node.id] = { x: 420, y };
-        let childY = y - 30;
-        nodesData.forEach((child) => {
-          if (child.parentId !== node.id) return;
-          pos[child.id] = { x: 740, y: childY };
-          childY += 110;
+      let y = 60;
+
+      if (isFlatCollection) {
+        rootRequests.forEach((node) => {
+          pos[node.id] = { x: 440, y };
+          y += 110;
         });
-        const childCount = nodesData.filter((c) => c.parentId === node.id).length;
-        y += Math.max(180, childCount * 110 + 40);
-      });
+        pos[root.id] = { x: 120, y: Math.max(0, (y - 110) / 2 - 30) };
+      } else {
+        rootFolders.forEach((node) => {
+          pos[node.id] = { x: 420, y };
+          let childY = y - 30;
+          nodesData.forEach((child) => {
+            if (child.parentId !== node.id) return;
+            pos[child.id] = { x: 740, y: childY };
+            childY += 110;
+          });
+          const childCount = nodesData.filter((c) => c.parentId === node.id).length;
+          y += Math.max(180, childCount * 110 + 40);
+        });
+        rootRequests.forEach((node) => {
+          pos[node.id] = { x: 420, y };
+          y += 110;
+        });
+      }
 
     } else if (graphStyle === "radial") {
-      const cx = 680, cy = 400, r1 = 280, r2 = 480;
-      const folders = nodesData.filter((n) => n.parentId === root.id && n.type === "folder");
+      const cx = 680, cy = 420, r1 = 280, r2 = 480;
       pos[root.id] = { x: cx - 112, y: cy - 50 };
-      folders.forEach((folder, fi) => {
-        const a = (fi / folders.length) * Math.PI * 2 - Math.PI / 2;
-        pos[folder.id] = { x: cx + Math.cos(a) * r1 - 104, y: cy + Math.sin(a) * r1 - 50 };
-        const children = nodesData.filter((c) => c.parentId === folder.id);
-        children.forEach((child, ci) => {
-          const spread = 0.4;
-          const ca = a + (ci - (children.length - 1) / 2) * spread / Math.max(1, children.length - 1) * 2;
-          pos[child.id] = { x: cx + Math.cos(ca) * r2 - 128, y: cy + Math.sin(ca) * r2 - 50 };
+
+      if (isFlatCollection) {
+        // Place bare requests in a circle directly around root
+        rootRequests.forEach((node, i) => {
+          const a = (i / rootRequests.length) * Math.PI * 2 - Math.PI / 2;
+          pos[node.id] = { x: cx + Math.cos(a) * r1 - 128, y: cy + Math.sin(a) * r1 - 50 };
         });
-      });
+      } else {
+        rootFolders.forEach((folder, fi) => {
+          const a = (fi / rootFolders.length) * Math.PI * 2 - Math.PI / 2;
+          pos[folder.id] = { x: cx + Math.cos(a) * r1 - 104, y: cy + Math.sin(a) * r1 - 50 };
+          const children = nodesData.filter((c) => c.parentId === folder.id);
+          children.forEach((child, ci) => {
+            const spread = 0.4;
+            const ca = a + (ci - (children.length - 1) / 2) * spread / Math.max(1, children.length - 1) * 2;
+            pos[child.id] = { x: cx + Math.cos(ca) * r2 - 128, y: cy + Math.sin(ca) * r2 - 50 };
+          });
+        });
+        rootRequests.forEach((node, i) => {
+          const a = (i / Math.max(1, rootRequests.length)) * Math.PI * 2 - Math.PI / 2;
+          pos[node.id] = { x: cx + Math.cos(a) * r2 - 128, y: cy + Math.sin(a) * r2 - 50 };
+        });
+      }
 
     } else {
       // mindmap — balanced branches expanding left / right from a vertically-centered root
@@ -1043,37 +1132,54 @@ const PostmanGraphViewer = () => {
       const FOLD_X_R   = 956;
       const CHILD_X_R  = 1228;
 
-      const folders = nodesData.filter((n) => n.parentId === root.id && n.type === "folder");
-      const lefts = [], rights = [];
-      folders.forEach((n, fi) => (fi % 2 === 0 ? lefts : rights).push(n));
-
-      const numChildren = (f) => nodesData.filter((c) => c.parentId === f.id).length;
-      const groupH      = (f) => Math.max(1, numChildren(f)) * CHILD_STEP + GROUP_GAP;
-      const totalH      = (arr) => arr.reduce((s, f) => s + groupH(f), 0);
-      const maxH        = Math.max(totalH(lefts), totalH(rights), 260);
-
-      pos[root.id] = { x: ROOT_X, y: maxH / 2 - 44 };
-
-      const placeGroup = (arr, folderX, childX) => {
-        let y = 0;
-        arr.forEach((folder) => {
-          const children = nodesData.filter((c) => c.parentId === folder.id);
-          const gh        = groupH(folder);
-          const usable    = gh - GROUP_GAP;
-          // folder centered in the usable zone
-          pos[folder.id] = { x: folderX, y: y + usable / 2 - 40 };
-          // children evenly spread around folder center
-          const span  = (children.length - 1) * CHILD_STEP;
-          const start = y + usable / 2 - span / 2 - 44;
-          children.forEach((child, ci) => {
-            pos[child.id] = { x: childX, y: start + ci * CHILD_STEP };
-          });
-          y += gh;
+      if (isFlatCollection) {
+        // Split bare requests left / right
+        const lefts  = rootRequests.filter((_, i) => i % 2 === 0);
+        const rights = rootRequests.filter((_, i) => i % 2 !== 0);
+        const totalH = Math.max(lefts.length, rights.length) * CHILD_STEP + GROUP_GAP;
+        pos[root.id] = { x: ROOT_X, y: totalH / 2 - 44 };
+        lefts.forEach((node, i) => {
+          pos[node.id] = { x: CHILD_X_L, y: i * CHILD_STEP };
         });
-      };
+        rights.forEach((node, i) => {
+          pos[node.id] = { x: CHILD_X_R, y: i * CHILD_STEP };
+        });
+      } else {
+        const folders = rootFolders;
+        const lefts = [], rights = [];
+        folders.forEach((n, fi) => (fi % 2 === 0 ? lefts : rights).push(n));
 
-      placeGroup(lefts,  FOLD_X_L, CHILD_X_L);
-      placeGroup(rights, FOLD_X_R, CHILD_X_R);
+        const numChildren = (f) => nodesData.filter((c) => c.parentId === f.id).length;
+        const groupH      = (f) => Math.max(1, numChildren(f)) * CHILD_STEP + GROUP_GAP;
+        const totalH      = (arr) => arr.reduce((s, f) => s + groupH(f), 0);
+        const maxH        = Math.max(totalH(lefts), totalH(rights), 260);
+
+        pos[root.id] = { x: ROOT_X, y: maxH / 2 - 44 };
+
+        const placeGroup = (arr, folderX, childX) => {
+          let y = 0;
+          arr.forEach((folder) => {
+            const children = nodesData.filter((c) => c.parentId === folder.id);
+            const gh        = groupH(folder);
+            const usable    = gh - GROUP_GAP;
+            pos[folder.id] = { x: folderX, y: y + usable / 2 - 40 };
+            const span  = (children.length - 1) * CHILD_STEP;
+            const start = y + usable / 2 - span / 2 - 44;
+            children.forEach((child, ci) => {
+              pos[child.id] = { x: childX, y: start + ci * CHILD_STEP };
+            });
+            y += gh;
+          });
+        };
+
+        placeGroup(lefts,  FOLD_X_L, CHILD_X_L);
+        placeGroup(rights, FOLD_X_R, CHILD_X_R);
+
+        // Bare requests on root in a mixed collection — append to right side
+        rootRequests.forEach((node, i) => {
+          pos[node.id] = { x: CHILD_X_R, y: totalH(rights) + i * CHILD_STEP };
+        });
+      }
     }
     return pos;
   }, [graphStyle]);
@@ -1262,6 +1368,23 @@ const PostmanGraphViewer = () => {
 
   const handleReset = () => { setZoom(1); setPanX(0); setPanY(0); };
 
+  const handleFitView = useCallback(() => {
+    const positions = Object.values(nodePositions);
+    if (!positions.length || !canvasRef.current) return;
+    const minX = Math.min(...positions.map((p) => p.x));
+    const minY = Math.min(...positions.map((p) => p.y));
+    const maxX = Math.max(...positions.map((p) => p.x)) + 280;
+    const maxY = Math.max(...positions.map((p) => p.y)) + 110;
+    const cW   = canvasRef.current.offsetWidth;
+    const cH   = canvasRef.current.offsetHeight;
+    const newZoom = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.4);
+    setZoom(newZoom);
+    setPanX(-minX + 40 / newZoom);
+    setPanY(-minY + 40 / newZoom);
+    canvasRef.current.scrollLeft = 0;
+    canvasRef.current.scrollTop  = 0;
+  }, [nodePositions]);
+
   const GRAPH_STYLES = ["tree","flowchart","radial","mindmap"];
 
   // ──────────────────────────────────────────
@@ -1279,8 +1402,8 @@ const PostmanGraphViewer = () => {
               <ArrowLeft size={17} className="group-hover:-translate-x-0.5 transition-transform duration-200" />
             </button>
           )}
-          <div className="text-xl font-black bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent tracking-tight">
-            ✨ Snap-Map
+          <div className="text-xl font-black bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent tracking-tight">
+            Snap-Map
           </div>
           {view === "graph" && collection && (
             <span className="text-sm text-slate-500 truncate max-w-40">
@@ -1299,11 +1422,11 @@ const PostmanGraphViewer = () => {
                 placeholder="Search… (Ctrl+K)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-56 bg-slate-800/50 border border-slate-700/40 rounded-lg py-1.5 pl-9 pr-8 text-sm text-white placeholder:text-slate-600 focus:border-cyan-500/70 focus:ring-1 focus:ring-cyan-500/20 transition-all duration-200 backdrop-blur-sm"
+                className="w-56 bg-slate-800/50 border border-slate-700/40 rounded-lg py-1.5 pl-9 pr-8 text-sm text-white placeholder:text-slate-600 focus:border-violet-500/70 focus:ring-1 focus:ring-violet-500/20 transition-all duration-200 backdrop-blur-sm"
               />
               {searchQuery && (
                 <>
-                  <span className="absolute right-7 top-1/2 -translate-y-1/2 text-xs text-cyan-400 font-semibold">
+                  <span className="absolute right-7 top-1/2 -translate-y-1/2 text-xs text-violet-400 font-semibold">
                     {highlightedIds.size}
                   </span>
                   <button onClick={() => setSearchQuery("")}
@@ -1320,7 +1443,7 @@ const PostmanGraphViewer = () => {
                 <button key={m} onClick={() => setFilterMethod(m)}
                   className={`px-2.5 py-1 text-xs font-semibold rounded transition-all duration-200 ${
                     filterMethod === m
-                      ? "bg-cyan-600 text-white shadow-md shadow-cyan-500/20"
+                      ? "bg-violet-600 text-white shadow-md shadow-violet-500/20"
                       : "text-slate-500 hover:text-slate-300"
                   }`}
                 >
@@ -1332,7 +1455,7 @@ const PostmanGraphViewer = () => {
             {/* Graph style picker */}
             <div className="relative">
               <button onClick={() => setShowGraphMenu(!showGraphMenu)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/10 border border-cyan-600/30 rounded-lg hover:border-cyan-500/60 hover:bg-cyan-600/20 transition-all duration-200 text-cyan-400 text-sm font-semibold group">
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/10 border border-violet-600/30 rounded-lg hover:border-violet-500/60 hover:bg-violet-600/20 transition-all duration-200 text-violet-400 text-sm font-semibold group">
                 <Code size={14} />
                 {graphStyle.charAt(0).toUpperCase() + graphStyle.slice(1)}
                 <ChevronDown size={14} className={`transition-transform duration-300 ${showGraphMenu ? "rotate-180" : ""}`} />
@@ -1343,7 +1466,7 @@ const PostmanGraphViewer = () => {
                   {GRAPH_STYLES.map((s, i) => (
                     <button key={s} onClick={() => { setGraphStyle(s); setShowGraphMenu(false); }}
                       className={`w-full text-left px-4 py-2.5 text-sm transition-all duration-200 border-l-2 hover:bg-slate-700/40 ${
-                        graphStyle === s ? "text-cyan-400 border-cyan-500 bg-cyan-600/10" : "text-slate-300 border-transparent"
+                        graphStyle === s ? "text-violet-400 border-violet-500 bg-violet-600/10" : "text-slate-300 border-transparent"
                       }`}
                       style={{ animation: `slideInUp 0.2s ease-out ${i*40}ms both` }}
                     >
@@ -1476,23 +1599,27 @@ const PostmanGraphViewer = () => {
             </div>
 
             {/* Toolbar — pinned to bottom-left of wrapper, unaffected by scroll */}
-            <div className="absolute bottom-5 left-5 flex items-center gap-1 bg-slate-900/80 border border-slate-700/40 rounded-xl p-1.5 z-30 backdrop-blur-xl shadow-xl"
+            <div className="absolute bottom-5 left-5 flex items-center gap-1 bg-slate-900/85 border border-slate-700/50 rounded-xl p-1.5 z-30 backdrop-blur-xl shadow-2xl shadow-black/40"
               style={{ animation: "slideInUp 0.4s cubic-bezier(0.34,1.56,0.64,1) 300ms both" }}>
               <button onClick={() => setZoom((z) => Math.min(3, z * 1.2))}
-                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-cyan-400 hover:scale-110" title="Zoom In (Ctrl+scroll)">
-                <ZoomIn size={16} />
+                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-violet-400 hover:scale-110" title="Zoom In (Ctrl+scroll)">
+                <ZoomIn size={15} />
               </button>
-              <span className="text-xs text-slate-400 w-10 text-center font-mono font-bold">
+              <span className="text-xs text-slate-400 w-10 text-center font-mono font-bold tabular-nums">
                 {(zoom * 100).toFixed(0)}%
               </span>
               <button onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))}
-                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-cyan-400 hover:scale-110" title="Zoom Out">
-                <ZoomOut size={16} />
+                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-violet-400 hover:scale-110" title="Zoom Out">
+                <ZoomOut size={15} />
               </button>
               <div className="w-px h-5 bg-slate-700/60 mx-0.5" />
+              <button onClick={handleFitView}
+                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-violet-400 hover:scale-110" title="Fit All Nodes">
+                <Maximize2 size={15} />
+              </button>
               <button onClick={handleReset}
-                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-cyan-400 hover:scale-110" title="Reset View">
-                <RotateCcw size={16} />
+                className="p-2 hover:bg-slate-800 rounded-lg transition-all duration-200 text-slate-400 hover:text-violet-400 hover:scale-110" title="Reset View">
+                <RotateCcw size={15} />
               </button>
             </div>
 
