@@ -5,6 +5,7 @@ import {
   useCallback,
   useMemo,
 } from "react";
+import yaml from "js-yaml";
 import {
   Upload,
   Download,
@@ -35,6 +36,8 @@ import {
   Terminal,
   ChevronRight,
   Layers,
+  FileJson,
+  FileCode2,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────
@@ -101,6 +104,249 @@ const METHOD_COLORS = {
   DELETE: { bg:"bg-red-600/20",     text:"text-red-400",     badge:"bg-red-600",     glow:"shadow-red-500/50",     line:"rgba(248,113,113,0.55)" },
 };
 const methodColor = (m) => METHOD_COLORS[m] || METHOD_COLORS.GET;
+
+// ─────────────────────────────────────────────
+// Format detection & multi-format parsers
+// ─────────────────────────────────────────────
+const HTTP_METHODS = ["get", "post", "put", "delete", "patch", "options", "head", "trace"];
+
+const detectFormat = (data) => {
+  if (data.openapi || data.swagger) return "openapi";
+  if (data.info && data.item && Array.isArray(data.item)) return "postman";
+  return "custom";
+};
+
+const formatLabel = (data) => {
+  if (data.openapi) return `OpenAPI ${data.openapi}`;
+  if (data.swagger) return `Swagger ${data.swagger}`;
+  if (data.info && data.item && Array.isArray(data.item)) return "Postman";
+  return "Custom JSON";
+};
+
+/**
+ * Parse an OpenAPI 3.x or Swagger 2.0 spec into the internal node tree.
+ */
+const parseOpenApi = (data, setStats) => {
+  const allNodes = [];
+  let id = 0;
+  const s = { total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 };
+
+  // Resolve base URL
+  let baseUrl = "";
+  if (data.servers && data.servers.length > 0) {
+    baseUrl = data.servers[0].url || "";
+  } else if (data.host) {
+    const scheme = (data.schemes && data.schemes[0]) || "https";
+    baseUrl = `${scheme}://${data.host}${data.basePath || ""}`;
+  }
+  // Remove trailing slash
+  baseUrl = baseUrl.replace(/\/+$/, "");
+
+  const root = {
+    id: "node-root",
+    name: data.info?.title || "API Specification",
+    version: data.info?.version || "v1.0",
+    type: "root",
+    parentId: null,
+    itemCount: 0,
+  };
+  allNodes.push(root);
+
+  // Group operations by tag
+  const tagGroups = {};
+  const paths = data.paths || {};
+
+  Object.entries(paths).forEach(([pathStr, pathObj]) => {
+    if (!pathObj) return;
+    HTTP_METHODS.forEach((method) => {
+      const operation = pathObj[method];
+      if (!operation) return;
+
+      const tags = operation.tags && operation.tags.length > 0 ? operation.tags : ["Default"];
+      const upperMethod = method.toUpperCase();
+
+      // Extract request body info
+      let body = null;
+      if (operation.requestBody) {
+        // OpenAPI 3.x
+        const content = operation.requestBody.content;
+        if (content) {
+          const jsonContent = content["application/json"];
+          if (jsonContent?.example) body = jsonContent.example;
+          else if (jsonContent?.schema?.example) body = jsonContent.schema.example;
+        }
+      } else if (operation.parameters) {
+        // Swagger 2.0 body parameter
+        const bodyParam = operation.parameters.find((p) => p.in === "body");
+        if (bodyParam?.schema?.example) body = bodyParam.schema.example;
+      }
+
+      tags.forEach((tag) => {
+        if (!tagGroups[tag]) tagGroups[tag] = [];
+        tagGroups[tag].push({
+          name: operation.summary || operation.operationId || `${upperMethod} ${pathStr}`,
+          method: upperMethod,
+          path: `${baseUrl}${pathStr}`,
+          description: operation.description || operation.summary || "",
+          body,
+        });
+      });
+
+      s[method] = (s[method] || 0) + 1;
+      s.total++;
+    });
+  });
+
+  // Create folder + request nodes from tag groups
+  Object.entries(tagGroups).forEach(([tag, endpoints]) => {
+    const folderId = `node-${id++}`;
+    allNodes.push({
+      id: folderId,
+      name: tag,
+      type: "folder",
+      parentId: "node-root",
+      itemCount: endpoints.length,
+      description: "",
+    });
+
+    endpoints.forEach((ep) => {
+      allNodes.push({
+        id: `node-${id++}`,
+        name: ep.name,
+        type: "request",
+        parentId: folderId,
+        method: ep.method,
+        path: ep.path,
+        description: ep.description,
+        body: ep.body,
+        headers: [
+          { key: "Content-Type", value: "application/json" },
+          { key: "Accept", value: "*/*" },
+          { key: "Authorization", value: "Bearer <token>" },
+        ],
+      });
+    });
+  });
+
+  root.itemCount = allNodes.length - 1;
+  setStats(s);
+  return allNodes;
+};
+
+/**
+ * Parse a custom/generic API JSON into the internal node tree.
+ * Supports: flat array, grouped object, or { endpoints/routes: [...] }
+ */
+const parseCustomApi = (data, setStats) => {
+  const allNodes = [];
+  let id = 0;
+  const s = { total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 };
+
+  const root = {
+    id: "node-root",
+    name: data.name || data.title || "API Collection",
+    version: data.version || "v1.0",
+    type: "root",
+    parentId: null,
+    itemCount: 0,
+  };
+  allNodes.push(root);
+
+  const normalizeEndpoint = (ep) => {
+    const method = (ep.method || ep.type || ep.httpMethod || "GET").toUpperCase();
+    const url = ep.url || ep.path || ep.endpoint || ep.route || "";
+    const name = ep.name || ep.title || ep.summary || `${method} ${url}`;
+    const description = ep.description || ep.summary || "";
+    let body = null;
+    if (ep.body) {
+      try { body = typeof ep.body === "string" ? JSON.parse(ep.body) : ep.body; } catch { body = ep.body; }
+    }
+    return { method, url, name, description, body };
+  };
+
+  const addEndpoints = (endpoints, parentId) => {
+    endpoints.forEach((ep) => {
+      const norm = normalizeEndpoint(ep);
+      const m = norm.method.toLowerCase();
+      s[m] = (s[m] || 0) + 1;
+      s.total++;
+      allNodes.push({
+        id: `node-${id++}`,
+        name: norm.name,
+        type: "request",
+        parentId,
+        method: norm.method,
+        path: norm.url,
+        description: norm.description,
+        body: norm.body,
+        headers: [
+          { key: "Content-Type", value: "application/json" },
+          { key: "Accept", value: "*/*" },
+          { key: "Authorization", value: "Bearer <token>" },
+        ],
+      });
+    });
+  };
+
+  if (Array.isArray(data)) {
+    // Flat array of endpoints
+    root.name = "API Collection";
+    addEndpoints(data, "node-root");
+  } else {
+    // Check for endpoints/routes key
+    const endpointsArr = data.endpoints || data.routes || data.apis || null;
+    if (Array.isArray(endpointsArr)) {
+      addEndpoints(endpointsArr, "node-root");
+    } else {
+      // Grouped object: { "GroupName": [...], ... }
+      // Filter out known metadata keys
+      const metaKeys = ["name", "title", "version", "description", "baseUrl", "base_url"];
+      const groups = Object.entries(data).filter(
+        ([key, val]) => Array.isArray(val) && !metaKeys.includes(key)
+      );
+      if (groups.length > 0) {
+        groups.forEach(([groupName, endpoints]) => {
+          const folderId = `node-${id++}`;
+          allNodes.push({
+            id: folderId,
+            name: groupName,
+            type: "folder",
+            parentId: "node-root",
+            itemCount: endpoints.length,
+            description: "",
+          });
+          addEndpoints(endpoints, folderId);
+        });
+      } else {
+        // Last resort: try to treat the whole object as a single endpoint
+        const norm = normalizeEndpoint(data);
+        if (norm.url) {
+          const m = norm.method.toLowerCase();
+          s[m] = (s[m] || 0) + 1;
+          s.total++;
+          allNodes.push({
+            id: `node-${id++}`,
+            name: norm.name,
+            type: "request",
+            parentId: "node-root",
+            method: norm.method,
+            path: norm.url,
+            description: norm.description,
+            body: norm.body,
+            headers: [
+              { key: "Content-Type", value: "application/json" },
+              { key: "Accept", value: "*/*" },
+            ],
+          });
+        }
+      }
+    }
+  }
+
+  root.itemCount = allNodes.length - 1;
+  setStats(s);
+  return allNodes;
+};
 
 // ─────────────────────────────────────────────
 // ConnectionLines — SVG with draw-on-mount animation
@@ -310,58 +556,82 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   const [error, setError]           = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const [isFormatting, setIsFormatting] = useState(false);
+  const [showSampleMenu, setShowSampleMenu] = useState(false);
+  const [editorFocused, setEditorFocused] = useState(false);
   const fileInputRef = useRef(null);
+  const textareaRef  = useRef(null);
+  const lineNumRef   = useRef(null);
 
-  const validate = (text) => {
-    try { JSON.parse(text); return true; } catch { return false; }
+  const tryParse = (text) => {
+    try { return JSON.parse(text); } catch { /* ignore */ }
+    try { return yaml.load(text); } catch { /* ignore */ }
+    return null;
   };
 
+  const validate = (text) => tryParse(text) !== null;
+
+  const detectedInputFormat = useMemo(() => {
+    if (!jsonText.trim()) return null;
+    const parsed = tryParse(jsonText);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.openapi) return `OpenAPI ${parsed.openapi}`;
+    if (parsed.swagger) return `Swagger ${parsed.swagger}`;
+    if (parsed.info && parsed.item && Array.isArray(parsed.item)) return "Postman";
+    if (Array.isArray(parsed)) return "Custom Array";
+    if (parsed.endpoints || parsed.routes || parsed.apis) return "Custom";
+    return "Custom JSON";
+  }, [jsonText]);
+
   const handleVisualize = () => {
-    if (!jsonText.trim()) { setError("Please paste your JSON or upload a file first."); return; }
-    try {
-      const data = JSON.parse(jsonText);
-      setError("");
-      onVisualize(data);
-    } catch (e) {
-      setError("Invalid JSON — " + e.message);
-    }
+    if (!jsonText.trim()) { setError("Paste JSON/YAML or upload a file."); return; }
+    const data = tryParse(jsonText);
+    if (data && typeof data === "object") { setError(""); onVisualize(data); }
+    else { setError("Invalid JSON/YAML"); }
   };
 
   const handleFormat = () => {
     if (!jsonText.trim()) return;
-    try {
-      setIsFormatting(true);
-      const formatted = JSON.stringify(JSON.parse(jsonText), null, 2);
-      setJsonText(formatted);
-      setError("");
-      setTimeout(() => setIsFormatting(false), 400);
-    } catch {
-      setError("Cannot format — invalid JSON");
-      setIsFormatting(false);
-    }
+    setIsFormatting(true);
+    const parsed = tryParse(jsonText);
+    if (parsed && typeof parsed === "object") { setJsonText(JSON.stringify(parsed, null, 2)); setError(""); }
+    else { setError("Cannot format — invalid input"); }
+    setTimeout(() => setIsFormatting(false), 400);
   };
 
   const handleFileRead = (file) => {
-    if (!file || !file.name.endsWith(".json")) { setError("Please upload a .json file"); return; }
+    const validExts = [".json", ".yaml", ".yml"];
+    if (!file || !validExts.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+      setError("Upload a .json, .yaml, or .yml file"); return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
-      try {
-        const text = e.target.result;
-        JSON.parse(text);
-        setJsonText(text);
-        setError("");
-      } catch {
-        setError("Invalid JSON file");
-      }
+      const text = e.target.result;
+      const parsed = tryParse(text);
+      if (parsed && typeof parsed === "object") { setJsonText(text); setError(""); }
+      else { setError("Invalid file"); }
     };
     reader.readAsText(file);
   };
 
   const handleDrop = (e) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    handleFileRead(file);
+    e.preventDefault(); setIsDragOver(false);
+    handleFileRead(e.dataTransfer.files?.[0]);
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && jsonText.trim()) {
+        e.preventDefault(); handleVisualize();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
+  const handleTextareaScroll = () => {
+    if (lineNumRef.current && textareaRef.current) {
+      lineNumRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
   };
 
   const lineCount = jsonText.split("\n").length;
@@ -369,158 +639,216 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   const isValid   = jsonText.trim() && validate(jsonText);
 
   return (
-    <div className="flex-1 flex flex-col overflow-auto" style={{ animation: "fadeIn 0.4s ease-out both" }}>
+    <div className="flex-1 flex flex-col overflow-auto" style={{ animation: "fadeIn 0.35s ease-out both" }}>
 
       {/* ── Hero ── */}
-      <div className="flex-shrink-0 text-center pt-12 pb-8 px-6"
-        style={{ animation: "slideInUp 0.5s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 bg-violet-500/10 border border-violet-500/25 rounded-full px-4 py-1.5 mb-5 text-xs font-bold text-violet-300 tracking-widest uppercase">
-          <Zap size={11} className="text-violet-400" />
-          API Visualization Tool
+      <div className="flex-shrink-0 text-center pt-16 pb-10 px-6"
+        style={{ animation: "slideInUp 0.45s cubic-bezier(0.22,1,0.36,1) both" }}>
+
+        <div className="inline-flex items-center gap-2 bg-slate-800/60 border border-slate-700/40 rounded-full px-4 py-1.5 mb-5">
+          <Zap size={11} className="text-slate-400" />
+          <span className="text-xs font-semibold text-slate-400 tracking-wide uppercase">API Visualization</span>
         </div>
-        <h1 className="text-6xl font-black bg-gradient-to-r from-white via-violet-200 to-indigo-300 bg-clip-text text-transparent mb-3 tracking-tight leading-none">
-          Snap-Map
+
+        <h1 className="text-6xl font-black text-white mb-3 tracking-tight leading-none">
+          Snap<span className="text-slate-400">-</span>Map
         </h1>
-        <p className="text-slate-400 text-base max-w-md mx-auto leading-relaxed">
-          Transform any JSON API collection into a beautiful, interactive graph in seconds
+
+        <p className="text-slate-500 text-base max-w-md mx-auto leading-relaxed">
+          Paste any API specification and visualize it as an interactive node graph
         </p>
-        {/* Feature pills */}
-        <div className="flex items-center justify-center gap-2.5 mt-6 flex-wrap"
-          style={{ animation: "slideInUp 0.5s cubic-bezier(0.34,1.56,0.64,1) 60ms both" }}>
+
+        <div className="flex items-center justify-center gap-2 mt-7 flex-wrap"
+          style={{ animation: "fadeIn 0.5s ease-out 150ms both" }}>
           {[
-            { icon: <Layers size={11} />,   label: "4 Layout Modes" },
-            { icon: <Terminal size={11} />, label: "API Playground" },
-            { icon: <Search size={11} />,   label: "Search & Filter" },
-            { icon: <Share2 size={11} />,   label: "Drag & Zoom"    },
+            { icon: <Layers size={11} />,   label: "4 Layouts" },
+            { icon: <Terminal size={11} />,  label: "Playground" },
+            { icon: <Search size={11} />,    label: "Search" },
+            { icon: <Share2 size={11} />,    label: "Drag & Zoom" },
           ].map(({ icon, label }) => (
-            <div key={label} className="flex items-center gap-1.5 bg-slate-800/60 border border-slate-700/40 rounded-full px-3 py-1.5 text-xs text-slate-400 backdrop-blur-sm">
-              <span className="text-violet-400">{icon}</span>{label}
+            <div key={label} className="flex items-center gap-1.5 bg-slate-800/40 border border-slate-700/30 rounded-full px-3 py-1.5 text-xs text-slate-500">
+              <span className="text-slate-500">{icon}</span>
+              <span className="font-medium">{label}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Editor + Upload ── */}
-      <div className="flex-shrink-0 w-full max-w-5xl mx-auto px-6 pb-10"
-        style={{ animation: "slideInUp 0.55s cubic-bezier(0.34,1.56,0.64,1) 100ms both" }}>
-        <div className="flex gap-5">
+      {/* ── Editor + Sidebar ── */}
+      <div className="flex-shrink-0 w-full max-w-5xl mx-auto px-6 pb-8"
+        style={{ animation: "slideInUp 0.5s cubic-bezier(0.22,1,0.36,1) 80ms both" }}>
+        <div className="flex gap-4">
 
-          {/* Left: JSON Editor */}
+          {/* Editor */}
           <div className="flex-1 flex flex-col min-w-0">
-            <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl overflow-hidden backdrop-blur-sm flex flex-col shadow-2xl shadow-black/30"
-              style={{ height: 360 }}>
+            <div className={`bg-slate-900/90 rounded-xl overflow-hidden flex flex-col transition-all duration-200
+              ${editorFocused
+                ? "border border-slate-600/60 shadow-lg shadow-black/30"
+                : "border border-slate-700/40 shadow-lg shadow-black/20"
+              }`}
+              style={{ height: 380 }}>
 
-              {/* Editor title bar — mac-style */}
-              <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/80 border-b border-slate-700/40 flex-shrink-0">
-                <div className="flex items-center gap-3">
+              {/* Title bar */}
+              <div className="flex items-center justify-between px-3.5 py-2 bg-slate-800/70 border-b border-slate-700/30 flex-shrink-0">
+                <div className="flex items-center gap-2.5">
                   <div className="flex gap-1.5">
-                    <div className="w-3 h-3 rounded-full bg-red-500/60" />
-                    <div className="w-3 h-3 rounded-full bg-amber-500/60" />
-                    <div className="w-3 h-3 rounded-full bg-emerald-500/60" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-600/80" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-600/80" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-600/80" />
                   </div>
-                  <div className="w-px h-4 bg-slate-700/60" />
-                  <Braces size={13} className="text-violet-400" />
-                  <span className="text-xs font-bold text-slate-300 tracking-wide">JSON Editor</span>
+                  <div className="w-px h-3.5 bg-slate-700/50" />
+                  <Braces size={12} className="text-slate-500" />
+                  <span className="text-xs font-medium text-slate-400">Editor</span>
                   {isValid && (
-                    <span className="flex items-center gap-1 text-xs text-emerald-400 font-semibold"
-                      style={{ animation: "fadeIn 0.3s ease-out both" }}>
+                    <span className="flex items-center gap-1 text-xs text-emerald-500/80 font-medium"
+                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
                       <CheckCircle size={10} /> Valid
                     </span>
                   )}
                   {error && (
-                    <span className="flex items-center gap-1 text-xs text-red-400 font-semibold"
-                      style={{ animation: "fadeIn 0.3s ease-out both" }}>
+                    <span className="flex items-center gap-1 text-xs text-red-400/80 font-medium"
+                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
                       <AlertCircle size={10} /> Error
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={handleFormat}
-                    className="px-2.5 py-1 text-xs bg-slate-700/60 hover:bg-violet-600/15 border border-slate-600/40 hover:border-violet-500/30 text-slate-400 hover:text-violet-300 rounded-md transition-all duration-200 flex items-center gap-1 font-medium">
-                    <RefreshCw size={10} className={isFormatting ? "animate-spin" : ""} /> Format
+                    className="px-2 py-0.5 text-xs bg-slate-700/40 hover:bg-slate-700/60 border border-slate-600/25 text-slate-500 hover:text-slate-300 rounded transition-all duration-150 flex items-center gap-1 font-medium">
+                    <RefreshCw size={9} className={isFormatting ? "animate-spin" : ""} /> Format
                   </button>
                   <button onClick={() => { setJsonText(""); setError(""); }}
-                    className="px-2.5 py-1 text-xs bg-slate-700/60 hover:bg-red-900/20 border border-slate-600/40 hover:border-red-500/30 text-slate-400 hover:text-red-300 rounded-md transition-all duration-200 font-medium">
+                    className="px-2 py-0.5 text-xs bg-slate-700/40 hover:bg-slate-700/60 border border-slate-600/25 text-slate-500 hover:text-slate-300 rounded transition-all duration-150 font-medium">
                     Clear
                   </button>
                 </div>
               </div>
 
-              {/* Textarea */}
-              <div className="flex-1 relative overflow-hidden">
+              {/* Editor body */}
+              <div className="flex-1 flex overflow-hidden relative">
+                {/* Line numbers */}
+                <div ref={lineNumRef}
+                  className="flex-shrink-0 w-10 bg-slate-900/50 border-r border-slate-800/60 overflow-hidden select-none pt-3 pb-3"
+                  style={{ lineHeight: "1.75" }}>
+                  {Array.from({ length: Math.max(lineCount, 18) }, (_, i) => (
+                    <div key={i} className="text-right pr-2.5 text-xs font-mono text-slate-700 leading-[1.75]">
+                      {i + 1}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Empty state */}
+                {!jsonText.trim() && (
+                  <div className="absolute inset-0 left-10 flex flex-col items-center justify-center pointer-events-none z-10">
+                    <Braces size={24} className="text-slate-700/60 mb-2" />
+                    <p className="text-sm text-slate-600 font-medium mb-0.5">Paste your API spec</p>
+                    <p className="text-xs text-slate-700">JSON or YAML — Postman, OpenAPI, Swagger, or custom</p>
+                  </div>
+                )}
+
                 <textarea
+                  ref={textareaRef}
                   value={jsonText}
                   onChange={(e) => { setJsonText(e.target.value); setError(""); }}
-                  placeholder={`{\n  "info": {\n    "name": "My API Collection"\n  },\n  "item": [ ... ]\n}`}
+                  onFocus={() => setEditorFocused(true)}
+                  onBlur={() => setEditorFocused(false)}
+                  onScroll={handleTextareaScroll}
+                  placeholder=""
                   spellCheck={false}
-                  className="w-full h-full bg-transparent resize-none text-sm font-mono text-slate-300 placeholder:text-slate-700 p-4 focus:outline-none"
+                  className="flex-1 bg-transparent resize-none text-sm font-mono text-slate-300 py-3 pr-4 pl-3 focus:outline-none"
                   style={{ lineHeight: "1.75" }}
                 />
               </div>
 
               {/* Footer */}
-              <div className="px-4 py-2 bg-slate-900/50 border-t border-slate-700/30 flex items-center justify-between flex-shrink-0">
-                <span className="text-xs text-slate-600 font-mono tabular-nums">{lineCount} lines · {charCount.toLocaleString()} chars</span>
+              <div className="px-3.5 py-1.5 bg-slate-800/40 border-t border-slate-700/25 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-600 font-mono tabular-nums">{lineCount}L · {charCount.toLocaleString()}C</span>
+                  {detectedInputFormat && (
+                    <span className="text-xs text-slate-500 font-medium bg-slate-800/60 border border-slate-700/30 rounded px-2 py-0.5"
+                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
+                      {detectedInputFormat}
+                    </span>
+                  )}
+                </div>
                 {error && (
-                  <span className="text-xs text-red-400 truncate max-w-xs" style={{ animation: "fadeIn 0.25s ease-out both" }}>
-                    ⚠ {error}
+                  <span className="text-xs text-red-400/70 truncate max-w-xs">
+                    {error}
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right: Upload + actions */}
-          <div className="w-60 flex flex-col gap-3 flex-shrink-0">
-            {/* Drag & drop */}
+          {/* Sidebar */}
+          <div className="w-56 flex flex-col gap-2.5 flex-shrink-0">
+
+            {/* Upload zone */}
             <div
-              className={`flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-300
+              className={`flex-1 flex flex-col items-center justify-center rounded-xl cursor-pointer transition-all duration-200
                 ${isDragOver
-                  ? "border-violet-400 bg-violet-500/8 scale-[1.02] shadow-lg shadow-violet-500/15"
-                  : "border-slate-700/60 bg-slate-900/30 hover:border-slate-600/80 hover:bg-slate-800/30"
+                  ? "border-2 border-slate-500 bg-slate-800/60"
+                  : "border border-dashed border-slate-700/50 bg-slate-900/40 hover:border-slate-600/60 hover:bg-slate-800/30"
                 }`}
-              style={{ minHeight: 190 }}
+              style={{ minHeight: 160 }}
               onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
               onDragLeave={() => setIsDragOver(false)}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
             >
-              <div className={`p-4 rounded-2xl mb-3 transition-all duration-300 ${isDragOver ? "bg-violet-500/20 scale-110" : "bg-slate-800/60 animate-float"}`}>
-                <Upload size={26} className={`transition-colors duration-300 ${isDragOver ? "text-violet-300" : "text-slate-500"}`} />
-              </div>
-              <p className={`text-sm font-semibold text-center transition-colors duration-300 ${isDragOver ? "text-violet-300" : "text-slate-400"}`}>
-                {isDragOver ? "Release to upload" : "Drop JSON file"}
+              <Upload size={22} className={`mb-2 transition-colors ${isDragOver ? "text-slate-300" : "text-slate-600"}`} />
+              <p className={`text-xs font-medium text-center ${isDragOver ? "text-slate-300" : "text-slate-500"}`}>
+                {isDragOver ? "Drop to upload" : "Drop file here"}
               </p>
-              <p className="text-xs text-slate-600 mt-1">or click to browse</p>
-              <input ref={fileInputRef} type="file" accept=".json" className="hidden"
+              <p className="text-xs text-slate-700 mt-0.5">.json .yaml .yml</p>
+              <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
                 onChange={(e) => handleFileRead(e.target.files?.[0])} />
             </div>
 
             {/* Divider */}
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-slate-700/40" />
-              <span className="text-xs text-slate-600 font-medium">or</span>
-              <div className="flex-1 h-px bg-slate-700/40" />
+              <div className="flex-1 h-px bg-slate-700/30" />
+              <span className="text-xs text-slate-700 font-medium">or</span>
+              <div className="flex-1 h-px bg-slate-700/30" />
             </div>
 
-            {/* Load sample */}
-            <button onClick={onLoadSample}
-              className="w-full py-3 bg-slate-800/60 hover:bg-slate-700/70 border border-slate-700/50 hover:border-violet-500/30 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-all duration-250 active:scale-95 group">
-              <Download size={14} className="text-violet-400 group-hover:translate-y-0.5 transition-transform duration-200" />
-              Load Sample
-            </button>
+            {/* Sample dropdown */}
+            <div className="relative">
+              <button onClick={() => setShowSampleMenu((v) => !v)}
+                className="w-full py-2.5 bg-slate-800/50 hover:bg-slate-800/70 border border-slate-700/40 text-slate-300 text-xs font-medium rounded-lg flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.98]">
+                <Download size={12} className="text-slate-500" />
+                Load Sample
+                <ChevronDown size={12} className={`text-slate-600 transition-transform duration-200 ${showSampleMenu ? "rotate-180" : ""}`} />
+              </button>
+              {showSampleMenu && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800/95 border border-slate-700/50 rounded-lg overflow-hidden backdrop-blur-sm shadow-xl shadow-black/30 z-50"
+                  style={{ animation: "scaleIn 0.12s ease-out both" }}>
+                  {[
+                    { key: "postman", label: "Postman Collection", desc: "Auth API" },
+                    { key: "openapi", label: "OpenAPI 3.0",        desc: "Petstore" },
+                    { key: "custom",  label: "Custom JSON",        desc: "E-Commerce" },
+                  ].map(({ key, label, desc }) => (
+                    <button key={key}
+                      onClick={() => { onLoadSample(key); setShowSampleMenu(false); }}
+                      className="w-full px-3 py-2 text-left hover:bg-slate-700/40 transition-colors duration-100 flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-300">{label}</span>
+                      <span className="text-xs text-slate-600">{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-            {/* Supported formats */}
-            <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3.5">
-              <p className="text-xs font-bold text-slate-600 uppercase tracking-widest mb-2.5">Supports</p>
+            {/* Formats list */}
+            <div className="bg-slate-900/40 border border-slate-800/40 rounded-lg p-3">
+              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Supported</p>
               {[
-                { name: "Postman Collections", dot: "bg-amber-500"  },
-                { name: "OpenAPI / Swagger",   dot: "bg-blue-500"   },
-                { name: "Custom API JSON",     dot: "bg-violet-500" },
-              ].map(({ name, dot }) => (
-                <div key={name} className="flex items-center gap-2.5 py-1">
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                { name: "Postman Collections", icon: <FileJson size={11} /> },
+                { name: "OpenAPI / Swagger",   icon: <Globe size={11} /> },
+                { name: "Custom API JSON",     icon: <FileCode2 size={11} /> },
+              ].map(({ name, icon }) => (
+                <div key={name} className="flex items-center gap-2 py-1">
+                  <span className="text-slate-600">{icon}</span>
                   <span className="text-xs text-slate-500">{name}</span>
                 </div>
               ))}
@@ -529,20 +857,21 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
         </div>
 
         {/* Visualize button */}
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex flex-col items-center gap-1.5">
           <button
             onClick={handleVisualize}
             disabled={!jsonText.trim()}
-            className={`px-10 py-3.5 text-sm font-bold rounded-xl flex items-center gap-2.5 transition-all duration-300 active:scale-95
+            className={`px-10 py-3 text-sm font-semibold rounded-lg flex items-center gap-2 transition-all duration-200 active:scale-[0.97]
               ${jsonText.trim()
-                ? "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-lg shadow-violet-600/30 hover:shadow-xl hover:shadow-violet-500/35 hover:-translate-y-0.5"
+                ? "bg-white text-slate-900 hover:bg-slate-100 shadow-md shadow-black/20"
                 : "bg-slate-800/50 text-slate-600 cursor-not-allowed border border-slate-700/30"
               }`}
           >
-            <Eye size={16} className={jsonText.trim() ? "" : "opacity-40"} />
-            Visualize API
-            {jsonText.trim() && <ChevronRight size={15} className="opacity-60" />}
+            <Eye size={15} className={jsonText.trim() ? "text-slate-700" : "opacity-40"} />
+            Visualize
+            {jsonText.trim() && <ChevronRight size={14} className="text-slate-500" />}
           </button>
+          <span className="text-xs text-slate-700 font-mono">Ctrl+Enter</span>
         </div>
       </div>
     </div>
@@ -1001,6 +1330,7 @@ const PostmanGraphViewer = () => {
   const [showMenu,       setShowMenu]      = useState(false);
   const [showPlayground, setShowPlayground]= useState(false);
   const [stats,          setStats]         = useState({ total:0, get:0, post:0, put:0, delete:0 });
+  const [detectedFormat, setDetectedFormat] = useState("");
 
   // ── Derived state ────────────────────────
   const filteredNodes = useMemo(() => nodes.filter((n) => {
@@ -1184,8 +1514,18 @@ const PostmanGraphViewer = () => {
     return pos;
   }, [graphStyle]);
 
-  // ── Parse JSON / collection ──────────────
+  // ── Parse JSON / collection (multi-format) ──
   const parseCollection = useCallback((data) => {
+    const format = Array.isArray(data) ? "custom" : detectFormat(data);
+    setDetectedFormat(Array.isArray(data) ? "Custom JSON" : formatLabel(data));
+
+    // OpenAPI / Swagger
+    if (format === "openapi") return parseOpenApi(data, setStats);
+
+    // Custom API JSON
+    if (format === "custom") return parseCustomApi(data, setStats);
+
+    // Postman collection (original logic)
     const allNodes = [];
     let id = 0;
     const s = { total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 };
@@ -1256,30 +1596,87 @@ const PostmanGraphViewer = () => {
     setView("graph");
   }, [parseCollection]);
 
-  const handleLoadSample = useCallback(() => {
-    const sample = {
-      info: { name: "Auth API Collection", version: "v2.4.0" },
-      item: [
-        { name: "User Management", item: [
-          { name: "User Login",     request: { method: "POST",   url: "https://api.example.com/v1/auth/login",    description: { content: "Authenticates a user and returns a bearer token." } } },
-          { name: "Get Profile",    request: { method: "GET",    url: "https://api.example.com/v1/user/profile"  } },
-          { name: "Update Profile", request: { method: "PUT",    url: "https://api.example.com/v1/user/profile"  } },
-          { name: "Delete Account", request: { method: "DELETE", url: "https://api.example.com/v1/user/:id"      } },
-        ]},
-        { name: "Payment Gateway", item: [
-          { name: "Create Payment",     request: { method: "POST", url: "https://api.example.com/v1/payments",     body: { raw: '{"amount":100,"currency":"USD"}' } } },
-          { name: "Get Payment Status", request: { method: "GET",  url: "https://api.example.com/v1/payments/:id" } },
-          { name: "Refund Payment",     request: { method: "POST", url: "https://api.example.com/v1/payments/:id/refund" } },
-        ]},
-        { name: "Products", item: [
-          { name: "List Products",  request: { method: "GET",    url: "https://api.example.com/v1/products"        } },
-          { name: "Create Product", request: { method: "POST",   url: "https://api.example.com/v1/products"        } },
-          { name: "Update Product", request: { method: "PATCH",  url: "https://api.example.com/v1/products/:id"    } },
-          { name: "Delete Product", request: { method: "DELETE", url: "https://api.example.com/v1/products/:id"    } },
-        ]},
-      ],
+  const handleLoadSample = useCallback((format = "postman") => {
+    const samples = {
+      postman: {
+        info: { name: "Auth API Collection", version: "v2.4.0" },
+        item: [
+          { name: "User Management", item: [
+            { name: "User Login",     request: { method: "POST",   url: "https://api.example.com/v1/auth/login",    description: { content: "Authenticates a user and returns a bearer token." } } },
+            { name: "Get Profile",    request: { method: "GET",    url: "https://api.example.com/v1/user/profile"  } },
+            { name: "Update Profile", request: { method: "PUT",    url: "https://api.example.com/v1/user/profile"  } },
+            { name: "Delete Account", request: { method: "DELETE", url: "https://api.example.com/v1/user/:id"      } },
+          ]},
+          { name: "Payment Gateway", item: [
+            { name: "Create Payment",     request: { method: "POST", url: "https://api.example.com/v1/payments",     body: { raw: '{"amount":100,"currency":"USD"}' } } },
+            { name: "Get Payment Status", request: { method: "GET",  url: "https://api.example.com/v1/payments/:id" } },
+            { name: "Refund Payment",     request: { method: "POST", url: "https://api.example.com/v1/payments/:id/refund" } },
+          ]},
+          { name: "Products", item: [
+            { name: "List Products",  request: { method: "GET",    url: "https://api.example.com/v1/products"        } },
+            { name: "Create Product", request: { method: "POST",   url: "https://api.example.com/v1/products"        } },
+            { name: "Update Product", request: { method: "PATCH",  url: "https://api.example.com/v1/products/:id"    } },
+            { name: "Delete Product", request: { method: "DELETE", url: "https://api.example.com/v1/products/:id"    } },
+          ]},
+        ],
+      },
+      openapi: {
+        openapi: "3.0.3",
+        info: { title: "Petstore API", version: "1.0.0", description: "A sample pet store API" },
+        servers: [{ url: "https://petstore.example.com/api/v1" }],
+        paths: {
+          "/pets": {
+            get:  { tags: ["Pets"], operationId: "listPets", summary: "List all pets", description: "Returns a paginated list of pets" },
+            post: { tags: ["Pets"], operationId: "createPet", summary: "Create a pet", description: "Creates a new pet in the store", requestBody: { content: { "application/json": { example: { name: "Buddy", species: "dog", age: 3 } } } } },
+          },
+          "/pets/{petId}": {
+            get:    { tags: ["Pets"], operationId: "getPet", summary: "Get pet by ID", description: "Returns a single pet" },
+            put:    { tags: ["Pets"], operationId: "updatePet", summary: "Update a pet", description: "Updates an existing pet", requestBody: { content: { "application/json": { example: { name: "Buddy", age: 4 } } } } },
+            delete: { tags: ["Pets"], operationId: "deletePet", summary: "Delete a pet", description: "Deletes a pet from the store" },
+          },
+          "/store/inventory": {
+            get: { tags: ["Store"], operationId: "getInventory", summary: "Get inventory", description: "Returns pet inventories by status" },
+          },
+          "/store/orders": {
+            post: { tags: ["Store"], operationId: "placeOrder", summary: "Place an order", description: "Place a new order for a pet", requestBody: { content: { "application/json": { example: { petId: 1, quantity: 1 } } } } },
+          },
+          "/store/orders/{orderId}": {
+            get:    { tags: ["Store"], operationId: "getOrder", summary: "Get order by ID", description: "Returns the order details" },
+            delete: { tags: ["Store"], operationId: "deleteOrder", summary: "Delete order", description: "Cancel and delete an order" },
+          },
+          "/users/login":  { post: { tags: ["Users"], operationId: "loginUser", summary: "User login", description: "Logs in and returns auth token" } },
+          "/users/logout": { post: { tags: ["Users"], operationId: "logoutUser", summary: "User logout", description: "Logs out the current user" } },
+          "/users/{userId}": {
+            get: { tags: ["Users"], operationId: "getUser", summary: "Get user profile", description: "Returns the user profile" },
+            put: { tags: ["Users"], operationId: "updateUser", summary: "Update user", description: "Update user profile information" },
+          },
+        },
+      },
+      custom: {
+        name: "E-Commerce API",
+        version: "v3.1",
+        "Authentication": [
+          { name: "Register",       method: "POST",   url: "https://api.shop.io/v3/auth/register" },
+          { name: "Login",          method: "POST",   url: "https://api.shop.io/v3/auth/login", body: { email: "user@example.com", password: "secret" } },
+          { name: "Refresh Token",  method: "POST",   url: "https://api.shop.io/v3/auth/refresh" },
+          { name: "Current User",   method: "GET",    url: "https://api.shop.io/v3/auth/me" },
+        ],
+        "Products": [
+          { name: "Search Products", method: "GET",    url: "https://api.shop.io/v3/products?q=shoes" },
+          { name: "Get Product",     method: "GET",    url: "https://api.shop.io/v3/products/:id" },
+          { name: "Create Product",  method: "POST",   url: "https://api.shop.io/v3/products", body: { title: "Sneakers", price: 79.99 } },
+          { name: "Update Product",  method: "PATCH",  url: "https://api.shop.io/v3/products/:id" },
+          { name: "Delete Product",  method: "DELETE", url: "https://api.shop.io/v3/products/:id" },
+        ],
+        "Cart": [
+          { name: "Get Cart",       method: "GET",    url: "https://api.shop.io/v3/cart" },
+          { name: "Add to Cart",    method: "POST",   url: "https://api.shop.io/v3/cart/items", body: { productId: 42, quantity: 1 } },
+          { name: "Remove Item",    method: "DELETE", url: "https://api.shop.io/v3/cart/items/:id" },
+          { name: "Checkout",       method: "POST",   url: "https://api.shop.io/v3/cart/checkout" },
+        ],
+      },
     };
-    handleVisualize(sample);
+    handleVisualize(samples[format] || samples.postman);
   }, [handleVisualize]);
 
   // ── Recalculate on style / nodes change ──
@@ -1488,11 +1885,19 @@ const PostmanGraphViewer = () => {
                   style={{ animation: "scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both" }}>
                   <button onClick={() => { fileInputRef.current?.click(); setShowMenu(false); }}
                     className="w-full text-left px-4 py-3 hover:bg-slate-700/40 text-slate-300 hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200">
-                    <Upload size={14} className="text-cyan-400" /> Import JSON File
+                    <Upload size={14} className="text-cyan-400" /> Import JSON / YAML File
                   </button>
-                  <button onClick={() => { handleLoadSample(); setShowMenu(false); }}
+                  <button onClick={() => { handleLoadSample("postman"); setShowMenu(false); }}
                     className="w-full text-left px-4 py-3 hover:bg-slate-700/40 text-slate-300 hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200">
-                    <Download size={14} className="text-emerald-400" /> Load Sample
+                    <Download size={14} className="text-amber-400" /> Postman Sample
+                  </button>
+                  <button onClick={() => { handleLoadSample("openapi"); setShowMenu(false); }}
+                    className="w-full text-left px-4 py-3 hover:bg-slate-700/40 text-slate-300 hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200">
+                    <Download size={14} className="text-blue-400" /> OpenAPI Sample
+                  </button>
+                  <button onClick={() => { handleLoadSample("custom"); setShowMenu(false); }}
+                    className="w-full text-left px-4 py-3 hover:bg-slate-700/40 text-slate-300 hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200">
+                    <Download size={14} className="text-violet-400" /> Custom JSON Sample
                   </button>
                   <div className="border-t border-slate-700/40 my-1" />
                   <button onClick={() => { handleReset(); setShowMenu(false); }}
@@ -1524,6 +1929,12 @@ const PostmanGraphViewer = () => {
               <span className={`text-sm font-bold ${cls}`}>{val}</span>
             </div>
           ))}
+          {detectedFormat && (
+            <div className="ml-auto flex items-center gap-1.5 bg-slate-800/60 border border-slate-700/40 rounded-full px-3 py-1 text-xs font-bold text-slate-400">
+              <Code size={10} className="text-violet-400" />
+              {detectedFormat}
+            </div>
+          )}
         </div>
       )}
 
@@ -1652,13 +2063,18 @@ const PostmanGraphViewer = () => {
       )}
 
       {/* Hidden file input */}
-      <input ref={fileInputRef} type="file" accept=".json" className="hidden"
+      <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (!file) return;
           const reader = new FileReader();
           reader.onload = (ev) => {
-            try { handleVisualize(JSON.parse(ev.target.result)); } catch { /* ignore */ }
+            try {
+              const text = ev.target.result;
+              let data;
+              try { data = JSON.parse(text); } catch { data = yaml.load(text); }
+              if (data && typeof data === "object") handleVisualize(data);
+            } catch { /* ignore */ }
           };
           reader.readAsText(file);
           e.target.value = "";
