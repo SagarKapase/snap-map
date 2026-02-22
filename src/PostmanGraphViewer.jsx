@@ -549,15 +549,15 @@ const GraphCard = ({ node, position, isSelected, isDragging, isHighlighted, onMo
 };
 
 // ─────────────────────────────────────────────
-// JsonInputScreen — landing / editor view
+// JsonInputScreen — unified glass workspace
 // ─────────────────────────────────────────────
 const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
-  const [jsonText, setJsonText]     = useState("");
-  const [error, setError]           = useState("");
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isFormatting, setIsFormatting] = useState(false);
-  const [showSampleMenu, setShowSampleMenu] = useState(false);
-  const [editorFocused, setEditorFocused] = useState(false);
+  const [jsonText,      setJsonText]      = useState("");
+  const [error,         setError]         = useState("");
+  const [isDragOver,    setIsDragOver]    = useState(false);
+  const [isFormatting,  setIsFormatting]  = useState(false);
+  const [showSampleMenu,setShowSampleMenu]= useState(false);
+  const [activeTab,     setActiveTab]     = useState("editor"); // "editor" | "upload"
   const fileInputRef = useRef(null);
   const textareaRef  = useRef(null);
   const lineNumRef   = useRef(null);
@@ -583,10 +583,10 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   }, [jsonText]);
 
   const handleVisualize = () => {
-    if (!jsonText.trim()) { setError("Paste JSON/YAML or upload a file."); return; }
+    if (!jsonText.trim()) { setError("Paste or upload an API specification first."); return; }
     const data = tryParse(jsonText);
     if (data && typeof data === "object") { setError(""); onVisualize(data); }
-    else { setError("Invalid JSON/YAML"); }
+    else { setError("Invalid JSON/YAML — cannot parse"); }
   };
 
   const handleFormat = () => {
@@ -594,7 +594,7 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
     setIsFormatting(true);
     const parsed = tryParse(jsonText);
     if (parsed && typeof parsed === "object") { setJsonText(JSON.stringify(parsed, null, 2)); setError(""); }
-    else { setError("Cannot format — invalid input"); }
+    else { setError("Cannot format — invalid JSON/YAML"); }
     setTimeout(() => setIsFormatting(false), 400);
   };
 
@@ -607,7 +607,7 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
     reader.onload = (e) => {
       const text = e.target.result;
       const parsed = tryParse(text);
-      if (parsed && typeof parsed === "object") { setJsonText(text); setError(""); }
+      if (parsed && typeof parsed === "object") { setJsonText(text); setError(""); setActiveTab("editor"); }
       else { setError("Invalid file"); }
     };
     reader.readAsText(file);
@@ -638,240 +638,339 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   const charCount = jsonText.length;
   const isValid   = jsonText.trim() && validate(jsonText);
 
+  const GLASS = {
+    background: "rgba(12, 12, 20, 0.75)",
+    backdropFilter: "blur(24px)",
+    WebkitBackdropFilter: "blur(24px)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    boxShadow: "0 32px 64px -16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)",
+  };
+
   return (
-    <div className="flex-1 flex flex-col overflow-auto" style={{ animation: "fadeIn 0.35s ease-out both" }}>
+    <div className="flex-1 overflow-auto relative" style={{ animation: "fadeIn 0.3s ease-out both" }}>
 
-      {/* ── Hero ── */}
-      <div className="flex-shrink-0 text-center pt-16 pb-10 px-6"
-        style={{ animation: "slideInUp 0.45s cubic-bezier(0.22,1,0.36,1) both" }}>
+      {/* Radial gradient background */}
+      <div className="fixed inset-0 pointer-events-none" style={{
+        background: "radial-gradient(circle at 18% 25%, rgba(99,102,241,0.11) 0%, transparent 45%), radial-gradient(circle at 82% 75%, rgba(217,70,239,0.07) 0%, transparent 45%)",
+        zIndex: 0,
+      }} />
 
-        <div className="inline-flex items-center gap-2 bg-slate-800/60 border border-slate-700/40 rounded-full px-4 py-1.5 mb-5">
-          <Zap size={11} className="text-slate-400" />
-          <span className="text-xs font-semibold text-slate-400 tracking-wide uppercase">API Visualization</span>
-        </div>
+      <div className="relative z-10 max-w-7xl mx-auto px-8 py-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
 
-        <h1 className="text-6xl font-black text-white mb-3 tracking-tight leading-none">
-          Snap<span className="text-slate-400">-</span>Map
-        </h1>
+        {/* ── Left: Hero (4 cols) ── */}
+        <div className="lg:col-span-4 flex flex-col gap-8 pt-2" style={{ animation: "slideInLeft 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
 
-        <p className="text-slate-500 text-base max-w-md mx-auto leading-relaxed">
-          Paste any API specification and visualize it as an interactive node graph
-        </p>
-
-        <div className="flex items-center justify-center gap-2 mt-7 flex-wrap"
-          style={{ animation: "fadeIn 0.5s ease-out 150ms both" }}>
-          {[
-            { icon: <Layers size={11} />,   label: "4 Layouts" },
-            { icon: <Terminal size={11} />,  label: "Playground" },
-            { icon: <Search size={11} />,    label: "Search" },
-            { icon: <Share2 size={11} />,    label: "Drag & Zoom" },
-          ].map(({ icon, label }) => (
-            <div key={label} className="flex items-center gap-1.5 bg-slate-800/40 border border-slate-700/30 rounded-full px-3 py-1.5 text-xs text-slate-500">
-              <span className="text-slate-500">{icon}</span>
-              <span className="font-medium">{label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Editor + Sidebar ── */}
-      <div className="flex-shrink-0 w-full max-w-5xl mx-auto px-6 pb-8"
-        style={{ animation: "slideInUp 0.5s cubic-bezier(0.22,1,0.36,1) 80ms both" }}>
-        <div className="flex gap-4">
-
-          {/* Editor */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <div className={`bg-slate-900/90 rounded-xl overflow-hidden flex flex-col transition-all duration-200
-              ${editorFocused
-                ? "border border-slate-600/60 shadow-lg shadow-black/30"
-                : "border border-slate-700/40 shadow-lg shadow-black/20"
-              }`}
-              style={{ height: 380 }}>
-
-              {/* Title bar */}
-              <div className="flex items-center justify-between px-3.5 py-2 bg-slate-800/70 border-b border-slate-700/30 flex-shrink-0">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-slate-600/80" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-slate-600/80" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-slate-600/80" />
-                  </div>
-                  <div className="w-px h-3.5 bg-slate-700/50" />
-                  <Braces size={12} className="text-slate-500" />
-                  <span className="text-xs font-medium text-slate-400">Editor</span>
-                  {isValid && (
-                    <span className="flex items-center gap-1 text-xs text-emerald-500/80 font-medium"
-                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
-                      <CheckCircle size={10} /> Valid
-                    </span>
-                  )}
-                  {error && (
-                    <span className="flex items-center gap-1 text-xs text-red-400/80 font-medium"
-                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
-                      <AlertCircle size={10} /> Error
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  <button onClick={handleFormat}
-                    className="px-2 py-0.5 text-xs bg-slate-700/40 hover:bg-slate-700/60 border border-slate-600/25 text-slate-500 hover:text-slate-300 rounded transition-all duration-150 flex items-center gap-1 font-medium">
-                    <RefreshCw size={9} className={isFormatting ? "animate-spin" : ""} /> Format
-                  </button>
-                  <button onClick={() => { setJsonText(""); setError(""); }}
-                    className="px-2 py-0.5 text-xs bg-slate-700/40 hover:bg-slate-700/60 border border-slate-600/25 text-slate-500 hover:text-slate-300 rounded transition-all duration-150 font-medium">
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              {/* Editor body */}
-              <div className="flex-1 flex overflow-hidden relative">
-                {/* Line numbers */}
-                <div ref={lineNumRef}
-                  className="flex-shrink-0 w-10 bg-slate-900/50 border-r border-slate-800/60 overflow-hidden select-none pt-3 pb-3"
-                  style={{ lineHeight: "1.75" }}>
-                  {Array.from({ length: Math.max(lineCount, 18) }, (_, i) => (
-                    <div key={i} className="text-right pr-2.5 text-xs font-mono text-slate-700 leading-[1.75]">
-                      {i + 1}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Empty state */}
-                {!jsonText.trim() && (
-                  <div className="absolute inset-0 left-10 flex flex-col items-center justify-center pointer-events-none z-10">
-                    <Braces size={24} className="text-slate-700/60 mb-2" />
-                    <p className="text-sm text-slate-600 font-medium mb-0.5">Paste your API spec</p>
-                    <p className="text-xs text-slate-700">JSON or YAML — Postman, OpenAPI, Swagger, or custom</p>
-                  </div>
-                )}
-
-                <textarea
-                  ref={textareaRef}
-                  value={jsonText}
-                  onChange={(e) => { setJsonText(e.target.value); setError(""); }}
-                  onFocus={() => setEditorFocused(true)}
-                  onBlur={() => setEditorFocused(false)}
-                  onScroll={handleTextareaScroll}
-                  placeholder=""
-                  spellCheck={false}
-                  className="flex-1 bg-transparent resize-none text-sm font-mono text-slate-300 py-3 pr-4 pl-3 focus:outline-none"
-                  style={{ lineHeight: "1.75" }}
-                />
-              </div>
-
-              {/* Footer */}
-              <div className="px-3.5 py-1.5 bg-slate-800/40 border-t border-slate-700/25 flex items-center justify-between flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-600 font-mono tabular-nums">{lineCount}L · {charCount.toLocaleString()}C</span>
-                  {detectedInputFormat && (
-                    <span className="text-xs text-slate-500 font-medium bg-slate-800/60 border border-slate-700/30 rounded px-2 py-0.5"
-                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
-                      {detectedInputFormat}
-                    </span>
-                  )}
-                </div>
-                {error && (
-                  <span className="text-xs text-red-400/70 truncate max-w-xs">
-                    {error}
-                  </span>
-                )}
-              </div>
-            </div>
+          {/* Status badge */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full w-fit"
+            style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" style={{ animation: "nodeEntrance 1s ease-in-out infinite alternate" }} />
+            <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">System Active</span>
           </div>
 
-          {/* Sidebar */}
-          <div className="w-56 flex flex-col gap-2.5 flex-shrink-0">
+          {/* Title */}
+          <div className="space-y-4">
+            <h1 className="text-5xl font-extrabold tracking-tight leading-[1.1] text-white">
+              Build API<br />
+              <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(135deg, #6366f1 0%, #d946ef 100%)" }}>
+                Maps.
+              </span>
+            </h1>
+            <p className="text-sm text-slate-400 leading-relaxed tracking-wide font-light max-w-xs">
+              Transform complex API specifications into navigable visual graphs. Supports Postman, OpenAPI, Swagger and custom JSON.
+            </p>
+          </div>
 
-            {/* Upload zone */}
-            <div
-              className={`flex-1 flex flex-col items-center justify-center rounded-xl cursor-pointer transition-all duration-200
-                ${isDragOver
-                  ? "border-2 border-slate-500 bg-slate-800/60"
-                  : "border border-dashed border-slate-700/50 bg-slate-900/40 hover:border-slate-600/60 hover:bg-slate-800/30"
-                }`}
-              style={{ minHeight: 160 }}
-              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload size={22} className={`mb-2 transition-colors ${isDragOver ? "text-slate-300" : "text-slate-600"}`} />
-              <p className={`text-xs font-medium text-center ${isDragOver ? "text-slate-300" : "text-slate-500"}`}>
-                {isDragOver ? "Drop to upload" : "Drop file here"}
-              </p>
-              <p className="text-xs text-slate-700 mt-0.5">.json .yaml .yml</p>
-              <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
-                onChange={(e) => handleFileRead(e.target.files?.[0])} />
+          {/* Feature grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { icon: <Layers size={16} />,   label: "Topology",   sub: "4 auto-layouts" },
+              { icon: <Zap size={16} />,       label: "Playground", sub: "Live API calls"  },
+              { icon: <Search size={16} />,    label: "Search",     sub: "Filter endpoints"},
+              { icon: <Share2 size={16} />,    label: "Canvas",     sub: "Drag & zoom"     },
+            ].map(({ icon, label, sub }) => (
+              <div key={label} className="p-3.5 rounded-2xl space-y-2 transition-colors duration-200 hover:border-white/10"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <span className="text-indigo-400">{icon}</span>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{label}</p>
+                <p className="text-xs text-slate-500">{sub}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* CTA button */}
+          <button
+            onClick={handleVisualize}
+            disabled={!jsonText.trim()}
+            className={`w-full group flex items-center justify-center gap-3 py-4 rounded-2xl font-bold text-sm tracking-wide uppercase transition-all duration-200 active:scale-[0.97]
+              ${jsonText.trim()
+                ? "text-white shadow-2xl hover:opacity-90"
+                : "text-slate-600 cursor-not-allowed"
+              }`}
+            style={jsonText.trim() ? {
+              background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+              boxShadow: "0 20px 40px -10px rgba(99,102,241,0.35)",
+            } : {
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <Eye size={16} className={jsonText.trim() ? "" : "opacity-30"} />
+            Initialize Visualization
+            {jsonText.trim() && (
+              <ChevronRight size={15} className="opacity-60 group-hover:translate-x-0.5 transition-transform" />
+            )}
+          </button>
+
+          {/* Supported formats */}
+          <div className="space-y-2.5">
+            <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Accepts</p>
+            {[
+              { name: "Postman Collections", icon: <FileJson size={12} /> },
+              { name: "OpenAPI / Swagger",   icon: <Globe size={12} /> },
+              { name: "Custom API JSON",     icon: <FileCode2 size={12} /> },
+            ].map(({ name, icon }) => (
+              <div key={name} className="flex items-center gap-2.5">
+                <span className="text-slate-600">{icon}</span>
+                <span className="text-xs text-slate-500">{name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Right: Glass editor panel (8 cols) ── */}
+        <div className="lg:col-span-8" style={{ animation: "slideInRight 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
+          <div className="rounded-3xl overflow-hidden flex flex-col" style={{ ...GLASS, height: 580 }}>
+
+            {/* Tab bar */}
+            <div className="flex items-center justify-between px-6 py-3.5 flex-shrink-0"
+              style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)" }}>
+              <div className="flex items-center gap-6">
+                {[
+                  { id: "editor", icon: <Terminal size={14} />, label: "Source Editor" },
+                  { id: "upload", icon: <Upload size={14} />,   label: "File Upload" },
+                ].map(({ id, icon, label }) => (
+                  <button key={id} onClick={() => setActiveTab(id)}
+                    className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest py-1 transition-colors duration-200
+                      ${activeTab === id
+                        ? "text-white border-b-2 border-indigo-500"
+                        : "text-slate-500 hover:text-slate-300"
+                      }`}>
+                    {icon}{label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                {/* Sample dropdown */}
+                <div className="relative">
+                  <button onClick={() => setShowSampleMenu((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-300 uppercase tracking-widest transition-colors duration-200">
+                    <Download size={13} />
+                    Sample
+                    <ChevronDown size={11} className={`transition-transform duration-200 ${showSampleMenu ? "rotate-180" : ""}`} />
+                  </button>
+                  {showSampleMenu && (
+                    <div className="absolute right-0 top-full mt-2 w-48 rounded-xl overflow-hidden z-50"
+                      style={{ ...GLASS, animation: "scaleIn 0.12s ease-out both" }}>
+                      {[
+                        { key: "postman", label: "Postman Collection", desc: "Auth API"    },
+                        { key: "openapi", label: "OpenAPI 3.0",        desc: "Petstore"    },
+                        { key: "custom",  label: "Custom JSON",        desc: "E-Commerce"  },
+                      ].map(({ key, label, desc }) => (
+                        <button key={key}
+                          onClick={() => { onLoadSample(key); setShowSampleMenu(false); }}
+                          className="w-full px-4 py-2.5 text-left flex items-center justify-between transition-colors duration-100 hover:bg-white/5">
+                          <span className="text-xs font-medium text-slate-300">{label}</span>
+                          <span className="text-xs text-slate-600">{desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="w-px h-4" style={{ background: "rgba(255,255,255,0.08)" }} />
+                <button onClick={handleFormat}
+                  className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-300 uppercase tracking-widest transition-colors duration-200">
+                  <RefreshCw size={12} className={isFormatting ? "animate-spin" : ""} />
+                  Format
+                </button>
+                <div className="w-px h-4" style={{ background: "rgba(255,255,255,0.08)" }} />
+                <span className="text-xs font-mono text-slate-600">
+                  Ln {lineCount}, Col 1
+                </span>
+              </div>
             </div>
 
-            {/* Divider */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-slate-700/30" />
-              <span className="text-xs text-slate-700 font-medium">or</span>
-              <div className="flex-1 h-px bg-slate-700/30" />
-            </div>
+            {/* Editor body */}
+            <div className="flex-1 flex overflow-hidden">
 
-            {/* Sample dropdown */}
-            <div className="relative">
-              <button onClick={() => setShowSampleMenu((v) => !v)}
-                className="w-full py-2.5 bg-slate-800/50 hover:bg-slate-800/70 border border-slate-700/40 text-slate-300 text-xs font-medium rounded-lg flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.98]">
-                <Download size={12} className="text-slate-500" />
-                Load Sample
-                <ChevronDown size={12} className={`text-slate-600 transition-transform duration-200 ${showSampleMenu ? "rotate-180" : ""}`} />
-              </button>
-              {showSampleMenu && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800/95 border border-slate-700/50 rounded-lg overflow-hidden backdrop-blur-sm shadow-xl shadow-black/30 z-50"
-                  style={{ animation: "scaleIn 0.12s ease-out both" }}>
-                  {[
-                    { key: "postman", label: "Postman Collection", desc: "Auth API" },
-                    { key: "openapi", label: "OpenAPI 3.0",        desc: "Petstore" },
-                    { key: "custom",  label: "Custom JSON",        desc: "E-Commerce" },
-                  ].map(({ key, label, desc }) => (
-                    <button key={key}
-                      onClick={() => { onLoadSample(key); setShowSampleMenu(false); }}
-                      className="w-full px-3 py-2 text-left hover:bg-slate-700/40 transition-colors duration-100 flex items-center justify-between">
-                      <span className="text-xs font-medium text-slate-300">{label}</span>
-                      <span className="text-xs text-slate-600">{desc}</span>
-                    </button>
-                  ))}
+              {activeTab === "editor" ? (
+                <>
+                  {/* Line numbers */}
+                  <div ref={lineNumRef}
+                    className="flex-shrink-0 w-16 overflow-hidden select-none pt-7 pb-4 flex flex-col items-center gap-0"
+                    style={{ background: "rgba(0,0,0,0.2)", borderRight: "1px solid rgba(255,255,255,0.05)" }}>
+                    {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => (
+                      <div key={i} className="text-right w-full pr-4 text-xs font-mono leading-[1.75]"
+                        style={{ color: "rgba(255,255,255,0.12)" }}>
+                        {String(i + 1).padStart(2, "0")}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Textarea + empty state */}
+                  <div className="flex-1 relative">
+                    {!jsonText.trim() && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-10 pointer-events-none z-10"
+                        style={{ animation: "fadeIn 0.4s ease-out both" }}>
+                        <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5"
+                          style={{ background: "rgba(99,102,241,0.06)" }}>
+                          <Braces size={28} style={{ color: "rgba(99,102,241,0.35)" }} />
+                        </div>
+                        <h3 className="text-base font-bold text-slate-400 mb-2 tracking-wide">Input Specification</h3>
+                        <p className="text-sm text-slate-600 max-w-xs leading-relaxed">
+                          Paste your OpenAPI, Swagger, Postman or custom JSON/YAML here to generate a real-time graph.
+                        </p>
+                        <div className="mt-8 flex gap-3 pointer-events-auto">
+                          <div className="relative">
+                            <button onClick={() => setShowSampleMenu((v) => !v)}
+                              className="px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors duration-200 hover:bg-white/10 flex items-center gap-2"
+                              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                              <Download size={12} /> Load Sample
+                            </button>
+                            {showSampleMenu && (
+                              <div className="absolute left-0 top-full mt-1.5 w-48 rounded-xl overflow-hidden z-50"
+                                style={{ ...GLASS, animation: "scaleIn 0.12s ease-out both" }}>
+                                {[
+                                  { key: "postman", label: "Postman Collection" },
+                                  { key: "openapi", label: "OpenAPI 3.0 Spec"   },
+                                  { key: "custom",  label: "Custom JSON"        },
+                                ].map(({ key, label }) => (
+                                  <button key={key}
+                                    onClick={() => { onLoadSample(key); setShowSampleMenu(false); }}
+                                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-300 hover:bg-white/5 transition-colors duration-100">
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => { setJsonText(""); setError(""); }}
+                            className="px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors duration-200 hover:bg-white/10 text-slate-500"
+                            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            Clear All
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <textarea
+                      ref={textareaRef}
+                      value={jsonText}
+                      onChange={(e) => { setJsonText(e.target.value); setError(""); }}
+                      onScroll={handleTextareaScroll}
+                      placeholder=""
+                      spellCheck={false}
+                      className="w-full h-full bg-transparent resize-none font-mono text-sm text-slate-300 p-7 focus:outline-none"
+                      style={{ lineHeight: "1.75", caretColor: "#6366f1" }}
+                    />
+                  </div>
+                </>
+              ) : (
+                /* Upload tab */
+                <div className="flex-1 flex flex-col items-center justify-center p-10"
+                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={handleDrop}>
+                  <div
+                    className="w-full max-w-sm flex flex-col items-center justify-center rounded-2xl py-14 cursor-pointer transition-all duration-200"
+                    style={{
+                      border: isDragOver
+                        ? "2px dashed rgba(99,102,241,0.6)"
+                        : "2px dashed rgba(255,255,255,0.08)",
+                      background: isDragOver ? "rgba(99,102,241,0.06)" : "rgba(255,255,255,0.02)",
+                    }}
+                    onClick={() => fileInputRef.current?.click()}>
+                    <div className="p-4 rounded-2xl mb-4" style={{ background: isDragOver ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.04)" }}>
+                      <Upload size={28} style={{ color: isDragOver ? "#6366f1" : "rgba(255,255,255,0.2)" }} />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-400 mb-1">
+                      {isDragOver ? "Release to upload" : "Drop your file here"}
+                    </p>
+                    <p className="text-xs text-slate-600">or click to browse · .json .yaml .yml</p>
+                  </div>
+                  <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
+                    onChange={(e) => handleFileRead(e.target.files?.[0])} />
                 </div>
               )}
             </div>
 
-            {/* Formats list */}
-            <div className="bg-slate-900/40 border border-slate-800/40 rounded-lg p-3">
-              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Supported</p>
-              {[
-                { name: "Postman Collections", icon: <FileJson size={11} /> },
-                { name: "OpenAPI / Swagger",   icon: <Globe size={11} /> },
-                { name: "Custom API JSON",     icon: <FileCode2 size={11} /> },
-              ].map(({ name, icon }) => (
-                <div key={name} className="flex items-center gap-2 py-1">
-                  <span className="text-slate-600">{icon}</span>
-                  <span className="text-xs text-slate-500">{name}</span>
+            {/* Status bar */}
+            <div className="flex items-center justify-between px-6 py-3 flex-shrink-0"
+              style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.25)" }}>
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Engine Ready</span>
                 </div>
-              ))}
+                {detectedInputFormat && (
+                  <div className="flex items-center gap-2">
+                    <Code size={11} className="text-slate-600" />
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest"
+                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
+                      {detectedInputFormat}
+                    </span>
+                  </div>
+                )}
+                {error && (
+                  <div className="flex items-center gap-1.5">
+                    <AlertCircle size={11} className="text-red-400/70" />
+                    <span className="text-xs text-red-400/70 font-medium">{error}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-4">
+                {/* Keyboard shortcut hint */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span className="px-1 py-0.5 rounded text-xs font-mono text-slate-500"
+                    style={{ background: "rgba(255,255,255,0.07)" }}>⌘</span>
+                  <span className="px-1 py-0.5 rounded text-xs font-mono text-slate-500"
+                    style={{ background: "rgba(255,255,255,0.07)" }}>ENTER</span>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">to run</span>
+                </div>
+                {/* Build Map button */}
+                <button
+                  onClick={handleVisualize}
+                  disabled={!jsonText.trim()}
+                  className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all duration-200 active:scale-[0.97]
+                    ${jsonText.trim()
+                      ? "text-white hover:opacity-90"
+                      : "text-slate-600 cursor-not-allowed"
+                    }`}
+                  style={jsonText.trim() ? {
+                    background: "#6366f1",
+                    boxShadow: "0 8px 20px -4px rgba(99,102,241,0.4)",
+                  } : {
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  Build Map
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Visualize button */}
-        <div className="mt-6 flex flex-col items-center gap-1.5">
-          <button
-            onClick={handleVisualize}
-            disabled={!jsonText.trim()}
-            className={`px-10 py-3 text-sm font-semibold rounded-lg flex items-center gap-2 transition-all duration-200 active:scale-[0.97]
-              ${jsonText.trim()
-                ? "bg-white text-slate-900 hover:bg-slate-100 shadow-md shadow-black/20"
-                : "bg-slate-800/50 text-slate-600 cursor-not-allowed border border-slate-700/30"
-              }`}
-          >
-            <Eye size={15} className={jsonText.trim() ? "text-slate-700" : "opacity-40"} />
-            Visualize
-            {jsonText.trim() && <ChevronRight size={14} className="text-slate-500" />}
-          </button>
-          <span className="text-xs text-slate-700 font-mono">Ctrl+Enter</span>
+          {/* Bottom meta */}
+          <div className="flex justify-center gap-12 mt-6">
+            {[
+              { icon: <CheckCircle size={13} />, label: "Secure · Local Only" },
+              { icon: <Zap size={13} />,         label: "Instant Rendering"   },
+              { icon: <Layers size={13} />,      label: "Multi-format"        },
+            ].map(({ icon, label }) => (
+              <div key={label} className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-widest">
+                {icon}{label}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
