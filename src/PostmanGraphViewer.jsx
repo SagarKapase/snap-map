@@ -552,12 +552,18 @@ const GraphCard = ({ node, position, isSelected, isDragging, isHighlighted, onMo
 // JsonInputScreen — unified glass workspace
 // ─────────────────────────────────────────────
 const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
-  const [jsonText,      setJsonText]      = useState("");
-  const [error,         setError]         = useState("");
-  const [isDragOver,    setIsDragOver]    = useState(false);
-  const [isFormatting,  setIsFormatting]  = useState(false);
-  const [showSampleMenu,setShowSampleMenu]= useState(false);
-  const [activeTab,     setActiveTab]     = useState("editor"); // "editor" | "upload"
+  const [jsonText,          setJsonText]          = useState("");
+  const [error,             setError]             = useState("");
+  const [isDragOver,        setIsDragOver]        = useState(false);
+  const [isFormatting,      setIsFormatting]      = useState(false);
+  const [showTabSample,     setShowTabSample]     = useState(false);
+  const [showEditorSample,  setShowEditorSample]  = useState(false);
+  const [activeTab,         setActiveTab]         = useState("editor");
+  const [urlInput,          setUrlInput]          = useState("");
+  const [urlError,          setUrlError]          = useState("");
+  const [isFetching,        setIsFetching]        = useState(false);
+  const [loadedFileName,    setLoadedFileName]    = useState("");
+  const [isCopied,          setIsCopied]          = useState(false);
   const fileInputRef = useRef(null);
   const textareaRef  = useRef(null);
   const lineNumRef   = useRef(null);
@@ -570,16 +576,54 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
 
   const validate = (text) => tryParse(text) !== null;
 
+  // Real-time format detection
   const detectedInputFormat = useMemo(() => {
     if (!jsonText.trim()) return null;
-    const parsed = tryParse(jsonText);
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.openapi) return `OpenAPI ${parsed.openapi}`;
-    if (parsed.swagger) return `Swagger ${parsed.swagger}`;
-    if (parsed.info && parsed.item && Array.isArray(parsed.item)) return "Postman";
-    if (Array.isArray(parsed)) return "Custom Array";
-    if (parsed.endpoints || parsed.routes || parsed.apis) return "Custom";
+    const p = tryParse(jsonText);
+    if (!p || typeof p !== "object") return null;
+    if (p.openapi) return `OpenAPI ${p.openapi}`;
+    if (p.swagger) return `Swagger ${p.swagger}`;
+    if (p.info && p.item && Array.isArray(p.item)) return "Postman";
+    if (Array.isArray(p)) return "Custom Array";
     return "Custom JSON";
+  }, [jsonText]);
+
+  // Live schema stats (shown when valid content is detected)
+  const quickStats = useMemo(() => {
+    if (!jsonText.trim()) return null;
+    const p = tryParse(jsonText);
+    if (!p || typeof p !== "object") return null;
+
+    if (p.openapi || p.swagger) {
+      let ops = 0; const tags = new Set();
+      const pathCount = Object.keys(p.paths || {}).length;
+      Object.values(p.paths || {}).forEach((po) => {
+        HTTP_METHODS.forEach((m) => { if (po[m]) { ops++; (po[m].tags || []).forEach((t) => tags.add(t)); } });
+      });
+      return [
+        { label: "Paths",      value: pathCount },
+        { label: "Operations", value: ops },
+        ...(tags.size ? [{ label: "Tags", value: tags.size }] : []),
+        ...(p.info?.version ? [{ label: "Version", value: p.info.version }] : []),
+      ];
+    }
+    if (p.info && p.item && Array.isArray(p.item)) {
+      let reqs = 0, folders = 0;
+      const walk = (items) => items.forEach((i) => { if (i.item) { folders++; walk(i.item); } else reqs++; });
+      walk(p.item);
+      return [
+        { label: "Requests", value: reqs },
+        { label: "Folders",  value: folders },
+        ...(p.info?.version ? [{ label: "Version", value: p.info.version }] : []),
+      ];
+    }
+    if (Array.isArray(p)) return [{ label: "Endpoints", value: p.length }];
+    const groups = Object.entries(p).filter(([k, v]) => Array.isArray(v) && !["name","title","version","description","baseUrl"].includes(k));
+    if (groups.length) {
+      const total = groups.reduce((a, [, v]) => a + v.length, 0);
+      return [{ label: "Endpoints", value: total }, { label: "Groups", value: groups.length }];
+    }
+    return null;
   }, [jsonText]);
 
   const handleVisualize = () => {
@@ -607,8 +651,10 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
     reader.onload = (e) => {
       const text = e.target.result;
       const parsed = tryParse(text);
-      if (parsed && typeof parsed === "object") { setJsonText(text); setError(""); setActiveTab("editor"); }
-      else { setError("Invalid file"); }
+      if (parsed && typeof parsed === "object") {
+        setJsonText(text); setLoadedFileName(file.name);
+        setError(""); setActiveTab("editor");
+      } else { setError("Invalid file"); }
     };
     reader.readAsText(file);
   };
@@ -618,20 +664,54 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
     handleFileRead(e.dataTransfer.files?.[0]);
   };
 
+  const handleUrlFetch = async () => {
+    if (!urlInput.trim()) { setUrlError("Enter a URL to fetch"); return; }
+    setIsFetching(true); setUrlError("");
+    try {
+      const res = await fetch(urlInput.trim());
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const text = await res.text();
+      const parsed = tryParse(text);
+      if (!parsed || typeof parsed !== "object") throw new Error("Response is not valid JSON or YAML");
+      setJsonText(typeof text === "string" ? text : JSON.stringify(parsed, null, 2));
+      setLoadedFileName(urlInput.split("/").pop() || "remote-spec");
+      setActiveTab("editor"); setUrlError("");
+    } catch (e) {
+      const msg = e.message || "";
+      setUrlError(msg.includes("fetch") || msg.includes("NetworkError") || msg.includes("Failed")
+        ? "CORS blocked — use a public spec or download the file locally"
+        : msg);
+    } finally { setIsFetching(false); }
+  };
+
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) { setJsonText(text); setError(""); setLoadedFileName(""); }
+    } catch { setError("Clipboard access denied — paste manually with Ctrl+V"); }
+  };
+
+  const handleCopyContent = () => {
+    if (!jsonText.trim()) return;
+    navigator.clipboard.writeText(jsonText);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  // Ctrl+Enter → visualize
   useEffect(() => {
-    const handler = (e) => {
+    const h = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && jsonText.trim()) {
         e.preventDefault(); handleVisualize();
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   });
 
   const handleTextareaScroll = () => {
-    if (lineNumRef.current && textareaRef.current) {
+    if (lineNumRef.current && textareaRef.current)
       lineNumRef.current.scrollTop = textareaRef.current.scrollTop;
-    }
   };
 
   const lineCount = jsonText.split("\n").length;
@@ -639,337 +719,503 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   const isValid   = jsonText.trim() && validate(jsonText);
 
   const GLASS = {
-    background: "rgba(12, 12, 20, 0.75)",
+    background: "rgba(10, 10, 18, 0.8)",
     backdropFilter: "blur(24px)",
     WebkitBackdropFilter: "blur(24px)",
     border: "1px solid rgba(255,255,255,0.07)",
-    boxShadow: "0 32px 64px -16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)",
+    boxShadow: "0 32px 64px -16px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05)",
   };
 
-  return (
-    <div className="flex-1 overflow-auto relative" style={{ animation: "fadeIn 0.3s ease-out both" }}>
+  const GLASS_SUBTLE = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.07)",
+  };
 
-      {/* Radial gradient background */}
+  const SAMPLES = [
+    { key: "postman", label: "Postman Collection", desc: "Auth API"   },
+    { key: "openapi", label: "OpenAPI 3.0 Spec",   desc: "Petstore"   },
+    { key: "custom",  label: "Custom JSON",        desc: "E-Commerce" },
+  ];
+
+  const FEATURES = [
+    { icon: <Layers size={15} />,  label: "4 Layouts",    sub: "Tree · Flow · Radial · Mindmap"  },
+    { icon: <Zap size={15} />,      label: "Playground",   sub: "Live HTTP requests"               },
+    { icon: <Search size={15} />,   label: "Smart Search", sub: "Filter by method or name"         },
+    { icon: <Share2 size={15} />,   label: "Canvas",       sub: "Drag, pan & zoom"                 },
+  ];
+
+  return (
+    <div className="flex-1 overflow-auto" style={{ animation: "fadeIn 0.3s ease-out both" }}>
+
+      {/* Fixed radial gradient bg */}
       <div className="fixed inset-0 pointer-events-none" style={{
-        background: "radial-gradient(circle at 18% 25%, rgba(99,102,241,0.11) 0%, transparent 45%), radial-gradient(circle at 82% 75%, rgba(217,70,239,0.07) 0%, transparent 45%)",
+        background: "radial-gradient(ellipse at 15% 20%, rgba(99,102,241,0.12) 0%, transparent 50%), radial-gradient(ellipse at 85% 80%, rgba(217,70,239,0.08) 0%, transparent 50%)",
         zIndex: 0,
       }} />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-8 py-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12">
 
-        {/* ── Left: Hero (4 cols) ── */}
-        <div className="lg:col-span-4 flex flex-col gap-8 pt-2" style={{ animation: "slideInLeft 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
-
-          {/* Status badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full w-fit"
-            style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" style={{ animation: "nodeEntrance 1s ease-in-out infinite alternate" }} />
-            <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">System Active</span>
+        {/* ── Mobile / Tablet compact hero (hidden on lg) ── */}
+        <div className="lg:hidden mb-6">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold text-indigo-400 uppercase tracking-widest"
+              style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              Live
+            </div>
           </div>
-
-          {/* Title */}
-          <div className="space-y-4">
-            <h1 className="text-5xl font-extrabold tracking-tight leading-[1.1] text-white">
-              Build API<br />
-              <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(135deg, #6366f1 0%, #d946ef 100%)" }}>
-                Maps.
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight leading-tight text-white mb-2">
+            Build API{" "}
+            <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(135deg, #6366f1 0%, #d946ef 100%)" }}>
+              Maps.
+            </span>
+          </h1>
+          <p className="text-sm text-slate-400 leading-relaxed max-w-lg">
+            Transform any API specification into a navigable visual graph. Paste, upload, or fetch a spec to get started.
+          </p>
+          {/* Mobile feature chips */}
+          <div className="flex gap-2 mt-4 flex-wrap">
+            {FEATURES.map(({ icon, label }) => (
+              <span key={label} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs text-slate-500 font-medium"
+                style={GLASS_SUBTLE}>
+                <span className="text-indigo-500/70">{icon}</span>{label}
               </span>
-            </h1>
-            <p className="text-sm text-slate-400 leading-relaxed tracking-wide font-light max-w-xs">
-              Transform complex API specifications into navigable visual graphs. Supports Postman, OpenAPI, Swagger and custom JSON.
-            </p>
-          </div>
-
-          {/* Feature grid */}
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { icon: <Layers size={16} />,   label: "Topology",   sub: "4 auto-layouts" },
-              { icon: <Zap size={16} />,       label: "Playground", sub: "Live API calls"  },
-              { icon: <Search size={16} />,    label: "Search",     sub: "Filter endpoints"},
-              { icon: <Share2 size={16} />,    label: "Canvas",     sub: "Drag & zoom"     },
-            ].map(({ icon, label, sub }) => (
-              <div key={label} className="p-3.5 rounded-2xl space-y-2 transition-colors duration-200 hover:border-white/10"
-                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
-                <span className="text-indigo-400">{icon}</span>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{label}</p>
-                <p className="text-xs text-slate-500">{sub}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* CTA button */}
-          <button
-            onClick={handleVisualize}
-            disabled={!jsonText.trim()}
-            className={`w-full group flex items-center justify-center gap-3 py-4 rounded-2xl font-bold text-sm tracking-wide uppercase transition-all duration-200 active:scale-[0.97]
-              ${jsonText.trim()
-                ? "text-white shadow-2xl hover:opacity-90"
-                : "text-slate-600 cursor-not-allowed"
-              }`}
-            style={jsonText.trim() ? {
-              background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-              boxShadow: "0 20px 40px -10px rgba(99,102,241,0.35)",
-            } : {
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <Eye size={16} className={jsonText.trim() ? "" : "opacity-30"} />
-            Initialize Visualization
-            {jsonText.trim() && (
-              <ChevronRight size={15} className="opacity-60 group-hover:translate-x-0.5 transition-transform" />
-            )}
-          </button>
-
-          {/* Supported formats */}
-          <div className="space-y-2.5">
-            <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Accepts</p>
-            {[
-              { name: "Postman Collections", icon: <FileJson size={12} /> },
-              { name: "OpenAPI / Swagger",   icon: <Globe size={12} /> },
-              { name: "Custom API JSON",     icon: <FileCode2 size={12} /> },
-            ].map(({ name, icon }) => (
-              <div key={name} className="flex items-center gap-2.5">
-                <span className="text-slate-600">{icon}</span>
-                <span className="text-xs text-slate-500">{name}</span>
-              </div>
             ))}
           </div>
         </div>
 
-        {/* ── Right: Glass editor panel (8 cols) ── */}
-        <div className="lg:col-span-8" style={{ animation: "slideInRight 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
-          <div className="rounded-3xl overflow-hidden flex flex-col" style={{ ...GLASS, height: 580 }}>
+        {/* ── Main grid ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-start">
 
-            {/* Tab bar */}
-            <div className="flex items-center justify-between px-6 py-3.5 flex-shrink-0"
-              style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)" }}>
-              <div className="flex items-center gap-6">
-                {[
-                  { id: "editor", icon: <Terminal size={14} />, label: "Source Editor" },
-                  { id: "upload", icon: <Upload size={14} />,   label: "File Upload" },
-                ].map(({ id, icon, label }) => (
-                  <button key={id} onClick={() => setActiveTab(id)}
-                    className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest py-1 transition-colors duration-200
-                      ${activeTab === id
-                        ? "text-white border-b-2 border-indigo-500"
-                        : "text-slate-500 hover:text-slate-300"
-                      }`}>
-                    {icon}{label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-3">
-                {/* Sample dropdown */}
-                <div className="relative">
-                  <button onClick={() => setShowSampleMenu((v) => !v)}
-                    className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-300 uppercase tracking-widest transition-colors duration-200">
-                    <Download size={13} />
-                    Sample
-                    <ChevronDown size={11} className={`transition-transform duration-200 ${showSampleMenu ? "rotate-180" : ""}`} />
-                  </button>
-                  {showSampleMenu && (
-                    <div className="absolute right-0 top-full mt-2 w-48 rounded-xl overflow-hidden z-50"
-                      style={{ ...GLASS, animation: "scaleIn 0.12s ease-out both" }}>
-                      {[
-                        { key: "postman", label: "Postman Collection", desc: "Auth API"    },
-                        { key: "openapi", label: "OpenAPI 3.0",        desc: "Petstore"    },
-                        { key: "custom",  label: "Custom JSON",        desc: "E-Commerce"  },
-                      ].map(({ key, label, desc }) => (
-                        <button key={key}
-                          onClick={() => { onLoadSample(key); setShowSampleMenu(false); }}
-                          className="w-full px-4 py-2.5 text-left flex items-center justify-between transition-colors duration-100 hover:bg-white/5">
-                          <span className="text-xs font-medium text-slate-300">{label}</span>
-                          <span className="text-xs text-slate-600">{desc}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="w-px h-4" style={{ background: "rgba(255,255,255,0.08)" }} />
-                <button onClick={handleFormat}
-                  className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-300 uppercase tracking-widest transition-colors duration-200">
-                  <RefreshCw size={12} className={isFormatting ? "animate-spin" : ""} />
-                  Format
-                </button>
-                <div className="w-px h-4" style={{ background: "rgba(255,255,255,0.08)" }} />
-                <span className="text-xs font-mono text-slate-600">
-                  Ln {lineCount}, Col 1
+          {/* ── Left panel (desktop only) ── */}
+          <div className="hidden lg:flex lg:col-span-4 flex-col gap-7 lg:sticky lg:top-6"
+            style={{ animation: "slideInLeft 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
+
+            {/* Badge */}
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full w-fit"
+              style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">System Active</span>
+            </div>
+
+            {/* Title */}
+            <div className="space-y-3">
+              <h1 className="text-5xl font-extrabold tracking-tight leading-[1.1] text-white">
+                Build API<br />
+                <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(135deg, #6366f1 0%, #d946ef 100%)" }}>
+                  Maps.
                 </span>
-              </div>
+              </h1>
+              <p className="text-sm text-slate-400 leading-relaxed font-light">
+                Transform any API specification into a navigable visual graph. Paste, upload, or fetch a remote spec.
+              </p>
             </div>
 
-            {/* Editor body */}
-            <div className="flex-1 flex overflow-hidden">
-
-              {activeTab === "editor" ? (
-                <>
-                  {/* Line numbers */}
-                  <div ref={lineNumRef}
-                    className="flex-shrink-0 w-16 overflow-hidden select-none pt-7 pb-4 flex flex-col items-center gap-0"
-                    style={{ background: "rgba(0,0,0,0.2)", borderRight: "1px solid rgba(255,255,255,0.05)" }}>
-                    {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => (
-                      <div key={i} className="text-right w-full pr-4 text-xs font-mono leading-[1.75]"
-                        style={{ color: "rgba(255,255,255,0.12)" }}>
-                        {String(i + 1).padStart(2, "0")}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Textarea + empty state */}
-                  <div className="flex-1 relative">
-                    {!jsonText.trim() && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-10 pointer-events-none z-10"
-                        style={{ animation: "fadeIn 0.4s ease-out both" }}>
-                        <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5"
-                          style={{ background: "rgba(99,102,241,0.06)" }}>
-                          <Braces size={28} style={{ color: "rgba(99,102,241,0.35)" }} />
-                        </div>
-                        <h3 className="text-base font-bold text-slate-400 mb-2 tracking-wide">Input Specification</h3>
-                        <p className="text-sm text-slate-600 max-w-xs leading-relaxed">
-                          Paste your OpenAPI, Swagger, Postman or custom JSON/YAML here to generate a real-time graph.
-                        </p>
-                        <div className="mt-8 flex gap-3 pointer-events-auto">
-                          <div className="relative">
-                            <button onClick={() => setShowSampleMenu((v) => !v)}
-                              className="px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors duration-200 hover:bg-white/10 flex items-center gap-2"
-                              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                              <Download size={12} /> Load Sample
-                            </button>
-                            {showSampleMenu && (
-                              <div className="absolute left-0 top-full mt-1.5 w-48 rounded-xl overflow-hidden z-50"
-                                style={{ ...GLASS, animation: "scaleIn 0.12s ease-out both" }}>
-                                {[
-                                  { key: "postman", label: "Postman Collection" },
-                                  { key: "openapi", label: "OpenAPI 3.0 Spec"   },
-                                  { key: "custom",  label: "Custom JSON"        },
-                                ].map(({ key, label }) => (
-                                  <button key={key}
-                                    onClick={() => { onLoadSample(key); setShowSampleMenu(false); }}
-                                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-300 hover:bg-white/5 transition-colors duration-100">
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={() => { setJsonText(""); setError(""); }}
-                            className="px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors duration-200 hover:bg-white/10 text-slate-500"
-                            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                            Clear All
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    <textarea
-                      ref={textareaRef}
-                      value={jsonText}
-                      onChange={(e) => { setJsonText(e.target.value); setError(""); }}
-                      onScroll={handleTextareaScroll}
-                      placeholder=""
-                      spellCheck={false}
-                      className="w-full h-full bg-transparent resize-none font-mono text-sm text-slate-300 p-7 focus:outline-none"
-                      style={{ lineHeight: "1.75", caretColor: "#6366f1" }}
-                    />
-                  </div>
-                </>
-              ) : (
-                /* Upload tab */
-                <div className="flex-1 flex flex-col items-center justify-center p-10"
-                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                  onDragLeave={() => setIsDragOver(false)}
-                  onDrop={handleDrop}>
-                  <div
-                    className="w-full max-w-sm flex flex-col items-center justify-center rounded-2xl py-14 cursor-pointer transition-all duration-200"
-                    style={{
-                      border: isDragOver
-                        ? "2px dashed rgba(99,102,241,0.6)"
-                        : "2px dashed rgba(255,255,255,0.08)",
-                      background: isDragOver ? "rgba(99,102,241,0.06)" : "rgba(255,255,255,0.02)",
-                    }}
-                    onClick={() => fileInputRef.current?.click()}>
-                    <div className="p-4 rounded-2xl mb-4" style={{ background: isDragOver ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.04)" }}>
-                      <Upload size={28} style={{ color: isDragOver ? "#6366f1" : "rgba(255,255,255,0.2)" }} />
-                    </div>
-                    <p className="text-sm font-semibold text-slate-400 mb-1">
-                      {isDragOver ? "Release to upload" : "Drop your file here"}
-                    </p>
-                    <p className="text-xs text-slate-600">or click to browse · .json .yaml .yml</p>
-                  </div>
-                  <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
-                    onChange={(e) => handleFileRead(e.target.files?.[0])} />
+            {/* Feature cards */}
+            <div className="grid grid-cols-2 gap-2.5">
+              {FEATURES.map(({ icon, label, sub }) => (
+                <div key={label}
+                  className="p-3.5 rounded-2xl space-y-2 cursor-default group transition-all duration-300 hover:-translate-y-0.5"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span className="text-indigo-400 group-hover:text-indigo-300 transition-colors">{icon}</span>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{label}</p>
+                  <p className="text-xs text-slate-600">{sub}</p>
                 </div>
-              )}
+              ))}
             </div>
 
-            {/* Status bar */}
-            <div className="flex items-center justify-between px-6 py-3 flex-shrink-0"
-              style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.25)" }}>
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Engine Ready</span>
+            {/* CTA */}
+            <button onClick={handleVisualize} disabled={!jsonText.trim()}
+              className={`w-full group flex items-center justify-center gap-2.5 py-3.5 rounded-2xl font-bold text-sm tracking-wide uppercase transition-all duration-200 active:scale-[0.97]
+                ${jsonText.trim() ? "text-white hover:opacity-90" : "text-slate-600 cursor-not-allowed"}`}
+              style={jsonText.trim()
+                ? { background: "linear-gradient(135deg,#6366f1,#4f46e5)", boxShadow: "0 16px 32px -8px rgba(99,102,241,0.4)" }
+                : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <Eye size={15} className={jsonText.trim() ? "" : "opacity-30"} />
+              Initialize Visualization
+              {jsonText.trim() && <ChevronRight size={14} className="opacity-60 group-hover:translate-x-0.5 transition-transform" />}
+            </button>
+
+            {/* Accepts list */}
+            <div className="space-y-2.5">
+              <p className="text-xs font-bold text-slate-700 uppercase tracking-widest">Accepts</p>
+              {[
+                { name: "Postman Collections",  icon: <FileJson size={12} /> },
+                { name: "OpenAPI / Swagger",    icon: <Globe size={12} /> },
+                { name: "Custom API JSON/YAML", icon: <FileCode2 size={12} /> },
+              ].map(({ name, icon }) => (
+                <div key={name} className="flex items-center gap-2.5">
+                  <span className="text-slate-600">{icon}</span>
+                  <span className="text-xs text-slate-500">{name}</span>
                 </div>
-                {detectedInputFormat && (
-                  <div className="flex items-center gap-2">
-                    <Code size={11} className="text-slate-600" />
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest"
-                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
-                      {detectedInputFormat}
-                    </span>
-                  </div>
-                )}
-                {error && (
-                  <div className="flex items-center gap-1.5">
-                    <AlertCircle size={11} className="text-red-400/70" />
-                    <span className="text-xs text-red-400/70 font-medium">{error}</span>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-4">
-                {/* Keyboard shortcut hint */}
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                  <span className="px-1 py-0.5 rounded text-xs font-mono text-slate-500"
-                    style={{ background: "rgba(255,255,255,0.07)" }}>⌘</span>
-                  <span className="px-1 py-0.5 rounded text-xs font-mono text-slate-500"
-                    style={{ background: "rgba(255,255,255,0.07)" }}>ENTER</span>
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">to run</span>
-                </div>
-                {/* Build Map button */}
-                <button
-                  onClick={handleVisualize}
-                  disabled={!jsonText.trim()}
-                  className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all duration-200 active:scale-[0.97]
-                    ${jsonText.trim()
-                      ? "text-white hover:opacity-90"
-                      : "text-slate-600 cursor-not-allowed"
-                    }`}
-                  style={jsonText.trim() ? {
-                    background: "#6366f1",
-                    boxShadow: "0 8px 20px -4px rgba(99,102,241,0.4)",
-                  } : {
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.06)",
-                  }}
-                >
-                  Build Map
-                </button>
-              </div>
+              ))}
             </div>
           </div>
 
-          {/* Bottom meta */}
-          <div className="flex justify-center gap-12 mt-6">
-            {[
-              { icon: <CheckCircle size={13} />, label: "Secure · Local Only" },
-              { icon: <Zap size={13} />,         label: "Instant Rendering"   },
-              { icon: <Layers size={13} />,      label: "Multi-format"        },
-            ].map(({ icon, label }) => (
-              <div key={label} className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-widest">
-                {icon}{label}
+          {/* ── Right: Glass editor (8 cols on lg, full on mobile) ── */}
+          <div className="col-span-1 lg:col-span-8"
+            style={{ animation: "slideInRight 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
+
+            <div className="rounded-2xl sm:rounded-3xl overflow-hidden flex flex-col"
+              style={{ ...GLASS, height: "clamp(420px, 60vh, 600px)" }}>
+
+              {/* ── Tab bar ── */}
+              <div className="flex items-center justify-between px-4 sm:px-6 py-3 flex-shrink-0"
+                style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.025)" }}>
+
+                {/* Tabs */}
+                <div className="flex items-center gap-1 sm:gap-5">
+                  {[
+                    { id: "editor", icon: <Terminal size={13} />, label: "Editor"      },
+                    { id: "upload", icon: <Upload size={13} />,   label: "Upload"      },
+                    { id: "url",    icon: <Globe size={13} />,    label: "Remote URL"  },
+                  ].map(({ id, icon, label }) => (
+                    <button key={id} onClick={() => setActiveTab(id)}
+                      className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-2 sm:px-0 py-2 transition-all duration-200 border-b-2
+                        ${activeTab === id
+                          ? "text-white border-indigo-500"
+                          : "text-slate-600 border-transparent hover:text-slate-300 hover:border-slate-600"
+                        }`}>
+                      {icon}
+                      <span className="hidden sm:inline">{label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 sm:gap-3">
+                  {/* Load sample */}
+                  <div className="relative">
+                    <button onClick={() => { setShowTabSample(v => !v); setShowEditorSample(false); }}
+                      className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-300 uppercase tracking-wider transition-colors">
+                      <Download size={12} />
+                      <span className="hidden sm:inline">Sample</span>
+                      <ChevronDown size={10} className={`transition-transform duration-200 ${showTabSample ? "rotate-180" : ""}`} />
+                    </button>
+                    {showTabSample && (
+                      <div className="absolute right-0 top-full mt-2 w-52 rounded-xl overflow-hidden z-50"
+                        style={{ ...GLASS, animation: "scaleIn 0.12s ease-out both" }}>
+                        {SAMPLES.map(({ key, label, desc }) => (
+                          <button key={key}
+                            onClick={() => { onLoadSample(key); setShowTabSample(false); }}
+                            className="w-full px-4 py-2.5 text-left flex items-center justify-between hover:bg-white/5 transition-colors">
+                            <span className="text-xs font-medium text-slate-300">{label}</span>
+                            <span className="text-xs text-slate-600">{desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="w-px h-3.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+                  {/* Format */}
+                  <button onClick={handleFormat} disabled={!jsonText.trim()}
+                    className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-300 disabled:opacity-30 uppercase tracking-wider transition-colors">
+                    <RefreshCw size={12} className={isFormatting ? "animate-spin" : ""} />
+                    <span className="hidden sm:inline">Format</span>
+                  </button>
+
+                  <div className="w-px h-3.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+                  {/* Copy */}
+                  <button onClick={handleCopyContent} disabled={!jsonText.trim()}
+                    className="flex items-center gap-1 text-xs font-bold disabled:opacity-30 uppercase tracking-wider transition-colors"
+                    style={{ color: isCopied ? "#6366f1" : undefined }}
+                    title="Copy editor content">
+                    {isCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
+                    <span className="hidden sm:inline" style={{ color: isCopied ? "#6366f1" : "rgba(100,116,139,1)" }}>
+                      {isCopied ? "Copied" : "Copy"}
+                    </span>
+                  </button>
+
+                  <div className="w-px h-3.5 hidden sm:block" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+                  {/* Cursor position */}
+                  <span className="hidden sm:inline text-xs font-mono text-slate-700">
+                    {lineCount}L · {charCount}C
+                  </span>
+                </div>
               </div>
-            ))}
+
+              {/* ── Editor body ── */}
+              <div className="flex-1 flex overflow-hidden">
+
+                {/* Source editor tab */}
+                {activeTab === "editor" && (
+                  <>
+                    {/* Line numbers */}
+                    <div ref={lineNumRef}
+                      className="hidden sm:flex flex-shrink-0 w-12 overflow-hidden select-none py-5 flex-col"
+                      style={{ background: "rgba(0,0,0,0.2)", borderRight: "1px solid rgba(255,255,255,0.04)" }}>
+                      {Array.from({ length: Math.max(lineCount, 22) }, (_, i) => (
+                        <div key={i} className="text-right pr-3 text-xs font-mono leading-[1.75]"
+                          style={{ color: "rgba(255,255,255,0.1)" }}>
+                          {i + 1}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Textarea + empty state */}
+                    <div className="flex-1 relative min-w-0">
+                      {/* Empty state */}
+                      {!jsonText.trim() && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 sm:px-12 pointer-events-none z-10"
+                          style={{ animation: "fadeIn 0.35s ease-out both" }}>
+                          <div className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+                            style={{ background: "rgba(99,102,241,0.07)" }}>
+                            <Braces size={24} style={{ color: "rgba(99,102,241,0.4)" }} />
+                          </div>
+                          <h3 className="text-sm font-bold text-slate-400 mb-1.5 tracking-wide">Input Specification</h3>
+                          <p className="text-xs text-slate-600 max-w-xs leading-relaxed">
+                            Paste OpenAPI, Swagger, Postman or custom JSON/YAML — or use a sample below.
+                          </p>
+                          {/* Empty state actions */}
+                          <div className="mt-6 flex flex-wrap items-center justify-center gap-2 pointer-events-auto">
+                            {/* Load sample */}
+                            <div className="relative">
+                              <button onClick={() => { setShowEditorSample(v => !v); setShowTabSample(false); }}
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                                style={GLASS_SUBTLE}>
+                                <Download size={11} /> Sample
+                                <ChevronDown size={10} className={`transition-transform duration-200 ${showEditorSample ? "rotate-180" : ""}`} />
+                              </button>
+                              {showEditorSample && (
+                                <div className="absolute left-0 top-full mt-1.5 w-48 rounded-xl overflow-hidden z-50"
+                                  style={{ ...GLASS, animation: "scaleIn 0.12s ease-out both" }}>
+                                  {SAMPLES.map(({ key, label }) => (
+                                    <button key={key}
+                                      onClick={() => { onLoadSample(key); setShowEditorSample(false); }}
+                                      className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-300 hover:bg-white/5 transition-colors">
+                                      {label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            {/* Paste from clipboard */}
+                            <button onClick={handlePasteClipboard}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                              style={GLASS_SUBTLE}>
+                              <Copy size={11} /> Paste
+                            </button>
+                            {/* Upload */}
+                            <button onClick={() => setActiveTab("upload")}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                              style={GLASS_SUBTLE}>
+                              <Upload size={11} /> Upload File
+                            </button>
+                            {/* Remote URL */}
+                            <button onClick={() => setActiveTab("url")}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                              style={GLASS_SUBTLE}>
+                              <Globe size={11} /> Remote URL
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {/* Loaded file badge */}
+                      {loadedFileName && jsonText.trim() && (
+                        <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400"
+                          style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                          <FileJson size={10} className="text-indigo-400" />
+                          {loadedFileName}
+                          <button onClick={() => setLoadedFileName("")} className="text-slate-600 hover:text-slate-400 transition-colors ml-0.5">
+                            <X size={9} />
+                          </button>
+                        </div>
+                      )}
+                      <textarea
+                        ref={textareaRef}
+                        value={jsonText}
+                        onChange={(e) => { setJsonText(e.target.value); setError(""); setLoadedFileName(""); }}
+                        onScroll={handleTextareaScroll}
+                        placeholder=""
+                        spellCheck={false}
+                        className="w-full h-full bg-transparent resize-none font-mono text-sm text-slate-300 p-5 sm:p-7 focus:outline-none"
+                        style={{ lineHeight: "1.75", caretColor: "#6366f1" }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* File upload tab */}
+                {activeTab === "upload" && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10"
+                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDrop={handleDrop}>
+                    <div
+                      className="w-full max-w-md flex flex-col items-center justify-center rounded-2xl py-12 sm:py-16 cursor-pointer transition-all duration-300"
+                      style={{
+                        border: isDragOver ? "2px dashed rgba(99,102,241,0.7)" : "2px dashed rgba(255,255,255,0.09)",
+                        background: isDragOver ? "rgba(99,102,241,0.07)" : "rgba(255,255,255,0.02)",
+                        transform: isDragOver ? "scale(1.01)" : "scale(1)",
+                      }}
+                      onClick={() => fileInputRef.current?.click()}>
+                      <div className="p-4 rounded-2xl mb-4 transition-colors"
+                        style={{ background: isDragOver ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.04)" }}>
+                        <Upload size={28} style={{ color: isDragOver ? "#6366f1" : "rgba(255,255,255,0.2)" }} />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-300 mb-1">
+                        {isDragOver ? "Release to upload" : "Drop your file here"}
+                      </p>
+                      <p className="text-xs text-slate-600 mb-4">or click to browse</p>
+                      <div className="flex gap-2">
+                        {[".json", ".yaml", ".yml"].map((ext) => (
+                          <span key={ext} className="px-2.5 py-1 rounded-lg text-xs font-mono text-slate-600 font-bold"
+                            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                            {ext}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
+                      onChange={(e) => handleFileRead(e.target.files?.[0])} />
+                  </div>
+                )}
+
+                {/* Remote URL tab */}
+                {activeTab === "url" && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12">
+                    <div className="w-full max-w-lg space-y-5">
+                      <div className="text-center">
+                        <Globe size={28} className="mx-auto mb-3" style={{ color: "rgba(99,102,241,0.5)" }} />
+                        <h3 className="text-sm font-bold text-slate-300 mb-1 tracking-wide uppercase">Fetch Remote Spec</h3>
+                        <p className="text-xs text-slate-600">Fetch an OpenAPI or Swagger spec from a public URL</p>
+                      </div>
+
+                      {/* URL input */}
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={urlInput}
+                          onChange={(e) => { setUrlInput(e.target.value); setUrlError(""); }}
+                          onKeyDown={(e) => e.key === "Enter" && handleUrlFetch()}
+                          placeholder="https://petstore3.swagger.io/api/v3/openapi.json"
+                          className="flex-1 min-w-0 text-sm font-mono text-slate-300 px-4 py-2.5 rounded-xl focus:outline-none transition-all duration-200"
+                          style={{
+                            background: "rgba(255,255,255,0.04)",
+                            border: urlError ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                            caretColor: "#6366f1",
+                          }}
+                        />
+                        <button onClick={handleUrlFetch} disabled={isFetching}
+                          className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white transition-all duration-200 active:scale-[0.97] disabled:opacity-60"
+                          style={{ background: "#6366f1", boxShadow: "0 8px 20px -4px rgba(99,102,241,0.4)" }}>
+                          {isFetching
+                            ? <RefreshCw size={13} className="animate-spin" />
+                            : <Send size={13} />}
+                          {isFetching ? "Fetching…" : "Fetch"}
+                        </button>
+                      </div>
+
+                      {/* Error */}
+                      {urlError && (
+                        <div className="flex items-start gap-2 px-3.5 py-2.5 rounded-xl"
+                          style={{ background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.15)" }}>
+                          <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-red-400">{urlError}</p>
+                        </div>
+                      )}
+
+                      {/* Example links */}
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold text-slate-700 uppercase tracking-widest">Public Examples</p>
+                        {[
+                          { label: "Petstore 3.0",   url: "https://petstore3.swagger.io/api/v3/openapi.json" },
+                          { label: "Petstore 2.0",   url: "https://petstore.swagger.io/v2/swagger.json" },
+                        ].map(({ label, url }) => (
+                          <button key={url}
+                            onClick={() => setUrlInput(url)}
+                            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left hover:bg-white/5 transition-colors group"
+                            style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                            <span className="text-xs font-medium text-slate-400 group-hover:text-slate-200 transition-colors">{label}</span>
+                            <span className="text-xs font-mono text-slate-700 truncate max-w-[220px] group-hover:text-slate-500 transition-colors">{url}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <p className="text-xs text-slate-700 text-center leading-relaxed">
+                        Only CORS-enabled endpoints are supported. Use <span className="text-slate-600 font-mono">File Upload</span> for local files.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Quick stats bar (visible when valid content is detected) ── */}
+              {isValid && quickStats && (
+                <div className="flex-shrink-0 flex items-center gap-4 px-5 py-2 overflow-x-auto"
+                  style={{ borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(99,102,241,0.04)", animation: "slideInUp 0.25s ease-out both" }}>
+                  <span className="text-xs font-bold text-indigo-400/70 uppercase tracking-widest flex-shrink-0">Schema</span>
+                  {quickStats.map(({ label, value }) => (
+                    <div key={label} className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="text-xs font-bold text-white/80">{value}</span>
+                      <span className="text-xs text-slate-600 uppercase tracking-wider">{label}</span>
+                    </div>
+                  ))}
+                  <div className="ml-auto flex-shrink-0">
+                    <CheckCircle size={12} className="text-emerald-500" />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Status bar ── */}
+              <div className="flex-shrink-0 flex items-center justify-between px-4 sm:px-6 py-2.5 gap-3"
+                style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.3)" }}>
+
+                {/* Left: engine + format + error */}
+                <div className="flex items-center gap-3 sm:gap-5 min-w-0 overflow-hidden">
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-widest hidden sm:inline">Ready</span>
+                  </div>
+                  {detectedInputFormat && (
+                    <span className="text-xs font-bold text-indigo-400/80 uppercase tracking-widest flex-shrink-0"
+                      style={{ animation: "fadeIn 0.2s ease-out both" }}>
+                      {detectedInputFormat}
+                    </span>
+                  )}
+                  {error && (
+                    <div className="flex items-center gap-1 min-w-0">
+                      <AlertCircle size={10} className="text-red-400/70 flex-shrink-0" />
+                      <span className="text-xs text-red-400/70 truncate">{error}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: shortcut + build button */}
+                <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                  <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span className="text-xs font-mono text-slate-600 px-1 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.07)" }}>⌘</span>
+                    <span className="text-xs font-mono text-slate-600 px-1 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.07)" }}>↵</span>
+                  </div>
+                  <button onClick={handleVisualize} disabled={!jsonText.trim()}
+                    className={`px-4 sm:px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all duration-200 active:scale-[0.97]
+                      ${jsonText.trim() ? "text-white hover:opacity-90" : "text-slate-700 cursor-not-allowed"}`}
+                    style={jsonText.trim()
+                      ? { background: "#6366f1", boxShadow: "0 6px 16px -4px rgba(99,102,241,0.5)" }
+                      : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    Build Map
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom meta strip */}
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
+              {[
+                { icon: <CheckCircle size={12} />, label: "Local Only · No Data Sent" },
+                { icon: <Zap size={12} />,          label: "Instant Render"             },
+                { icon: <Layers size={12} />,       label: "JSON · YAML · Postman"      },
+              ].map(({ icon, label }) => (
+                <div key={label} className="flex items-center gap-1.5 text-xs font-bold text-slate-700 uppercase tracking-widest">
+                  {icon}{label}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
