@@ -745,7 +745,7 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
   ];
 
   return (
-    <div className="flex-1 overflow-auto" style={{ animation: "fadeIn 0.3s ease-out both" }}>
+    <div className="flex-1 overflow-auto" style={{ animation: "fadeIn 0.3s ease-out both", minHeight: "100dvh" }}>
 
       {/* Fixed radial gradient bg */}
       <div className="fixed inset-0 pointer-events-none" style={{
@@ -753,7 +753,8 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
         zIndex: 0,
       }} />
 
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12">
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8"
+        style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
 
         {/* ── Mobile / Tablet compact hero (hidden on lg) ── */}
         <div className="lg:hidden mb-6">
