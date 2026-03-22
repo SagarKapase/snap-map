@@ -4,6 +4,7 @@ import {
   Upload, Download, ZoomIn, ZoomOut, RotateCcw, Maximize2, Search,
   ChevronDown, X, Code, Menu, ArrowLeft, Eye, Sparkles,
   Save, FolderOpen, Share2, GitCompareArrows, Link2, Check, Copy,
+  Activity, Zap, Globe, ServerCog,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
@@ -17,6 +18,10 @@ import RequestDetailsPanel from "./components/RequestDetailsPanel";
 import ExportMenu from "./components/ExportMenu";
 import { SaveCollectionModal, CollectionsModal } from "./components/CollectionManager";
 import DiffView from "./components/DiffView";
+import AutoImportPanel from "./components/AutoImport";
+import HealthMonitor from "./components/HealthMonitor";
+import FlowBuilder from "./components/FlowBuilder";
+import EnvironmentManager from "./components/EnvironmentManager";
 
 const PostmanGraphViewer = () => {
   const fileInputRef = useRef(null);
@@ -49,6 +54,12 @@ const PostmanGraphViewer = () => {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showCollections, setShowCollections] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  // Phase 2 features
+  const [showAutoImport, setShowAutoImport] = useState(false);
+  const [showHealthMonitor, setShowHealthMonitor] = useState(false);
+  const [showFlowBuilder, setShowFlowBuilder] = useState(false);
+  const [showEnvManager, setShowEnvManager] = useState(false);
+  const [activeEnvId, setActiveEnvId] = useState(null);
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -567,6 +578,33 @@ const PostmanGraphViewer = () => {
               {shareCopied ? <><Check size={14} /> Copied!</> : <><Link2 size={14} /> Share</>}
             </button>
 
+            <div className="w-px h-5 bg-[#46484c]/30 mx-0.5" />
+
+            {/* Health Monitor */}
+            <button onClick={() => setShowHealthMonitor(true)}
+              className="p-2 rounded-lg text-[#a9abb0] hover:text-[#81ecff] hover:bg-[#22262b] transition-all duration-200"
+              title="Health Monitor">
+              <Activity size={15} />
+            </button>
+
+            {/* Flow Builder */}
+            <button onClick={() => setShowFlowBuilder(true)}
+              className="p-2 rounded-lg text-[#a9abb0] hover:text-[#e08efe] hover:bg-[#22262b] transition-all duration-200"
+              title="Test Flow Builder">
+              <Zap size={15} />
+            </button>
+
+            {/* Environment */}
+            <button onClick={() => setShowEnvManager(true)}
+              className={`p-2 rounded-lg transition-all duration-200 ${
+                activeEnvId
+                  ? "bg-[#e08efe]/10 text-[#e08efe] border border-[#e08efe]/20"
+                  : "text-[#a9abb0] hover:text-white hover:bg-[#22262b]"
+              }`}
+              title="Environments">
+              <Globe size={15} />
+            </button>
+
             {/* Menu */}
             <div className="relative">
               <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-white"><Menu size={18} /></button>
@@ -617,6 +655,7 @@ const PostmanGraphViewer = () => {
           onLoadSample={handleLoadSample}
           onOpenCollections={() => setShowCollections(true)}
           onOpenDiff={() => setView("diff")}
+          onOpenAutoImport={() => setShowAutoImport(true)}
         />
       ) : view === "diff" ? (
         <DiffView onBack={() => setView("input")} />
@@ -709,6 +748,34 @@ const PostmanGraphViewer = () => {
         <CollectionsModal
           onClose={() => setShowCollections(false)}
           onLoad={(data) => handleVisualize(data)}
+        />
+      )}
+
+      {/* Phase 2 modals */}
+      {showAutoImport && (
+        <AutoImportPanel
+          onImport={(data) => handleVisualize(data)}
+          onClose={() => setShowAutoImport(false)}
+        />
+      )}
+      {showHealthMonitor && (
+        <HealthMonitor
+          nodes={nodes}
+          onClose={() => setShowHealthMonitor(false)}
+        />
+      )}
+      {showFlowBuilder && (
+        <FlowBuilder
+          nodes={nodes}
+          onClose={() => setShowFlowBuilder(false)}
+          activeEnv={activeEnvId ? undefined : undefined}
+        />
+      )}
+      {showEnvManager && (
+        <EnvironmentManager
+          activeEnvId={activeEnvId}
+          onSelectEnv={setActiveEnvId}
+          onClose={() => setShowEnvManager(false)}
         />
       )}
 
