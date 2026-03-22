@@ -3,6 +3,7 @@ import yaml from "js-yaml";
 import {
   Upload, Download, ChevronDown, X, Copy, Zap, AlertCircle, CheckCircle,
   Send, Globe, RefreshCw, Braces, Eye, Terminal, ChevronRight, Layers, FileJson,
+  FolderOpen, GitCompareArrows,
 } from "lucide-react";
 import { GLASS, GLASS_SUBTLE, FEATURES, ACCEPTED_FORMATS, SAMPLES_META, HTTP_METHODS } from "../utils/constants";
 
@@ -22,7 +23,7 @@ const FloatingIcon = ({ children, className, style }) => (
   <div className={`absolute pointer-events-none select-none opacity-[0.03] ${className}`} style={style}>{children}</div>
 );
 
-const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
+const JsonInputScreen = ({ onVisualize, onLoadSample, onOpenCollections, onOpenDiff }) => {
   const [jsonText, setJsonText] = useState("");
   const [error, setError] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
@@ -336,7 +337,23 @@ const JsonInputScreen = ({ onVisualize, onLoadSample }) => {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
+            {/* Quick action buttons */}
+            <div className="mt-5 flex items-center justify-center gap-3">
+              {onOpenCollections && (
+                <button onClick={onOpenCollections}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-200 hover:bg-[#22262b] border border-[#46484c]/20 text-[#a9abb0] hover:text-white hover:border-[#46484c]/40">
+                  <FolderOpen size={14} className="text-[#e08efe]" /> My Collections
+                </button>
+              )}
+              {onOpenDiff && (
+                <button onClick={onOpenDiff}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-200 hover:bg-[#22262b] border border-[#46484c]/20 text-[#a9abb0] hover:text-white hover:border-[#46484c]/40">
+                  <GitCompareArrows size={14} className="text-[#81ecff]" /> API Diff
+                </button>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
               {[{ icon: CheckCircle, label: "Local Only · No Data Sent" }, { icon: Zap, label: "Instant Render" }, { icon: Layers, label: "JSON · YAML · Postman" }].map(({ icon: Icon, label }) => (
                 <div key={label} className="flex items-center gap-1.5 text-xs font-bold text-[#46484c] uppercase tracking-widest"><Icon size={12} />{label}</div>
               ))}

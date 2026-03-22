@@ -3,15 +3,20 @@ import yaml from "js-yaml";
 import {
   Upload, Download, ZoomIn, ZoomOut, RotateCcw, Maximize2, Search,
   ChevronDown, X, Code, Menu, ArrowLeft, Eye, Sparkles,
+  Save, FolderOpen, Share2, GitCompareArrows, Link2, Check, Copy,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
+import { generateShareUrl, extractSharedSpec } from "./utils/sharing";
 import ConnectionLines from "./components/ConnectionLines";
 import GraphCard from "./components/GraphCard";
 import Minimap from "./components/Minimap";
 import JsonInputScreen from "./components/JsonInputScreen";
 import ApiPlaygroundModal from "./components/ApiPlaygroundModal";
 import RequestDetailsPanel from "./components/RequestDetailsPanel";
+import ExportMenu from "./components/ExportMenu";
+import { SaveCollectionModal, CollectionsModal } from "./components/CollectionManager";
+import DiffView from "./components/DiffView";
 
 const PostmanGraphViewer = () => {
   const fileInputRef = useRef(null);
@@ -40,6 +45,10 @@ const PostmanGraphViewer = () => {
   const [showParticles, setShowParticles] = useState(true);
   const [showRipple, setShowRipple] = useState(false);
   const [focusedMatchIdx, setFocusedMatchIdx] = useState(0);
+  // Phase 1 features
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showCollections, setShowCollections] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -301,6 +310,27 @@ const PostmanGraphViewer = () => {
 
   const handleLoadSample = useCallback((format = "postman") => { handleVisualize(SAMPLE_DATA[format] || SAMPLE_DATA.postman); }, [handleVisualize]);
 
+  // ── Share link handler ─────────────────────
+  const handleShare = useCallback(() => {
+    if (!collection) return;
+    const url = generateShareUrl(collection);
+    if (url) {
+      navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    }
+  }, [collection]);
+
+  // ── Auto-load shared spec from URL on mount ──
+  useEffect(() => {
+    const shared = extractSharedSpec();
+    if (shared) {
+      // Clean URL without reloading
+      window.history.replaceState({}, "", window.location.pathname);
+      handleVisualize(shared);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (nodes.length > 0) {
       const newPos = calculatePositions(nodes);
@@ -514,6 +544,29 @@ const PostmanGraphViewer = () => {
               <Sparkles size={15} />
             </button>
 
+            <div className="w-px h-5 bg-[#46484c]/30 mx-0.5" />
+
+            {/* Export */}
+            <ExportMenu paperRef={paperRef} graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"} />
+
+            {/* Save to collection */}
+            <button onClick={() => setShowSaveModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg hover:border-[#46484c]/60 hover:bg-[#22262b] transition-all duration-200 text-[#a9abb0] hover:text-white text-sm font-semibold"
+              title="Save to collections">
+              <Save size={14} /> Save
+            </button>
+
+            {/* Share link */}
+            <button onClick={handleShare}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all duration-200 text-sm font-semibold ${
+                shareCopied
+                  ? "bg-[#81ecff]/10 border-[#81ecff]/30 text-[#81ecff]"
+                  : "bg-[#22262b]/60 border-[#46484c]/30 hover:border-[#46484c]/60 hover:bg-[#22262b] text-[#a9abb0] hover:text-white"
+              }`}
+              title="Copy shareable link">
+              {shareCopied ? <><Check size={14} /> Copied!</> : <><Link2 size={14} /> Share</>}
+            </button>
+
             {/* Menu */}
             <div className="relative">
               <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-white"><Menu size={18} /></button>
@@ -559,7 +612,14 @@ const PostmanGraphViewer = () => {
 
       {/* Main content */}
       {view === "input" ? (
-        <JsonInputScreen onVisualize={handleVisualize} onLoadSample={handleLoadSample} />
+        <JsonInputScreen
+          onVisualize={handleVisualize}
+          onLoadSample={handleLoadSample}
+          onOpenCollections={() => setShowCollections(true)}
+          onOpenDiff={() => setView("diff")}
+        />
+      ) : view === "diff" ? (
+        <DiffView onBack={() => setView("input")} />
       ) : (
         <div className="flex-1 flex overflow-hidden" style={{ animation: "fadeIn 0.35s ease-out both" }}>
           <div className="flex-1 relative overflow-hidden">
@@ -635,6 +695,22 @@ const PostmanGraphViewer = () => {
       )}
 
       {showPlayground && selectedNode && <ApiPlaygroundModal node={selectedNode} onClose={() => setShowPlayground(false)} />}
+
+      {/* Collection modals */}
+      {showSaveModal && collection && (
+        <SaveCollectionModal
+          data={collection}
+          format={detectedFormat}
+          onClose={() => setShowSaveModal(false)}
+          onSaved={() => {}}
+        />
+      )}
+      {showCollections && (
+        <CollectionsModal
+          onClose={() => setShowCollections(false)}
+          onLoad={(data) => handleVisualize(data)}
+        />
+      )}
 
       <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
         onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { try { const text = ev.target.result; let data; try { data = JSON.parse(text); } catch { data = yaml.load(text); } if (data && typeof data === "object") handleVisualize(data); } catch {} }; reader.readAsText(file); e.target.value = ""; }} />
