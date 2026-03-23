@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Check, X, Play, ChevronDown, Zap, Shield,
@@ -127,6 +127,33 @@ const FAQS = [
   { q: "Can I cancel anytime?", a: "Yes. All paid plans are month-to-month or annual with no lock-in. Cancel anytime from your dashboard." },
 ];
 
+// ─── Animated price counter ──────────────────
+const AnimatedPrice = ({ value }) => {
+  const [display, setDisplay] = useState(value);
+  const prevRef = useRef(value);
+
+  useEffect(() => {
+    const from = prevRef.current;
+    const to = value;
+    prevRef.current = to;
+    if (from === to) return;
+
+    const duration = 500;
+    const start = performance.now();
+
+    const tick = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      // Ease-out cubic
+      const ease = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + (to - from) * ease));
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [value]);
+
+  return <>{display}</>;
+};
+
 const CellValue = ({ val }) => {
   if (val === true) return <Check size={16} className="text-[#34d399] mx-auto" />;
   if (val === false) return <X size={14} className="text-[#46484c] mx-auto" />;
@@ -140,6 +167,28 @@ const PricingPage = () => {
 
   return (
     <div className="min-h-screen bg-[#0c0e12] text-[#f8f9fe]">
+      {/* ── Rising particles background (same as landing) ── */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
+        <div className="absolute" style={{ top: "-10%", left: "-5%", width: "40%", height: "40%", background: "radial-gradient(circle, rgba(224,142,254,0.05) 0%, transparent 70%)", borderRadius: "50%" }} />
+        <div className="absolute" style={{ bottom: "-5%", right: "-5%", width: "35%", height: "35%", background: "radial-gradient(circle, rgba(58,162,255,0.04) 0%, transparent 70%)", borderRadius: "50%" }} />
+        {[...Array(30)].map((_, i) => {
+          const size = 1.5 + (i % 4);
+          const left = (i * 3.37 + 2) % 98;
+          const dur = 12 + (i % 7) * 4;
+          const delay = (i * 1.3) % dur;
+          const colors = ["rgba(224,142,254,", "rgba(58,162,255,", "rgba(129,236,255,", "rgba(251,191,36,"];
+          const c = colors[i % 4];
+          return (
+            <div key={i} style={{
+              position: "absolute", width: size, height: size, borderRadius: "50%",
+              left: `${left}%`, bottom: "-2%",
+              background: `${c}0.5)`, boxShadow: `0 0 ${size * 2}px ${c}0.3)`,
+              animation: `riseParticle ${dur}s linear ${delay}s infinite`,
+            }} />
+          );
+        })}
+      </div>
+    <div className="relative" style={{ zIndex: 1 }}>
       {/* Nav */}
       <nav className="border-b border-[#46484c]/10 bg-[#0c0e12]">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -204,12 +253,12 @@ const PricingPage = () => {
               <div className="mb-6">
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-extrabold text-white">
-                    ${billing === "yearly" ? plan.price.yearly : plan.price.monthly}
+                    $<AnimatedPrice value={billing === "yearly" ? plan.price.yearly : plan.price.monthly} />
                   </span>
                   {plan.price.monthly > 0 && <span className="text-sm text-[#73757a]">/mo</span>}
                 </div>
                 {billing === "yearly" && plan.price.yearly > 0 && (
-                  <p className="text-xs text-[#73757a] mt-1">Billed ${plan.price.yearly * 12}/year</p>
+                  <p className="text-xs text-[#73757a] mt-1">Billed $<AnimatedPrice value={plan.price.yearly * 12} />/year</p>
                 )}
                 {plan.price.monthly === 0 && <p className="text-xs text-[#73757a] mt-1">Free forever</p>}
               </div>
@@ -323,6 +372,7 @@ const PricingPage = () => {
           </div>
         </div>
       </footer>
+    </div>
     </div>
   );
 };
