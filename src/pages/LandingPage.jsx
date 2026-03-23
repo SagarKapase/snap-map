@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Play, ChevronRight, Layers, Zap, Search, Share2, Download,
   Shield, Globe, GitCompareArrows, Activity, BarChart3, Server,
@@ -6,6 +7,57 @@ import {
   Code, Terminal, Eye, Lock, FileJson,
 } from "lucide-react";
 import PhysicsPlayground from "../components/PhysicsPlayground";
+
+// ─── Scroll reveal hook ──────────────────────
+const useInView = (options = {}) => {
+  const ref = useRef(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setInView(true); obs.disconnect(); }
+    }, { threshold: 0.15, ...options });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  return [ref, inView];
+};
+
+// ─── Scroll reveal wrapper ───────────────────
+const Reveal = ({ children, delay = 0, direction = "up", className = "" }) => {
+  const [ref, inView] = useInView();
+  const transforms = { up: "translateY(40px)", down: "translateY(-40px)", left: "translateX(40px)", right: "translateX(-40px)", none: "none" };
+  return (
+    <div ref={ref} className={className}
+      style={{
+        opacity: inView ? 1 : 0,
+        transform: inView ? "none" : transforms[direction],
+        transition: `opacity 0.7s cubic-bezier(0.22,1,0.36,1) ${delay}ms, transform 0.7s cubic-bezier(0.22,1,0.36,1) ${delay}ms`,
+      }}>
+      {children}
+    </div>
+  );
+};
+
+// ─── Animated counter ────────────────────────
+const Counter = ({ target, suffix = "", duration = 1200 }) => {
+  const [ref, inView] = useInView();
+  const [value, setValue] = useState(0);
+  const num = parseInt(target) || 0;
+  useEffect(() => {
+    if (!inView || num === 0) return;
+    let start = 0;
+    const step = Math.ceil(num / (duration / 16));
+    const timer = setInterval(() => {
+      start += step;
+      if (start >= num) { setValue(num); clearInterval(timer); }
+      else setValue(start);
+    }, 16);
+    return () => clearInterval(timer);
+  }, [inView, num, duration]);
+  return <span ref={ref}>{inView ? value : 0}{suffix}</span>;
+};
 
 // ─── Feature card ────────────────────────────
 const FeatureCard = ({ icon: Icon, title, desc, color }) => (
@@ -100,20 +152,27 @@ const LandingPage = () => {
         <div className="absolute pointer-events-none" style={{ top: "50%", right: "-5%", width: "40%", height: "40%", background: "rgba(58,162,255,0.04)", filter: "blur(100px)", borderRadius: "50%" }} />
 
         <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8" style={{ background: "rgba(224,142,254,0.08)", border: "1px solid rgba(224,142,254,0.15)" }}>
-            <span className="w-2 h-2 rounded-full bg-[#e08efe]" />
-            <span className="text-xs font-bold text-[#e08efe] uppercase tracking-widest">Now with 14 Pro Features</span>
-          </div>
+          <Reveal delay={0}>
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8" style={{ background: "rgba(224,142,254,0.08)", border: "1px solid rgba(224,142,254,0.15)" }}>
+              <span className="w-2 h-2 rounded-full bg-[#e08efe]" />
+              <span className="text-xs font-bold text-[#e08efe] uppercase tracking-widest">Now with 14 Pro Features</span>
+            </div>
+          </Reveal>
 
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6">
-            Visualize your APIs.<br />
-            <span className="text-[#e08efe]">Test, Diff & Document them.</span>
-          </h1>
+          <Reveal delay={100}>
+            <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6">
+              Visualize your APIs.<br />
+              <span className="text-[#e08efe]">Test, Diff & Document them.</span>
+            </h1>
+          </Reveal>
 
-          <p className="text-lg sm:text-xl text-[#73757a] max-w-2xl mx-auto mb-10 leading-relaxed">
-            Vizroute transforms API specs into interactive visual graphs. Test endpoints, detect breaking changes, generate docs, and monitor health — all from one tool.
-          </p>
+          <Reveal delay={200}>
+            <p className="text-lg sm:text-xl text-[#73757a] max-w-2xl mx-auto mb-10 leading-relaxed">
+              Vizroute transforms API specs into interactive visual graphs. Test endpoints, detect breaking changes, generate docs, and monitor health — all from one tool.
+            </p>
+          </Reveal>
 
+          <Reveal delay={300}>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
             <button onClick={() => navigate("/app")}
               className="px-8 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-3"
@@ -126,7 +185,9 @@ const LandingPage = () => {
               View Pricing <ArrowRight size={16} />
             </button>
           </div>
+          </Reveal>
 
+          <Reveal delay={400}>
           {/* Demo preview */}
           <div className="relative rounded-2xl border border-[#46484c]/20 overflow-hidden mx-auto max-w-4xl"
             style={{ background: "rgba(17,20,23,0.6)", boxShadow: "0 40px 80px -20px rgba(0,0,0,0.5), 0 0 0 1px rgba(70,72,76,0.1)" }}>
@@ -232,16 +293,26 @@ const LandingPage = () => {
               </div>
             </div>
           </div>
+          </Reveal>
         </div>
       </section>
 
       {/* Stats */}
       <section className="py-16 border-y border-[#46484c]/10">
         <div className="max-w-4xl mx-auto px-6 grid grid-cols-2 sm:grid-cols-4 gap-8">
-          <StatCard value="14" label="Pro Features" />
-          <StatCard value="5" label="Graph Layouts" />
-          <StatCard value="0ms" label="Render Time" />
-          <StatCard value="100%" label="Client-Side" />
+          {[
+            { value: 14, suffix: "", label: "Pro Features" },
+            { value: 5, suffix: "", label: "Graph Layouts" },
+            { value: 0, suffix: "ms", label: "Render Time" },
+            { value: 100, suffix: "%", label: "Client-Side" },
+          ].map((s, i) => (
+            <Reveal key={s.label} delay={i * 100} className="text-center">
+              <p className="text-3xl sm:text-4xl font-extrabold text-[#e08efe]">
+                <Counter target={s.value} suffix={s.suffix} />
+              </p>
+              <p className="text-xs text-[#73757a] uppercase tracking-widest mt-1 font-bold">{s.label}</p>
+            </Reveal>
+          ))}
         </div>
       </section>
 
@@ -251,13 +322,19 @@ const LandingPage = () => {
       {/* Features */}
       <section id="features" className="py-20 sm:py-28">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <span className="text-xs font-bold text-[#e08efe] uppercase tracking-widest">Everything you need</span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3 mb-4">Powerful features for modern API teams</h2>
-            <p className="text-[#73757a] max-w-xl mx-auto">From visualization to testing to documentation — Vizroute covers the entire API lifecycle.</p>
-          </div>
+          <Reveal>
+            <div className="text-center mb-16">
+              <span className="text-xs font-bold text-[#e08efe] uppercase tracking-widest">Everything you need</span>
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3 mb-4">Powerful features for modern API teams</h2>
+              <p className="text-[#73757a] max-w-xl mx-auto">From visualization to testing to documentation — Vizroute covers the entire API lifecycle.</p>
+            </div>
+          </Reveal>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {FEATURES.map((f) => <FeatureCard key={f.title} {...f} />)}
+            {FEATURES.map((f, i) => (
+              <Reveal key={f.title} delay={i * 60}>
+                <FeatureCard {...f} />
+              </Reveal>
+            ))}
           </div>
         </div>
       </section>
@@ -265,24 +342,28 @@ const LandingPage = () => {
       {/* How it works */}
       <section className="py-20 border-y border-[#46484c]/10">
         <div className="max-w-5xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <span className="text-xs font-bold text-[#81ecff] uppercase tracking-widest">Simple workflow</span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3">Three steps to API clarity</h2>
-          </div>
+          <Reveal>
+            <div className="text-center mb-16">
+              <span className="text-xs font-bold text-[#81ecff] uppercase tracking-widest">Simple workflow</span>
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3">Three steps to API clarity</h2>
+            </div>
+          </Reveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               { step: "01", icon: FileJson, title: "Paste or Upload", desc: "Drop in any OpenAPI, Swagger, Postman, or custom JSON/YAML spec.", color: "#e08efe" },
               { step: "02", icon: Eye, title: "Visualize", desc: "Instantly see your API as an interactive graph. Drag nodes, zoom, switch layouts.", color: "#3aa2ff" },
               { step: "03", icon: Zap, title: "Test & Analyze", desc: "Run health checks, build test flows, detect breaking changes, generate docs.", color: "#81ecff" },
-            ].map(({ step, icon: Icon, title, desc, color }) => (
-              <div key={step} className="text-center">
-                <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: `${color}10`, border: `1px solid ${color}20` }}>
-                  <Icon size={28} style={{ color }} />
+            ].map(({ step, icon: Icon, title, desc, color }, i) => (
+              <Reveal key={step} delay={i * 150}>
+                <div className="text-center">
+                  <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: `${color}10`, border: `1px solid ${color}20` }}>
+                    <Icon size={28} style={{ color }} />
+                  </div>
+                  <span className="text-[10px] font-bold text-[#46484c] uppercase tracking-widest">{step}</span>
+                  <h3 className="text-lg font-bold text-white mt-2 mb-2">{title}</h3>
+                  <p className="text-sm text-[#73757a] leading-relaxed">{desc}</p>
                 </div>
-                <span className="text-[10px] font-bold text-[#46484c] uppercase tracking-widest">{step}</span>
-                <h3 className="text-lg font-bold text-white mt-2 mb-2">{title}</h3>
-                <p className="text-sm text-[#73757a] leading-relaxed">{desc}</p>
-              </div>
+              </Reveal>
             ))}
           </div>
         </div>
@@ -291,30 +372,38 @@ const LandingPage = () => {
       {/* Testimonials */}
       <section id="testimonials" className="py-20 sm:py-28">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <span className="text-xs font-bold text-[#fbbf24] uppercase tracking-widest">Trusted by teams</span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3">Loved by API developers</h2>
-          </div>
+          <Reveal>
+            <div className="text-center mb-16">
+              <span className="text-xs font-bold text-[#fbbf24] uppercase tracking-widest">Trusted by teams</span>
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3">Loved by API developers</h2>
+            </div>
+          </Reveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {TESTIMONIALS.map((t) => <TestimonialCard key={t.name} {...t} />)}
+            {TESTIMONIALS.map((t, i) => (
+              <Reveal key={t.name} delay={i * 120}>
+                <TestimonialCard {...t} />
+              </Reveal>
+            ))}
           </div>
         </div>
       </section>
 
       {/* CTA */}
       <section className="py-20 sm:py-28">
-        <div className="max-w-3xl mx-auto px-6 text-center">
-          <div className="p-12 sm:p-16 rounded-3xl border border-[#e08efe]/20 relative overflow-hidden" style={{ background: "linear-gradient(135deg, rgba(224,142,254,0.06), rgba(58,162,255,0.04))" }}>
-            <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(224,142,254,0.08), transparent 70%)" }} />
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-4 relative z-10">Ready to visualize your APIs?</h2>
-            <p className="text-[#a9abb0] mb-8 relative z-10">Start for free. No account required. Your data never leaves your browser.</p>
-            <button onClick={() => navigate("/app")}
-              className="relative z-10 px-10 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] inline-flex items-center gap-3"
-              style={{ boxShadow: "0 16px 40px -8px rgba(224,142,254,0.4)" }}>
-              <Play size={18} className="fill-[#0c0e12]" /> Launch Vizroute
-            </button>
+        <Reveal>
+          <div className="max-w-3xl mx-auto px-6 text-center">
+            <div className="p-12 sm:p-16 rounded-3xl border border-[#e08efe]/20 relative overflow-hidden" style={{ background: "linear-gradient(135deg, rgba(224,142,254,0.06), rgba(58,162,255,0.04))" }}>
+              <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(224,142,254,0.08), transparent 70%)" }} />
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-4 relative z-10">Ready to visualize your APIs?</h2>
+              <p className="text-[#a9abb0] mb-8 relative z-10">Start for free. No account required. Your data never leaves your browser.</p>
+              <button onClick={() => navigate("/app")}
+                className="relative z-10 px-10 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] inline-flex items-center gap-3"
+                style={{ boxShadow: "0 16px 40px -8px rgba(224,142,254,0.4)" }}>
+                <Play size={18} className="fill-[#0c0e12]" /> Launch Vizroute
+              </button>
+            </div>
           </div>
-        </div>
+        </Reveal>
       </section>
 
       {/* Footer */}
