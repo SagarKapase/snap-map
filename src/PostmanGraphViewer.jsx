@@ -4,7 +4,8 @@ import {
   Upload, Download, ZoomIn, ZoomOut, RotateCcw, Maximize2, Search,
   ChevronDown, X, Code, Menu, ArrowLeft, Eye, Sparkles,
   Save, FolderOpen, Share2, GitCompareArrows, Link2, Check, Copy,
-  Activity, Zap, Globe, ServerCog,
+  Activity, Zap, Globe, Server, BarChart3, Users, BookOpen, ShieldAlert,
+  Network,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
@@ -22,6 +23,12 @@ import AutoImportPanel from "./components/AutoImport";
 import HealthMonitor from "./components/HealthMonitor";
 import FlowBuilder from "./components/FlowBuilder";
 import EnvironmentManager from "./components/EnvironmentManager";
+import BreakingChangeDetector from "./components/BreakingChangeDetector";
+import DocGenerator from "./components/DocGenerator";
+import MultiServiceGraph from "./components/MultiServiceGraph";
+import MockServer from "./components/MockServer";
+import LoadTester from "./components/LoadTester";
+import WorkspaceManager from "./components/WorkspaceManager";
 
 const PostmanGraphViewer = () => {
   const fileInputRef = useRef(null);
@@ -60,6 +67,11 @@ const PostmanGraphViewer = () => {
   const [showFlowBuilder, setShowFlowBuilder] = useState(false);
   const [showEnvManager, setShowEnvManager] = useState(false);
   const [activeEnvId, setActiveEnvId] = useState(null);
+  // Phase 3 features
+  const [showDocGenerator, setShowDocGenerator] = useState(false);
+  const [showMockServer, setShowMockServer] = useState(false);
+  const [showLoadTester, setShowLoadTester] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -616,6 +628,11 @@ const PostmanGraphViewer = () => {
                   <button onClick={() => { handleLoadSample("custom"); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Download size={14} className="text-[#e08efe]" /> Custom JSON Sample</button>
                   <div className="border-t border-[#46484c]/30 my-1" />
                   <button onClick={() => { handleReset(); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><RotateCcw size={14} className="text-[#73757a]" /> Reset View</button>
+                  <div className="border-t border-[#46484c]/30 my-1" />
+                  <button onClick={() => { setShowDocGenerator(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BookOpen size={14} className="text-[#3aa2ff]" /> Generate Docs</button>
+                  <button onClick={() => { setShowMockServer(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Server size={14} className="text-[#81ecff]" /> Mock Server</button>
+                  <button onClick={() => { setShowLoadTester(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BarChart3 size={14} className="text-[#fbbf24]" /> Load Tester</button>
+                  <button onClick={() => { setShowWorkspace(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Users size={14} className="text-[#34d399]" /> Workspace</button>
                 </div>
               )}
             </div>
@@ -656,9 +673,15 @@ const PostmanGraphViewer = () => {
           onOpenCollections={() => setShowCollections(true)}
           onOpenDiff={() => setView("diff")}
           onOpenAutoImport={() => setShowAutoImport(true)}
+          onOpenBreaking={() => setView("breaking")}
+          onOpenMultiService={() => setView("multiservice")}
         />
       ) : view === "diff" ? (
         <DiffView onBack={() => setView("input")} />
+      ) : view === "breaking" ? (
+        <BreakingChangeDetector onBack={() => setView("input")} />
+      ) : view === "multiservice" ? (
+        <MultiServiceGraph onBack={() => setView("input")} />
       ) : (
         <div className="flex-1 flex overflow-hidden" style={{ animation: "fadeIn 0.35s ease-out both" }}>
           <div className="flex-1 relative overflow-hidden">
@@ -777,6 +800,20 @@ const PostmanGraphViewer = () => {
           onSelectEnv={setActiveEnvId}
           onClose={() => setShowEnvManager(false)}
         />
+      )}
+
+      {/* Phase 3 modals */}
+      {showDocGenerator && collection && (
+        <DocGenerator collection={collection} detectedFormat={detectedFormat} onBack={() => setShowDocGenerator(false)} />
+      )}
+      {showMockServer && collection && (
+        <MockServer collection={collection} onClose={() => setShowMockServer(false)} />
+      )}
+      {showLoadTester && (
+        <LoadTester nodes={nodes} onClose={() => setShowLoadTester(false)} />
+      )}
+      {showWorkspace && (
+        <WorkspaceManager onClose={() => setShowWorkspace(false)} />
       )}
 
       <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"

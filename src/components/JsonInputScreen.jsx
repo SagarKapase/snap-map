@@ -3,7 +3,7 @@ import yaml from "js-yaml";
 import {
   Upload, Download, ChevronDown, X, Copy, Zap, AlertCircle, CheckCircle,
   Send, Globe, RefreshCw, Braces, Eye, Terminal, ChevronRight, Layers, FileJson,
-  FolderOpen, GitCompareArrows, Wifi,
+  FolderOpen, GitCompareArrows, Wifi, ShieldAlert, Network,
 } from "lucide-react";
 import { GLASS, GLASS_SUBTLE, FEATURES, ACCEPTED_FORMATS, SAMPLES_META, HTTP_METHODS } from "../utils/constants";
 
@@ -23,7 +23,7 @@ const FloatingIcon = ({ children, className, style }) => (
   <div className={`absolute pointer-events-none select-none opacity-[0.03] ${className}`} style={style}>{children}</div>
 );
 
-const JsonInputScreen = ({ onVisualize, onLoadSample, onOpenCollections, onOpenDiff, onOpenAutoImport }) => {
+const JsonInputScreen = ({ onVisualize, onLoadSample, onOpenCollections, onOpenDiff, onOpenAutoImport, onOpenBreaking, onOpenMultiService }) => {
   const [jsonText, setJsonText] = useState("");
   const [error, setError] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
@@ -355,6 +355,18 @@ const JsonInputScreen = ({ onVisualize, onLoadSample, onOpenCollections, onOpenD
                 <button onClick={onOpenAutoImport}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-200 hover:bg-[#22262b] border border-[#46484c]/20 text-[#a9abb0] hover:text-white hover:border-[#46484c]/40">
                   <Wifi size={14} className="text-[#3aa2ff]" /> Auto-Import
+                </button>
+              )}
+              {onOpenBreaking && (
+                <button onClick={onOpenBreaking}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-200 hover:bg-[#22262b] border border-[#46484c]/20 text-[#a9abb0] hover:text-white hover:border-[#46484c]/40">
+                  <ShieldAlert size={14} className="text-[#ff6e84]" /> Breaking Changes
+                </button>
+              )}
+              {onOpenMultiService && (
+                <button onClick={onOpenMultiService}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-200 hover:bg-[#22262b] border border-[#46484c]/20 text-[#a9abb0] hover:text-white hover:border-[#46484c]/40">
+                  <Network size={14} className="text-[#e08efe]" /> Multi-Service
                 </button>
               )}
             </div>
