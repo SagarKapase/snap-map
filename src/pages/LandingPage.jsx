@@ -120,6 +120,37 @@ const LandingPage = () => {
 
   return (
     <div className="min-h-screen bg-[#0c0e12] text-[#f8f9fe] overflow-x-hidden">
+
+      {/* ── Persistent animated background — rising particles ── */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
+        {/* Static ambient glow — not animated */}
+        <div className="absolute" style={{ top: "-10%", left: "-5%", width: "40%", height: "40%", background: "radial-gradient(circle, rgba(224,142,254,0.05) 0%, transparent 70%)", borderRadius: "50%" }} />
+        <div className="absolute" style={{ bottom: "-5%", right: "-5%", width: "35%", height: "35%", background: "radial-gradient(circle, rgba(58,162,255,0.04) 0%, transparent 70%)", borderRadius: "50%" }} />
+
+        {/* Rising particles — like embers floating upward */}
+        {[...Array(30)].map((_, i) => {
+          const size = 1.5 + (i % 4);
+          const left = (i * 3.37 + 2) % 98;
+          const dur = 12 + (i % 7) * 4;
+          const delay = (i * 1.3) % dur;
+          const colors = ["rgba(224,142,254,", "rgba(58,162,255,", "rgba(129,236,255,", "rgba(251,191,36,"];
+          const c = colors[i % 4];
+          return (
+            <div key={i} style={{
+              position: "absolute",
+              width: size,
+              height: size,
+              borderRadius: "50%",
+              left: `${left}%`,
+              bottom: "-2%",
+              background: `${c}0.5)`,
+              boxShadow: `0 0 ${size * 2}px ${c}0.3)`,
+              animation: `riseParticle ${dur}s linear ${delay}s infinite`,
+            }} />
+          );
+        })}
+      </div>
+
       {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[#46484c]/10 bg-[#0c0e12]/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
