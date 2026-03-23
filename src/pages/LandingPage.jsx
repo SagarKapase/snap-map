@@ -1,43 +1,16 @@
-import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Play, ChevronRight, Layers, Zap, Search, Share2, Download,
   Shield, Globe, GitCompareArrows, Activity, BarChart3, Server,
   Users, BookOpen, Network, ArrowRight, CheckCircle, Star,
-  Code, Terminal, Eye, Lock, Sparkles, FileJson, MousePointerClick,
+  Code, Terminal, Eye, Lock, FileJson,
 } from "lucide-react";
-
-// ─── Typewriter ──────────────────────────────
-const TypewriterLoop = ({ words, speed = 80, pause = 2000 }) => {
-  const [text, setText] = useState("");
-  const [wordIdx, setWordIdx] = useState(0);
-  const [charIdx, setCharIdx] = useState(0);
-  const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    const word = words[wordIdx];
-    const timer = setTimeout(() => {
-      if (!deleting) {
-        setText(word.slice(0, charIdx + 1));
-        if (charIdx + 1 === word.length) setTimeout(() => setDeleting(true), pause);
-        else setCharIdx(charIdx + 1);
-      } else {
-        setText(word.slice(0, charIdx));
-        if (charIdx === 0) { setDeleting(false); setWordIdx((wordIdx + 1) % words.length); }
-        else setCharIdx(charIdx - 1);
-      }
-    }, deleting ? 40 : speed);
-    return () => clearTimeout(timer);
-  }, [charIdx, deleting, wordIdx, words, speed, pause]);
-
-  return <>{text}<span className="typewriter-cursor" /></>;
-};
+import PhysicsPlayground from "../components/PhysicsPlayground";
 
 // ─── Feature card ────────────────────────────
-const FeatureCard = ({ icon: Icon, title, desc, color, delay }) => (
+const FeatureCard = ({ icon: Icon, title, desc, color }) => (
   <div
     className="p-6 rounded-2xl border border-[#46484c]/15 bg-[#171a1e]/30 hover:bg-[#171a1e]/60 hover:border-[#46484c]/30 transition-all duration-300 hover:-translate-y-1 group"
-    style={{ animation: `slideInUp 0.5s cubic-bezier(0.22,1,0.36,1) ${delay}ms both` }}
   >
     <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-4" style={{ background: `${color}12`, border: `1px solid ${color}25` }}>
       <Icon size={20} style={{ color }} />
@@ -48,19 +21,16 @@ const FeatureCard = ({ icon: Icon, title, desc, color, delay }) => (
 );
 
 // ─── Stat card ───────────────────────────────
-const StatCard = ({ value, label, delay }) => (
-  <div className="text-center" style={{ animation: `slideInUp 0.5s ease-out ${delay}ms both` }}>
+const StatCard = ({ value, label }) => (
+  <div className="text-center">
     <p className="text-3xl sm:text-4xl font-extrabold text-[#e08efe]">{value}</p>
     <p className="text-xs text-[#73757a] uppercase tracking-widest mt-1 font-bold">{label}</p>
   </div>
 );
 
 // ─── Testimonial ─────────────────────────────
-const TestimonialCard = ({ name, role, quote, delay }) => (
-  <div
-    className="p-6 rounded-2xl border border-[#46484c]/15 bg-[#171a1e]/30"
-    style={{ animation: `slideInUp 0.5s ease-out ${delay}ms both` }}
-  >
+const TestimonialCard = ({ name, role, quote }) => (
+  <div className="p-6 rounded-2xl border border-[#46484c]/15 bg-[#171a1e]/30">
     <div className="flex items-center gap-1 mb-3">
       {[...Array(5)].map((_, i) => <Star key={i} size={14} className="text-[#fbbf24] fill-[#fbbf24]" />)}
     </div>
@@ -115,7 +85,7 @@ const LandingPage = () => {
               Pricing
             </button>
             <button onClick={() => navigate("/app")}
-              className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-2 btn-shimmer"
+              className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-2"
               style={{ boxShadow: "0 8px 24px -6px rgba(224,142,254,0.35)" }}>
               <Play size={14} className="fill-[#0c0e12]" /> Open App
             </button>
@@ -125,30 +95,28 @@ const LandingPage = () => {
 
       {/* Hero */}
       <section className="relative pt-32 pb-20 sm:pt-40 sm:pb-28 overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none mesh-gradient-bg" />
+        {/* Static subtle background blurs */}
         <div className="absolute pointer-events-none" style={{ top: "-15%", left: "-10%", width: "50%", height: "50%", background: "rgba(224,142,254,0.05)", filter: "blur(120px)", borderRadius: "50%" }} />
         <div className="absolute pointer-events-none" style={{ top: "50%", right: "-5%", width: "40%", height: "40%", background: "rgba(58,162,255,0.04)", filter: "blur(100px)", borderRadius: "50%" }} />
 
         <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8" style={{ background: "rgba(224,142,254,0.08)", border: "1px solid rgba(224,142,254,0.15)", animation: "slideInUp 0.5s ease-out both" }}>
-            <span className="w-2 h-2 rounded-full bg-[#e08efe] animate-pulse" />
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8" style={{ background: "rgba(224,142,254,0.08)", border: "1px solid rgba(224,142,254,0.15)" }}>
+            <span className="w-2 h-2 rounded-full bg-[#e08efe]" />
             <span className="text-xs font-bold text-[#e08efe] uppercase tracking-widest">Now with 14 Pro Features</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6" style={{ animation: "slideInUp 0.6s ease-out 100ms both" }}>
+          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6">
             Visualize your APIs.<br />
-            <span className="text-[#e08efe]">
-              <TypewriterLoop words={["Test them.", "Diff them.", "Document them.", "Monitor them."]} speed={70} pause={1800} />
-            </span>
+            <span className="text-[#e08efe]">Test, Diff & Document them.</span>
           </h1>
 
-          <p className="text-lg sm:text-xl text-[#73757a] max-w-2xl mx-auto mb-10 leading-relaxed" style={{ animation: "slideInUp 0.6s ease-out 200ms both" }}>
+          <p className="text-lg sm:text-xl text-[#73757a] max-w-2xl mx-auto mb-10 leading-relaxed">
             Vizroute transforms API specs into interactive visual graphs. Test endpoints, detect breaking changes, generate docs, and monitor health — all from one tool.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16" style={{ animation: "slideInUp 0.6s ease-out 300ms both" }}>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
             <button onClick={() => navigate("/app")}
-              className="px-8 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-3 btn-shimmer"
+              className="px-8 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-3"
               style={{ boxShadow: "0 16px 40px -8px rgba(224,142,254,0.4)" }}>
               <Play size={18} className="fill-[#0c0e12]" /> Start Building — Free
               <ChevronRight size={16} className="opacity-60" />
@@ -161,7 +129,7 @@ const LandingPage = () => {
 
           {/* Demo preview */}
           <div className="relative rounded-2xl border border-[#46484c]/20 overflow-hidden mx-auto max-w-4xl"
-            style={{ background: "rgba(17,20,23,0.6)", boxShadow: "0 40px 80px -20px rgba(0,0,0,0.5), 0 0 0 1px rgba(70,72,76,0.1)", animation: "slideInUp 0.7s ease-out 400ms both" }}>
+            style={{ background: "rgba(17,20,23,0.6)", boxShadow: "0 40px 80px -20px rgba(0,0,0,0.5), 0 0 0 1px rgba(70,72,76,0.1)" }}>
             {/* Fake browser chrome */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[#46484c]/15" style={{ background: "rgba(12,14,18,0.8)" }}>
               <div className="flex gap-1.5">
@@ -173,35 +141,95 @@ const LandingPage = () => {
                 <div className="bg-[#22262b]/60 rounded-lg px-4 py-1.5 text-xs text-[#73757a] font-mono text-center">map.snap-test.in</div>
               </div>
             </div>
-            {/* Fake graph preview */}
-            <div className="p-8 sm:p-12 dot-grid-bg relative" style={{ minHeight: 300 }}>
-              {/* Fake nodes */}
-              <div className="absolute left-1/2 top-8 -translate-x-1/2 px-6 py-3 rounded-2xl border-2 border-[#e08efe]/30 bg-[#171a1e] shadow-lg shadow-[#e08efe]/10">
-                <div className="flex items-center gap-2">
-                  <Lock size={14} className="text-[#e08efe]" />
-                  <span className="text-sm font-bold text-white">Auth API v2.4</span>
-                  <span className="text-[10px] text-[#73757a] font-mono">12 nodes</span>
-                </div>
-              </div>
-              {[
-                { x: "20%", y: "55%", method: "POST", name: "Login", color: "#fbbf24" },
-                { x: "50%", y: "65%", method: "GET", name: "Profile", color: "#34d399" },
-                { x: "80%", y: "55%", method: "DELETE", name: "Account", color: "#f87171" },
-              ].map((n, i) => (
-                <div key={i} className="absolute rounded-xl border border-[#46484c]/30 bg-[#171a1e]/80 px-4 py-2.5"
-                  style={{ left: n.x, top: n.y, transform: "translate(-50%, -50%)", animation: `nodeEntrance 0.4s ease-out ${600 + i * 100}ms both` }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase" style={{ background: `${n.color}20`, color: n.color }}>{n.method}</span>
-                    <span className="text-xs font-medium text-white">{n.name}</span>
+            {/* Animated graph preview — mirrors the real app */}
+            <div className="relative" style={{ height: 340, backgroundColor: "#111417", backgroundImage: "radial-gradient(circle, rgba(70,72,76,0.4) 1px, transparent 1px)", backgroundSize: "40px 40px" }}>
+
+              {/* Centered wrapper — all nodes positioned relative to center */}
+              <div className="absolute inset-0 flex items-start justify-center">
+                <div className="relative" style={{ width: 760, height: 320, marginTop: 10 }}>
+
+                  {/* ── SVG Connection lines with draw + particle animation ── */}
+                  <svg className="absolute inset-0 pointer-events-none" width="760" height="320" viewBox="0 0 760 320" style={{ overflow: "visible" }}>
+                    {[
+                      /* Root (380,40) → Folders */
+                      { path: "M 380 50 C 380 100, 130 100, 130 140", stroke: "rgba(224,142,254,0.45)", w: 2.2, p: "#e08efe", d: 0 },
+                      { path: "M 380 50 C 380 100, 380 100, 380 140", stroke: "rgba(224,142,254,0.45)", w: 2.2, p: "#e08efe", d: 100 },
+                      { path: "M 380 50 C 380 100, 630 100, 630 140", stroke: "rgba(224,142,254,0.45)", w: 2.2, p: "#e08efe", d: 200 },
+                      /* User Mgmt (130,170) → requests */
+                      { path: "M 130 180 C 130 220, 60 220,  60 250",  stroke: "rgba(251,191,36,0.4)",  w: 1.5, p: "#fbbf24", d: 400 },
+                      { path: "M 130 180 C 130 220, 200 220, 200 250", stroke: "rgba(52,211,153,0.4)",  w: 1.5, p: "#34d399", d: 500 },
+                      /* Payments (380,170) → requests */
+                      { path: "M 380 180 C 380 220, 320 220, 320 250", stroke: "rgba(96,165,250,0.4)",  w: 1.5, p: "#60a5fa", d: 600 },
+                      { path: "M 380 180 C 380 220, 440 220, 440 250", stroke: "rgba(248,113,113,0.4)", w: 1.5, p: "#f87171", d: 700 },
+                      /* Products (630,170) → requests */
+                      { path: "M 630 180 C 630 220, 560 220, 560 250", stroke: "rgba(167,139,250,0.4)", w: 1.5, p: "#a78bfa", d: 800 },
+                      { path: "M 630 180 C 630 220, 700 220, 700 250", stroke: "rgba(251,146,60,0.4)",  w: 1.5, p: "#fb923c", d: 900 },
+                    ].map(({ path, stroke, w, p, d }, i) => (
+                      <g key={i}>
+                        <path d={path} stroke={stroke} strokeWidth={w} fill="none" strokeLinecap="round" strokeDasharray="2000"
+                          style={{ animation: `drawPath 0.8s cubic-bezier(0.4,0,0.2,1) ${d}ms both, pathPulse 4s ease-in-out ${d + 800}ms infinite`, filter: `drop-shadow(0 0 4px ${stroke})` }} />
+                        <circle r="2.5" fill={p} opacity="0" style={{ filter: `drop-shadow(0 0 3px ${p})` }}>
+                          <animateMotion dur="2.8s" repeatCount="indefinite" begin={`${d + 900}ms`} path={path} rotate="auto" />
+                          <animate attributeName="opacity" values="0;0.8;1;0.8;0" dur="2.8s" repeatCount="indefinite" begin={`${d + 900}ms`} />
+                          <animate attributeName="r" values="2;3.5;2" dur="2.8s" repeatCount="indefinite" begin={`${d + 900}ms`} />
+                        </circle>
+                      </g>
+                    ))}
+                  </svg>
+
+                  {/* ── Root node — centered at top ── */}
+                  <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 8 }}>
+                    <div className="px-6 py-3 rounded-2xl border-2 border-[#e08efe]/30 bg-[#171a1e]"
+                      style={{ animation: "nodeEntrance 0.5s ease-out both", boxShadow: "0 0 20px rgba(224,142,254,0.12)" }}>
+                      <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[#e08efe]/40 to-transparent" />
+                      <div className="flex items-center gap-2">
+                        <Lock size={14} className="text-[#e08efe]" />
+                        <span className="text-sm font-bold text-white">Auth API v2.4</span>
+                        <span className="text-[10px] text-[#73757a] font-mono">12 nodes</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Folder nodes — evenly spaced across center ── */}
+                  {[
+                    { cx: 130, label: "User Mgmt", count: 4, delay: 200 },
+                    { cx: 380, label: "Payments",   count: 3, delay: 300 },
+                    { cx: 630, label: "Products",   count: 4, delay: 400 },
+                  ].map((f, i) => (
+                    <div key={i} className="absolute -translate-x-1/2" style={{ left: f.cx, top: 140, animation: `nodeEntrance 0.45s ease-out ${f.delay}ms both` }}>
+                      <div className="px-4 py-2 rounded-xl border border-[#46484c]/40 bg-[#171a1e]/90">
+                        <div className="flex items-center gap-2">
+                          <Layers size={11} className="text-[#3aa2ff]" />
+                          <span className="text-[11px] font-semibold text-white">{f.label}</span>
+                          <span className="text-[9px] bg-[#22262b] text-[#a9abb0] px-1.5 py-0.5 rounded-full font-bold">{f.count}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* ── Request nodes — centered under their parent folders ── */}
+                  {[
+                    { cx: 60,  method: "POST",   name: "Login",   color: "#fbbf24", delay: 600 },
+                    { cx: 200, method: "GET",     name: "Profile", color: "#34d399", delay: 700 },
+                    { cx: 320, method: "PUT",     name: "Pay",     color: "#60a5fa", delay: 800 },
+                    { cx: 440, method: "DELETE",  name: "Refund",  color: "#f87171", delay: 900 },
+                    { cx: 560, method: "PATCH",   name: "Update",  color: "#a78bfa", delay: 1000 },
+                    { cx: 700, method: "GET",     name: "List",    color: "#fb923c", delay: 1100 },
+                  ].map((n, i) => (
+                    <div key={i} className="absolute -translate-x-1/2" style={{ left: n.cx, top: 250, animation: `nodeEntrance 0.4s ease-out ${n.delay}ms both` }}>
+                      <div className="px-3 py-2 rounded-xl border border-[#46484c]/30 bg-[#171a1e]/80"
+                        style={{ borderTop: `2px solid ${n.color}` }}>
+                        <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+                        style={{ background: `${n.color}20`, color: n.color }}>{n.method}</span>
+                      <span className="text-[11px] font-medium text-white">{n.name}</span>
+                    </div>
                   </div>
                 </div>
               ))}
-              {/* Fake connection lines */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-30">
-                <path d="M 50% 70 Q 30% 120 20% 150" stroke="#e08efe" strokeWidth="1.5" fill="none" strokeDasharray="4" />
-                <path d="M 50% 70 Q 50% 130 50% 170" stroke="#e08efe" strokeWidth="1.5" fill="none" strokeDasharray="4" />
-                <path d="M 50% 70 Q 70% 120 80% 150" stroke="#e08efe" strokeWidth="1.5" fill="none" strokeDasharray="4" />
-              </svg>
+
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -210,12 +238,15 @@ const LandingPage = () => {
       {/* Stats */}
       <section className="py-16 border-y border-[#46484c]/10">
         <div className="max-w-4xl mx-auto px-6 grid grid-cols-2 sm:grid-cols-4 gap-8">
-          <StatCard value="14" label="Pro Features" delay={0} />
-          <StatCard value="5" label="Graph Layouts" delay={100} />
-          <StatCard value="0ms" label="Render Time" delay={200} />
-          <StatCard value="100%" label="Client-Side" delay={300} />
+          <StatCard value="14" label="Pro Features" />
+          <StatCard value="5" label="Graph Layouts" />
+          <StatCard value="0ms" label="Render Time" />
+          <StatCard value="100%" label="Client-Side" />
         </div>
       </section>
+
+      {/* Physics playground */}
+      <PhysicsPlayground />
 
       {/* Features */}
       <section id="features" className="py-20 sm:py-28">
@@ -226,7 +257,7 @@ const LandingPage = () => {
             <p className="text-[#73757a] max-w-xl mx-auto">From visualization to testing to documentation — Vizroute covers the entire API lifecycle.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {FEATURES.map((f, i) => <FeatureCard key={f.title} {...f} delay={100 + i * 60} />)}
+            {FEATURES.map((f) => <FeatureCard key={f.title} {...f} />)}
           </div>
         </div>
       </section>
@@ -243,8 +274,8 @@ const LandingPage = () => {
               { step: "01", icon: FileJson, title: "Paste or Upload", desc: "Drop in any OpenAPI, Swagger, Postman, or custom JSON/YAML spec.", color: "#e08efe" },
               { step: "02", icon: Eye, title: "Visualize", desc: "Instantly see your API as an interactive graph. Drag nodes, zoom, switch layouts.", color: "#3aa2ff" },
               { step: "03", icon: Zap, title: "Test & Analyze", desc: "Run health checks, build test flows, detect breaking changes, generate docs.", color: "#81ecff" },
-            ].map(({ step, icon: Icon, title, desc, color }, i) => (
-              <div key={step} className="text-center" style={{ animation: `slideInUp 0.5s ease-out ${200 + i * 100}ms both` }}>
+            ].map(({ step, icon: Icon, title, desc, color }) => (
+              <div key={step} className="text-center">
                 <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: `${color}10`, border: `1px solid ${color}20` }}>
                   <Icon size={28} style={{ color }} />
                 </div>
@@ -265,7 +296,7 @@ const LandingPage = () => {
             <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-3">Loved by API developers</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {TESTIMONIALS.map((t, i) => <TestimonialCard key={t.name} {...t} delay={100 + i * 100} />)}
+            {TESTIMONIALS.map((t) => <TestimonialCard key={t.name} {...t} />)}
           </div>
         </div>
       </section>
@@ -278,7 +309,7 @@ const LandingPage = () => {
             <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-4 relative z-10">Ready to visualize your APIs?</h2>
             <p className="text-[#a9abb0] mb-8 relative z-10">Start for free. No account required. Your data never leaves your browser.</p>
             <button onClick={() => navigate("/app")}
-              className="relative z-10 px-10 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] inline-flex items-center gap-3 btn-shimmer"
+              className="relative z-10 px-10 py-4 rounded-2xl text-base font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] inline-flex items-center gap-3"
               style={{ boxShadow: "0 16px 40px -8px rgba(224,142,254,0.4)" }}>
               <Play size={18} className="fill-[#0c0e12]" /> Launch Vizroute
             </button>
