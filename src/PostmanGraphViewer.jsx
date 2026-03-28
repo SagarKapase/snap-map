@@ -622,17 +622,12 @@ const PostmanGraphViewer = () => {
               <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-white"><Menu size={18} /></button>
               {showMenu && (
                 <div className="absolute right-0 mt-2 w-52 bg-[#22262b]/95 border border-[#46484c]/40 rounded-xl shadow-2xl z-50 backdrop-blur-xl overflow-hidden" style={{ animation: "scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-                  <button onClick={() => { fileInputRef.current?.click(); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Upload size={14} className="text-[#81ecff]" /> Import JSON / YAML</button>
-                  <button onClick={() => { handleLoadSample("postman"); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Download size={14} className="text-amber-400" /> Postman Sample</button>
-                  <button onClick={() => { handleLoadSample("openapi"); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Download size={14} className="text-[#3aa2ff]" /> OpenAPI Sample</button>
-                  <button onClick={() => { handleLoadSample("custom"); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Download size={14} className="text-[#e08efe]" /> Custom JSON Sample</button>
-                  <div className="border-t border-[#46484c]/30 my-1" />
-                  <button onClick={() => { handleReset(); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><RotateCcw size={14} className="text-[#73757a]" /> Reset View</button>
-                  <div className="border-t border-[#46484c]/30 my-1" />
                   <button onClick={() => { setShowDocGenerator(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BookOpen size={14} className="text-[#3aa2ff]" /> Generate Docs</button>
                   <button onClick={() => { setShowMockServer(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Server size={14} className="text-[#81ecff]" /> Mock Server</button>
                   <button onClick={() => { setShowLoadTester(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BarChart3 size={14} className="text-[#fbbf24]" /> Load Tester</button>
                   <button onClick={() => { setShowWorkspace(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Users size={14} className="text-[#34d399]" /> Workspace</button>
+                  <div className="border-t border-[#46484c]/30 my-1" />
+                  <button onClick={() => { handleReset(); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><RotateCcw size={14} className="text-[#73757a]" /> Reset View</button>
                 </div>
               )}
             </div>
@@ -756,7 +751,12 @@ const PostmanGraphViewer = () => {
         </div>
       )}
 
-      {showPlayground && selectedNode && <ApiPlaygroundModal node={selectedNode} onClose={() => setShowPlayground(false)} />}
+      {showPlayground && selectedNode && <ApiPlaygroundModal node={selectedNode} onClose={() => setShowPlayground(false)}
+        onUpdate={(nodeId, updates) => {
+          setNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, ...updates } : n));
+          setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
+        }}
+      />}
 
       {/* Collection modals */}
       {showSaveModal && collection && (

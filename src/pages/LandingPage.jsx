@@ -7,6 +7,7 @@ import {
   Code, Terminal, Eye, Lock, FileJson,
 } from "lucide-react";
 import PhysicsPlayground from "../components/PhysicsPlayground";
+import { LoginModal, SignupModal } from "../components/AuthModals";
 
 // ─── Scroll reveal hook ──────────────────────
 const useInView = (options = {}) => {
@@ -117,6 +118,7 @@ const TESTIMONIALS = [
 
 const LandingPage = () => {
   const navigate = useNavigate();
+  const [authModal, setAuthModal] = useState(null); // null | "login" | "signup"
 
   return (
     <div className="min-h-screen bg-[#0c0e12] text-[#f8f9fe] overflow-x-hidden">
@@ -164,13 +166,13 @@ const LandingPage = () => {
             <button onClick={() => navigate("/pricing")} className="text-sm text-[#a9abb0] hover:text-white transition-colors font-medium">Pricing</button>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate("/pricing")} className="hidden sm:block text-sm font-semibold text-[#a9abb0] hover:text-white transition-colors px-4 py-2">
-              Pricing
+            <button onClick={() => setAuthModal("login")} className="hidden sm:block text-sm font-semibold text-[#a9abb0] hover:text-white transition-colors px-4 py-2">
+              Log In
             </button>
-            <button onClick={() => navigate("/app")}
+            <button onClick={() => setAuthModal("signup")}
               className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-2"
               style={{ boxShadow: "0 8px 24px -6px rgba(224,142,254,0.35)" }}>
-              <Play size={14} className="fill-[#0c0e12]" /> Open App
+              Sign Up Free
             </button>
           </div>
         </div>
@@ -451,6 +453,14 @@ const LandingPage = () => {
           </div>
         </div>
       </footer>
+
+      {/* Auth modals */}
+      {authModal === "login" && (
+        <LoginModal onClose={() => setAuthModal(null)} onSwitchToSignup={() => setAuthModal("signup")} />
+      )}
+      {authModal === "signup" && (
+        <SignupModal onClose={() => setAuthModal(null)} onSwitchToLogin={() => setAuthModal("login")} />
+      )}
     </div>
   );
 };
