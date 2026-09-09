@@ -18,8 +18,9 @@ import {
   resolveSchema,
 } from "../../utils/analysis";
 import { methodColor } from "../../utils/constants";
+import { buildSnippets } from "../../utils/snippets";
 
-const TABS = ["Endpoint", "Schema", "Examples", "Related"];
+const TABS = ["Endpoint", "Schema", "Code", "Examples", "Related"];
 
 const statusTone = (status) => {
   const code = parseInt(status, 10);
@@ -201,6 +202,7 @@ const EndpointInspector = ({
   // Remounted by the parent whenever the selection changes, so the tab
   // always starts on Endpoint for a newly picked node.
   const [tab, setTab] = useState("Endpoint");
+  const [language, setLanguage] = useState("curl");
 
   const specResponse = useMemo(() => {
     const list = node?.responses || [];
@@ -211,6 +213,8 @@ const EndpointInspector = ({
     () => (node ? relatedEndpoints(nodes, node) : []),
     [nodes, node],
   );
+
+  const snippets = useMemo(() => buildSnippets(node), [node]);
 
   const requestSchema = useMemo(
     () => (node?.requestBodySchema ? resolveSchema(spec, node.requestBodySchema) : null),
@@ -267,13 +271,13 @@ const EndpointInspector = ({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Tabs */}
-      <div className="flex flex-shrink-0 items-stretch gap-1 border-b border-vz-line-soft px-2">
+      <div className="vz-scroll flex flex-shrink-0 items-stretch gap-0.5 overflow-x-auto border-b border-vz-line-soft px-1.5">
         {TABS.map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`vz-t relative px-2.5 py-[18px] text-[12px] ${
+            className={`vz-t relative whitespace-nowrap px-2 py-[18px] text-[11.5px] ${
               tab === t
                 ? "text-[#e6c4ff] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-vz-accent-2"
                 : "text-vz-soft hover:text-vz-text"
@@ -469,6 +473,40 @@ const EndpointInspector = ({
               )}
             </Card>
           </>
+        )}
+
+        {tab === "Code" && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1">
+              {snippets.map((snippet) => (
+                <button
+                  key={snippet.id}
+                  type="button"
+                  onClick={() => setLanguage(snippet.id)}
+                  className={`vz-t rounded-md px-2 py-1 text-[11.5px] ${
+                    language === snippet.id
+                      ? "bg-vz-accent/18 text-vz-text"
+                      : "text-vz-soft hover:bg-white/5 hover:text-vz-text"
+                  }`}
+                >
+                  {snippet.label}
+                </button>
+              ))}
+            </div>
+
+            {snippets
+              .filter((snippet) => snippet.id === language)
+              .map((snippet) => (
+                <div key={snippet.id}>
+                  <div className="mb-1.5 flex items-center justify-end">
+                    <CopyButton value={snippet.code} label={`Copy ${snippet.label}`} />
+                  </div>
+                  <pre className="vz-mono vz-scroll max-h-[420px] overflow-auto whitespace-pre-wrap break-all rounded-[10px] border border-vz-line bg-vz-bg p-3 text-[11px] leading-[1.65] text-vz-soft">
+                    {snippet.code}
+                  </pre>
+                </div>
+              ))}
+          </div>
         )}
 
         {tab === "Examples" && (

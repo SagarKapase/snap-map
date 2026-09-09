@@ -28,7 +28,14 @@ export const extractUrlParams = (url) => {
   pathMatches.forEach((raw) => {
     const name = raw.startsWith("{") ? raw.slice(1, -1) : raw.slice(1);
     if (name)
-      params.push({ name, in: "path", required: true, type: "", description: "" });
+      params.push({
+        name,
+        in: "path",
+        required: true,
+        type: "",
+        description: "",
+        inferred: true,
+      });
   });
 
   if (queryPart) {
@@ -43,6 +50,7 @@ export const extractUrlParams = (url) => {
           type: "",
           description: "",
           example: value,
+          inferred: true,
         });
     });
   }

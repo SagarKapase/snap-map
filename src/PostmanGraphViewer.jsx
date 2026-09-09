@@ -2,17 +2,18 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import yaml from "js-yaml";
 import {
-  ZoomIn, ZoomOut, RotateCcw, Search, MoreHorizontal, Play, Share2,
+  ZoomIn, ZoomOut, RotateCcw, Search, Play, Share2,
   Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
   Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
-  Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github,
+  Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
 import { generateShareUrl, extractSharedSpec } from "./utils/sharing";
 import {
-  LAYOUT_LABELS, ancestorsOf, buildGroupTree, collectWarnings, countSchemas,
+  LAYOUT_LABELS, ancestorsOf, buildGroupTree, countSchemas,
 } from "./utils/analysis";
+import { auditSpec } from "./utils/audit";
 import { addRecent, clearRecents, getRecents } from "./utils/recents";
 import BrandMark from "./components/BrandMark";
 import ConnectionLines from "./components/ConnectionLines";
@@ -41,11 +42,13 @@ import StatusBar from "./components/workspace/StatusBar";
 import CommandPalette from "./components/workspace/CommandPalette";
 import TableView from "./components/workspace/TableView";
 import RawSpecView from "./components/workspace/RawSpecView";
+import AuditView from "./components/workspace/AuditView";
 
 const CENTER_TABS = [
   { id: "map", label: "API Map", icon: Waypoints },
   { id: "table", label: "Table View", icon: Table2 },
   { id: "raw", label: "Raw Spec", icon: Braces },
+  { id: "audit", label: "Audit", icon: ShieldCheck },
 ];
 
 const PostmanGraphViewer = () => {
@@ -55,7 +58,6 @@ const PostmanGraphViewer = () => {
   const paperRef = useRef(null);
   const canvasShellRef = useRef(null);
   const searchInputRef = useRef(null);
-  const moreMenuRef = useRef(null);
 
   const [view, setView] = useState("input");
   const [returnView, setReturnView] = useState("input");
@@ -99,7 +101,6 @@ const PostmanGraphViewer = () => {
   const [showPalette, setShowPalette] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
@@ -135,7 +136,10 @@ const PostmanGraphViewer = () => {
   }, [hoveredNodeId, nodes]);
 
   const groups = useMemo(() => buildGroupTree(nodes), [nodes]);
-  const warnings = useMemo(() => collectWarnings(nodes), [nodes]);
+  const audit = useMemo(
+    () => auditSpec({ spec: collection, nodes, format: detectedFormat }),
+    [collection, nodes, detectedFormat],
+  );
   const schemaCount = useMemo(() => countSchemas(collection), [collection]);
 
   // Positions are computed for every node, but collapsed children are not
@@ -523,16 +527,6 @@ const PostmanGraphViewer = () => {
     el.addEventListener("wheel", onWheel, { passive: false }); return () => el.removeEventListener("wheel", onWheel);
   }, [view, centerTab]);
 
-  // Close the overflow menu on an outside click, like the other menus
-  useEffect(() => {
-    if (!moreOpen) return undefined;
-    const onDown = (e) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) setMoreOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [moreOpen]);
-
   useEffect(() => {
     const onFs = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFs);
@@ -610,13 +604,11 @@ const PostmanGraphViewer = () => {
   const openTool = useCallback((setter) => {
     setReturnView("graph");
     setter(true);
-    setMoreOpen(false);
   }, []);
 
   const openFullView = useCallback((next) => {
     setReturnView(view);
     setView(next);
-    setMoreOpen(false);
   }, [view]);
 
   // ── Sorted match list (stable order) ──
@@ -681,6 +673,7 @@ const PostmanGraphViewer = () => {
     { id: "view-map", group: "Views", icon: Waypoints, label: "Open API Map", keywords: "graph canvas", run: () => setCenterTab("map") },
     { id: "view-table", group: "Views", icon: Table2, label: "Open Table View", keywords: "list rows", run: () => setCenterTab("table") },
     { id: "view-raw", group: "Views", icon: Braces, label: "Open Raw Spec", keywords: "json source", run: () => setCenterTab("raw") },
+    { id: "view-audit", group: "Views", icon: ShieldCheck, label: "Open audit", hint: "Lint, security and quality checks", keywords: "lint score security quality issues", run: () => setCenterTab("audit") },
     { id: "export", group: "Views", icon: Download, label: "Export graph", hint: "PNG, SVG or source JSON", keywords: "png svg json download", run: () => { setCenterTab("map"); setExportOpen(true); } },
     { id: "share", group: "Views", icon: Link2, label: "Copy share link", keywords: "url share", run: handleShare },
     { id: "save", group: "Tools", icon: Save, label: "Save to collections", keywords: "store bookmark", run: () => openTool(setShowSaveModal) },
@@ -886,43 +879,6 @@ const PostmanGraphViewer = () => {
                   onOpenChange={setExportOpen}
                 />
 
-                <div className="relative" ref={moreMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setMoreOpen((v) => !v)}
-                    title="More tools"
-                    className="vz-t flex h-9 w-9 items-center justify-center rounded-lg border border-vz-line bg-vz-panel-2 text-vz-soft hover:text-vz-text"
-                  >
-                    <MoreHorizontal size={15} />
-                  </button>
-                  {moreOpen && (
-                    <div className="vz-scroll absolute right-0 z-50 mt-2 max-h-[calc(100vh-200px)] w-60 overflow-auto rounded-xl border border-vz-line bg-vz-panel shadow-2xl shadow-black/50">
-                        {[
-                          { label: "Save to collections", icon: Save, run: () => openTool(setShowSaveModal) },
-                          { label: "Health monitor", icon: Activity, run: () => openTool(setShowHealthMonitor) },
-                          { label: "Test flow builder", icon: Zap, run: () => openTool(setShowFlowBuilder) },
-                          { label: "Environments", icon: Globe, run: () => openTool(setShowEnvManager) },
-                          { label: "Mock server", icon: Server, run: () => openTool(setShowMockServer) },
-                          { label: "Load tester", icon: BarChart3, run: () => openTool(setShowLoadTester) },
-                          { label: "Auto-import", icon: Wifi, run: () => openTool(setShowAutoImport) },
-                          { label: "API diff", icon: GitCompareArrows, run: () => openFullView("diff") },
-                          { label: "Breaking changes", icon: ShieldAlert, run: () => openFullView("breaking") },
-                          { label: "Multi-service graph", icon: Network, run: () => openFullView("multiservice") },
-                        ].map((item) => (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={item.run}
-                            className="vz-t flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] text-vz-soft hover:bg-white/4 hover:text-vz-text"
-                          >
-                            <item.icon size={14} className="text-vz-dim" />
-                            {item.label}
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
-
                 <button
                   type="button"
                   onClick={handleShare}
@@ -1055,6 +1011,14 @@ const PostmanGraphViewer = () => {
                     onShowInMap={(n) => { setCenterTab("map"); selectAndReveal(n); }}
                   />
                 </div>
+              ) : centerTab === "audit" ? (
+                <div className="absolute inset-0">
+                  <AuditView
+                    audit={audit}
+                    nodes={nodes}
+                    onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+                  />
+                </div>
               ) : (
                 <div className="absolute inset-0">
                   <RawSpecView spec={collection} title={collection?.info?.name || collection?.info?.title || "spec"} />
@@ -1076,7 +1040,9 @@ const PostmanGraphViewer = () => {
         <StatusBar
           endpointCount={endpointCount}
           schemaCount={schemaCount}
-          warnings={warnings}
+          warnings={audit.findings}
+          score={audit.score}
+          onOpenAudit={() => setCenterTab("audit")}
           detectedFormat={detectedFormat}
           importedAt={importedAt}
           activeEnvName={activeEnvId ? "Environment active" : null}

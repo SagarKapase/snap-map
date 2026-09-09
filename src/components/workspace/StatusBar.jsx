@@ -6,12 +6,15 @@ import {
   Boxes,
   Globe,
   Clock,
+  ShieldCheck,
 } from "lucide-react";
 import { timeAgo } from "../../utils/analysis";
 import { FormatMark } from "../icons/BrandIcons";
 
 const StatusBar = ({
   endpointCount,
+  score,
+  onOpenAudit,
   schemaCount,
   warnings = [],
   detectedFormat,
@@ -53,6 +56,19 @@ const StatusBar = ({
       <span className="hidden flex-shrink-0 items-center gap-1.5 sm:flex">
         <Braces size={12} /> {endpointCount} endpoints
       </span>
+
+      {typeof score === "number" && (
+        <button
+          type="button"
+          onClick={onOpenAudit}
+          title="Open the specification audit"
+          className={`vz-t hidden flex-shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-white/6 sm:flex ${
+            score >= 90 ? "text-vz-green" : score >= 70 ? "text-vz-warn" : "text-vz-red"
+          }`}
+        >
+          <ShieldCheck size={12} /> Score {score}
+        </button>
+      )}
 
       {schemaCount != null && (
         <span className="hidden flex-shrink-0 items-center gap-1.5 md:flex">
