@@ -27,18 +27,46 @@ import JsonView from "../workspace/JsonView";
  */
 
 // Node centres are percentages of the canvas so the graph reflows with it.
+// `flow` describes the traffic drawn along that node's connector: the colour
+// borrows the method palette used in the legend, and `inbound` sends the packet
+// towards the selected node instead of away from it.
 const NODES = [
   { id: "customers", label: "Customers", count: 12, icon: Users, x: 50, y: 47, selected: true },
-  { id: "authentication", label: "Authentication", count: 3, icon: Lock, x: 50, y: 13 },
-  { id: "payments", label: "Payments", count: 18, icon: CreditCard, x: 19, y: 29 },
-  { id: "invoices", label: "Invoices", count: 14, icon: FileText, x: 50, y: 82 },
-  { id: "orders", label: "Orders", count: 9, icon: ShoppingCart, x: 81, y: 29, minor: true },
-  { id: "webhooks", label: "Webhooks", count: 7, icon: Webhook, x: 81, y: 63, minor: true },
-  { id: "products", label: "Products", count: 11, icon: Box, x: 19, y: 76, minor: true },
-  { id: "subscriptions", label: "Subscriptions", count: 16, icon: RefreshCw, x: 81, y: 82, minor: true },
+  { id: "authentication", label: "Authentication", count: 3, icon: Lock, x: 50, y: 13, flow: "#34d399", inbound: true },
+  { id: "payments", label: "Payments", count: 18, icon: CreditCard, x: 19, y: 29, flow: "#60a5fa" },
+  { id: "invoices", label: "Invoices", count: 14, icon: FileText, x: 50, y: 82, flow: "#fb923c" },
+  { id: "orders", label: "Orders", count: 9, icon: ShoppingCart, x: 81, y: 29, minor: true, flow: "#34d399", inbound: true },
+  { id: "webhooks", label: "Webhooks", count: 7, icon: Webhook, x: 81, y: 63, minor: true, flow: "#f43f5e" },
+  { id: "products", label: "Products", count: 11, icon: Box, x: 19, y: 76, minor: true, flow: "#60a5fa", inbound: true },
+  { id: "subscriptions", label: "Subscriptions", count: 16, icon: RefreshCw, x: 81, y: 82, minor: true, flow: "#34d399" },
 ];
 
 const CENTRE = NODES[0];
+
+/**
+ * One packet per connector, travelling at a roughly constant speed.
+ *
+ * The canvas is only ever laid out at one aspect ratio here, so approximating
+ * it as 620x330 is enough to convert the percentage coordinates into a length
+ * and give the long edges a proportionally longer trip. Departures are spread
+ * out so the graph never pulses in unison.
+ */
+const EDGES = NODES.filter((node) => !node.selected).map((node, i) => {
+  const dx = ((node.x - CENTRE.x) / 100) * 620;
+  const dy = ((node.y - CENTRE.y) / 100) * 330;
+  const seconds = Math.round((Math.hypot(dx, dy) / 108) * 100) / 100;
+  const from = node.inbound ? node : CENTRE;
+  const to = node.inbound ? CENTRE : node;
+  return {
+    ...node,
+    from,
+    to,
+    style: {
+      "--flow-dur": `${Math.max(1.4, seconds)}s`,
+      "--flow-delay": `${i * 430}ms`,
+    },
+  };
+});
 
 const GROUPS = [
   { name: "Authentication", count: 3 },
@@ -247,19 +275,61 @@ const WorkspacePreview = () => (
               className="absolute inset-0 h-full w-full"
               preserveAspectRatio="none"
             >
-              {NODES.filter((node) => !node.selected).map((node) => (
-                <line
-                  key={node.id}
-                  x1={`${CENTRE.x}%`}
-                  y1={`${CENTRE.y}%`}
-                  x2={`${node.x}%`}
-                  y2={`${node.y}%`}
-                  stroke="rgba(122,136,163,0.32)"
-                  strokeWidth="1"
-                  className={node.minor ? "hidden sm:block" : ""}
-                />
+              {EDGES.map((edge) => (
+                <g key={edge.id} className={edge.minor ? "hidden sm:block" : ""}>
+                  <line
+                    x1={`${CENTRE.x}%`}
+                    y1={`${CENTRE.y}%`}
+                    x2={`${edge.x}%`}
+                    y2={`${edge.y}%`}
+                    stroke="rgba(122,136,163,0.32)"
+                    strokeWidth="1"
+                  />
+                  <line
+                    x1={`${edge.from.x}%`}
+                    y1={`${edge.from.y}%`}
+                    x2={`${edge.to.x}%`}
+                    y2={`${edge.to.y}%`}
+                    stroke={edge.flow}
+                    strokeOpacity="0.28"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    pathLength="100"
+                    strokeDasharray="22 78"
+                    className="traffic-trail"
+                    style={edge.style}
+                  />
+                  <line
+                    x1={`${edge.from.x}%`}
+                    y1={`${edge.from.y}%`}
+                    x2={`${edge.to.x}%`}
+                    y2={`${edge.to.y}%`}
+                    stroke={edge.flow}
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    pathLength="100"
+                    strokeDasharray="9 91"
+                    className="traffic-flow"
+                    style={edge.style}
+                  />
+                </g>
               ))}
             </svg>
+
+            {EDGES.map((edge) => (
+              <span
+                key={`pulse-${edge.id}`}
+                className={`traffic-pulse absolute h-[34px] w-[104px] rounded-lg sm:h-[38px] sm:w-[112px] xl:h-[42px] xl:w-[126px] ${
+                  edge.minor ? "hidden sm:block" : ""
+                }`}
+                style={{
+                  ...edge.style,
+                  left: `${edge.to.x}%`,
+                  top: `${edge.to.y}%`,
+                  boxShadow: `0 0 22px 3px ${edge.flow}`,
+                }}
+              />
+            ))}
 
             {NODES.map((node) => (
               <PreviewNode

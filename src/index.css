@@ -134,6 +134,62 @@ body {
   opacity: 1;
 }
 
+/* ─── Traffic flowing through the preview graph ─── */
+
+/* Every connector declares pathLength="100", so one dash pattern reads the
+   same on a short edge as on a long one; the duration carries the length. */
+@keyframes trafficFlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.traffic-flow {
+  animation: trafficFlow var(--flow-dur, 2.4s) linear var(--flow-delay, 0ms)
+    infinite;
+}
+
+/* A dimmer, longer dash offset to sit just behind the head: a short tail. */
+@keyframes trafficTrail {
+  from {
+    stroke-dashoffset: 13;
+  }
+  to {
+    stroke-dashoffset: -87;
+  }
+}
+
+.traffic-trail {
+  animation: trafficTrail var(--flow-dur, 2.4s) linear var(--flow-delay, 0ms)
+    infinite;
+}
+
+/* The endpoint lights up as the packet lands on it. */
+@keyframes trafficLand {
+  0%,
+  78% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.72);
+  }
+  88% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.12);
+  }
+}
+
+.traffic-pulse {
+  opacity: 0;
+  animation: trafficLand var(--flow-dur, 2.4s) ease-out var(--flow-delay, 0ms)
+    infinite;
+}
+
 /* ─── Depth: things arrive from the back of the scene ─── */
 
 .preview-stage {
@@ -197,6 +253,12 @@ body {
   .preview-arrive {
     animation: none !important;
   }
+
+  .traffic-flow,
+  .traffic-trail,
+  .traffic-pulse {
+    display: none !important;
+  }
 }
 
 /* Honour the OS motion preference across the whole app */
@@ -213,6 +275,14 @@ body {
   .preview-arrive,
   .approach {
     animation: none !important;
+  }
+
+  /* A halted dash would leave a coloured stub on every connector, so the
+     traffic is removed rather than frozen. */
+  .traffic-flow,
+  .traffic-trail,
+  .traffic-pulse {
+    display: none !important;
   }
 
   .lift-card:hover {
