@@ -1,11 +1,108 @@
-import { useState, useMemo } from "react";
-import { X, Send, Plus, Trash2, Globe, RefreshCw, AlertCircle, CheckCircle, Copy, Terminal, Clock, Wifi, Save } from "lucide-react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import {
+  X,
+  Send,
+  Plus,
+  Trash2,
+  RefreshCw,
+  AlertCircle,
+  Check,
+  Copy,
+  Terminal,
+  Clock,
+  Wifi,
+  Save,
+  Lock,
+  Braces,
+  Ban,
+} from "lucide-react";
 import { methodColor } from "../utils/constants";
+import JsonView from "./workspace/JsonView";
+import { toJsonText } from "../utils/format";
+
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+const BODY_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
+const PATH_VAR = /\{([^}/]+)\}|:([a-zA-Z_][a-zA-Z0-9_-]*)/g;
+
+/** Names of the {placeholder} / :placeholder segments in a URL path. */
+const pathVarsIn = (url) => {
+  const names = [];
+  let match;
+  PATH_VAR.lastIndex = 0;
+  while ((match = PATH_VAR.exec(String(url || ""))) !== null) {
+    const name = match[1] || match[2];
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+};
+
+/** Split "a=1&b=2" without re-encoding what the user typed. */
+const parseQuery = (queryString) =>
+  String(queryString || "")
+    .split("&")
+    .filter(Boolean)
+    .map((pair) => {
+      const eq = pair.indexOf("=");
+      return eq === -1
+        ? { key: pair, value: "", enabled: true }
+        : { key: pair.slice(0, eq), value: pair.slice(eq + 1), enabled: true };
+    });
+
+/** Append a query string, respecting whatever the URL already carries. */
+const joinQuery = (url, query) => {
+  if (!query) return url;
+  return url.includes("?") ? `${url}&${query}` : `${url}?${query}`;
+};
+
+const serializeQuery = (rows) =>
+  rows
+    .filter((row) => row.enabled && row.key.trim())
+    .map((row) => `${row.key}=${row.value}`)
+    .join("&");
+
+/** POSIX-safe single quoting — a quote cannot be backslash-escaped inside ''. */
+const shellQuote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const statusTone = (status) => {
+  if (!status) return "bg-white/6 text-vz-soft";
+  if (status < 300) return "bg-vz-green/14 text-vz-green";
+  if (status < 400) return "bg-vz-warn/14 text-vz-warn";
+  return "bg-vz-red/14 text-[#fda4af]";
+};
+
+const Field = (props) => (
+  <input
+    {...props}
+    className={`vz-mono vz-t h-8 min-w-0 rounded-lg border border-vz-line bg-vz-bg px-2.5 text-[12px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50 ${props.className || ""}`}
+  />
+);
 
 const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
   const [method, setMethod] = useState(node?.method || "GET");
-  const [url, setUrl] = useState(node?.path || "");
-  // Prefer headers declared by the spec; fall back to sensible client defaults.
+
+  // The URL box holds the path only; query parameters are edited as rows so
+  // they can be toggled without rewriting the string.
+  const [baseUrl, setBaseUrl] = useState(() => String(node?.path || "").split("?")[0]);
+  const [queryRows, setQueryRows] = useState(() =>
+    parseQuery(String(node?.path || "").split("?")[1]),
+  );
+
+  // Path placeholders are kept in the URL and substituted at send time, so
+  // "Update endpoint" still stores the templated path.
+  const [pathValues, setPathValues] = useState(() => {
+    const seed = {};
+    (node?.params || []).forEach((p) => {
+      if (p.in === "path" && p.example != null) seed[p.name] = String(p.example);
+    });
+    return seed;
+  });
+
   const [headers, setHeaders] = useState(() =>
     node?.headers?.length
       ? node.headers.map((h) => ({ key: h.key, value: h.value }))
@@ -15,280 +112,660 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
         ],
   );
   const [body, setBody] = useState(node?.body ? JSON.stringify(node.body, null, 2) : "");
+
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
   const [reqError, setReqError] = useState("");
   const [curlCopied, setCurlCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState("headers");
   const [responseCopied, setResponseCopied] = useState(false);
   const [updateSaved, setUpdateSaved] = useState(false);
+  const [requestTab, setRequestTab] = useState("params");
+  const [responseTab, setResponseTab] = useState("body");
+  const abortRef = useRef(null);
 
-  const methodOptions = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
   const mc = methodColor(method);
+  const pathVars = useMemo(() => pathVarsIn(baseUrl), [baseUrl]);
+  const missingVars = pathVars.filter((name) => !String(pathValues[name] || "").trim());
 
-  // Track if user changed anything from original node
+  const specQuery = useMemo(
+    () => (node?.params || []).filter((p) => p.in === "query"),
+    [node],
+  );
+
+  /** What "Update endpoint" would store: template intact, query rebuilt. */
+  const composedUrl = useMemo(
+    () => joinQuery(baseUrl, serializeQuery(queryRows)),
+    [baseUrl, queryRows],
+  );
+
+  /** What actually gets requested: placeholders resolved. */
+  const effectiveUrl = useMemo(() => {
+    const resolved = baseUrl.replace(PATH_VAR, (whole, braced, colon) => {
+      const name = braced || colon;
+      const value = pathValues[name];
+      return value != null && String(value).trim()
+        ? encodeURIComponent(String(value).trim())
+        : whole;
+    });
+    return joinQuery(resolved, serializeQuery(queryRows));
+  }, [baseUrl, pathValues, queryRows]);
+
   const hasChanges = useMemo(() => {
     if (!node) return false;
     if (method !== (node.method || "GET")) return true;
-    if (url !== (node.path || "")) return true;
-    const origBody = node.body ? JSON.stringify(node.body, null, 2) : "";
-    if (body !== origBody) return true;
-    return false;
-  }, [method, url, body, node]);
+    if (composedUrl !== (node.path || "")) return true;
+    const originalBody = node.body ? JSON.stringify(node.body, null, 2) : "";
+    return body !== originalBody;
+  }, [method, composedUrl, body, node]);
+
+  const authHint = useMemo(() => {
+    const auth = (node?.auth || [])[0];
+    if (!auth) return null;
+    const type = String(auth.type || auth.name || "").toLowerCase();
+    if (type === "http" || type === "bearer")
+      return auth.scheme === "basic"
+        ? { label: "Basic authentication required", prefix: "Basic " }
+        : { label: "Bearer token required", prefix: "Bearer " };
+    if (type === "apikey")
+      return { label: `API key required${auth.headerName ? ` (${auth.headerName})` : ""}`, prefix: "", key: auth.headerName || "X-API-Key" };
+    return { label: `${auth.name || "Authentication"} required`, prefix: "" };
+  }, [node]);
+
+  const hasAuthHeader = headers.some(
+    (h) => h.key.trim().toLowerCase() === (authHint?.key || "authorization").toLowerCase(),
+  );
+
+  const addQueryRow = () =>
+    setQueryRows((rows) => [...rows, { key: "", value: "", enabled: true }]);
+  const updateQueryRow = (i, patch) =>
+    setQueryRows((rows) => rows.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const removeQueryRow = (i) =>
+    setQueryRows((rows) => rows.filter((_, idx) => idx !== i));
+
+  const addHeader = () => setHeaders((h) => [...h, { key: "", value: "" }]);
+  const removeHeader = (i) => setHeaders((h) => h.filter((_, idx) => idx !== i));
+  const updateHeader = (i, field, val) =>
+    setHeaders((h) => h.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
+
+  const addAuthHeader = () => {
+    setHeaders((h) => [
+      ...h,
+      { key: authHint?.key || "Authorization", value: authHint?.prefix || "" },
+    ]);
+    setRequestTab("headers");
+  };
+
+  const handleSend = useCallback(async () => {
+    if (!effectiveUrl.trim()) {
+      setReqError("URL is required");
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+    setReqError("");
+    setResponse(null);
+    setResponseTab("body");
+
+    try {
+      const headerObject = {};
+      headers.forEach((h) => {
+        if (h.key.trim()) headerObject[h.key.trim()] = h.value;
+      });
+      const options = { method, headers: headerObject, signal: controller.signal };
+      if (BODY_METHODS.includes(method) && body.trim()) options.body = body;
+
+      const startedAt = Date.now();
+      const res = await fetch(effectiveUrl, options);
+      const elapsed = Date.now() - startedAt;
+      const text = await res.text();
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+
+      const responseHeaders = [];
+      res.headers.forEach((value, key) => responseHeaders.push({ key, value }));
+
+      const result = {
+        status: res.status,
+        statusText: res.statusText,
+        elapsed,
+        data,
+        isJson: typeof data === "object" && data !== null,
+        size: new Blob([text]).size,
+        headers: responseHeaders,
+        url: effectiveUrl,
+      };
+      setResponse(result);
+      if (node?.id) onResponse?.(node.id, { ...result, at: new Date().toISOString() });
+    } catch (err) {
+      if (err.name === "AbortError") setReqError("Request cancelled.");
+      else
+        setReqError(
+          err.message.includes("Failed to fetch")
+            ? "Network error — the host may not allow cross-origin requests from the browser."
+            : `Request failed: ${err.message}`,
+        );
+    } finally {
+      abortRef.current = null;
+      setLoading(false);
+    }
+  }, [effectiveUrl, headers, method, body, node, onResponse]);
+
+  // Ctrl/Cmd+Enter sends, like every other HTTP client
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!loading) handleSend();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [handleSend, loading]);
+
+  // Never leave a request running behind a closed modal
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const handleUpdate = () => {
     if (!onUpdate || !node) return;
     let parsedBody = null;
     if (body.trim()) {
-      try { parsedBody = JSON.parse(body); } catch { parsedBody = body; }
+      try {
+        parsedBody = JSON.parse(body);
+      } catch {
+        parsedBody = body;
+      }
     }
-    onUpdate(node.id, { method, path: url, body: parsedBody });
+    onUpdate(node.id, {
+      method,
+      path: composedUrl,
+      body: parsedBody,
+      headers: headers.filter((h) => h.key.trim()),
+    });
     setUpdateSaved(true);
     setTimeout(() => setUpdateSaved(false), 2000);
   };
 
-  const addHeader = () => setHeaders((h) => [...h, { key: "", value: "" }]);
-  const removeHeader = (i) => setHeaders((h) => h.filter((_, idx) => idx !== i));
-  const updateHeader = (i, field, val) => setHeaders((h) => h.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
-
-  const handleSend = async () => {
-    if (!url.trim()) { setReqError("URL is required"); return; }
-    setLoading(true); setReqError(""); setResponse(null);
+  const handleFormatBody = () => {
+    if (!body.trim()) return;
     try {
-      const hObj = {};
-      headers.forEach((h) => { if (h.key.trim()) hObj[h.key.trim()] = h.value; });
-      const opts = { method, headers: hObj };
-      if (["POST", "PUT", "PATCH"].includes(method) && body.trim()) opts.body = body;
-      const t0 = Date.now();
-      const res = await fetch(url, opts);
-      const elapsed = Date.now() - t0;
-      const text = await res.text();
-      let data;
-      try { data = JSON.parse(text); } catch { data = text; }
-      const size = new Blob([text]).size;
-      const result = { status: res.status, statusText: res.statusText, elapsed, data, isJson: typeof data === "object", size };
-      setResponse(result);
-      // Surface the real response to the inspector for this endpoint
-      if (node?.id) onResponse?.(node.id, { ...result, at: new Date().toISOString() });
-    } catch (err) {
-      setReqError(err.message.includes("Failed to fetch") ? "Network error — CORS may be blocking this request." : "Request failed: " + err.message);
-    } finally { setLoading(false); }
+      setBody(JSON.stringify(JSON.parse(body), null, 2));
+    } catch {
+      /* leave non-JSON bodies alone */
+    }
   };
 
   const handleCopyCurl = () => {
-    const h = headers.filter((r) => r.key.trim()).map((r) => `-H "${r.key}: ${r.value}"`).join(" ");
-    const b = ["POST", "PUT", "PATCH"].includes(method) && body.trim() ? ` -d '${body.replace(/'/g, "\\'")}' ` : " ";
-    navigator.clipboard.writeText(`curl -X ${method} ${h}${b}"${url}"`);
+    const parts = [`curl -X ${method}`, `  ${shellQuote(effectiveUrl)}`];
+    headers
+      .filter((h) => h.key.trim())
+      .forEach((h) => parts.push(`  -H ${shellQuote(`${h.key}: ${h.value}`)}`));
+    if (BODY_METHODS.includes(method) && body.trim())
+      parts.push(`  --data-raw ${shellQuote(body)}`);
+    navigator.clipboard?.writeText(parts.join(" \\\n"));
     setCurlCopied(true);
-    setTimeout(() => setCurlCopied(false), 2500);
+    setTimeout(() => setCurlCopied(false), 2000);
   };
+
+  const responseText = response
+    ? response.isJson
+      ? toJsonText(response.data)
+      : String(response.data ?? "")
+    : "";
 
   const handleCopyResponse = () => {
     if (!response) return;
-    navigator.clipboard.writeText(response.isJson ? JSON.stringify(response.data, null, 2) : String(response.data));
+    navigator.clipboard?.writeText(responseText);
     setResponseCopied(true);
     setTimeout(() => setResponseCopied(false), 2000);
   };
 
-  const formatBytes = (bytes) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
+  const paramCount = pathVars.length + queryRows.length;
+  const headerCount = headers.filter((h) => h.key.trim()).length;
 
-  const statusColor = (s) => {
-    if (!s) return { text: "text-[#a9abb0]", bg: "bg-[#46484c]/20" };
-    if (s < 300) return { text: "text-[#81ecff]", bg: "bg-[#81ecff]/10" };
-    if (s < 400) return { text: "text-amber-400", bg: "bg-amber-400/10" };
-    return { text: "text-[#ff6e84]", bg: "bg-[#ff6e84]/10" };
-  };
-
-  const responseText = response?.isJson ? JSON.stringify(response.data, null, 2) : String(response?.data || "");
-  const lineCount = responseText ? responseText.split("\n").length : 0;
+  const requestTabs = [
+    { id: "params", label: "Params", count: paramCount, alert: missingVars.length > 0 },
+    { id: "headers", label: "Headers", count: headerCount },
+    { id: "body", label: "Body" },
+  ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
-      style={{ animation: "fadeIn 0.15s ease-out both" }}>
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal */}
       <div
-        className="relative w-full max-w-6xl border border-[#46484c]/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-        style={{
-          height: "min(95vh, 800px)",
-          background: "rgba(12,14,18,0.97)",
-          backdropFilter: "blur(24px)",
-          boxShadow: "0 40px 80px -16px rgba(0,0,0,0.6), 0 0 0 1px rgba(70,72,76,0.15), 0 0 60px -10px rgba(224,142,254,0.08)",
-          animation: "playgroundEnter 0.35s cubic-bezier(0.16,1,0.3,1) both",
-        }}
+        className="playground-enter relative flex w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-vz-line bg-vz-panel shadow-[0_40px_80px_-16px_rgba(0,0,0,0.7)]"
+        style={{ height: "min(95vh, 820px)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="API playground"
       >
-
         {/* ── Header ── */}
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-[#46484c]/20 flex-shrink-0" style={{ background: "rgba(17,20,23,0.6)" }}>
-          <div className="w-8 h-8 rounded-lg bg-[#e08efe]/10 border border-[#e08efe]/20 flex items-center justify-center">
-            <Terminal size={16} className="text-[#e08efe]" />
+        <div className="flex flex-shrink-0 items-center gap-3 border-b border-vz-line-soft px-4 py-3">
+          <span className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2">
+            <Terminal size={15} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-semibold text-vz-text">API Playground</p>
+            <p className="truncate text-[12px] text-vz-dim">{node?.name}</p>
           </div>
-          <div className="flex-1 min-w-0">
-            <span className="font-bold text-white text-base">API Playground</span>
-            <span className="text-[#46484c] mx-2">—</span>
-            <span className="text-[#a9abb0] text-sm truncate">{node?.name}</span>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 hover:scale-105 group">
-            <X size={18} className="text-[#46484c] group-hover:text-white transition-colors" />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close playground"
+            className="vz-t rounded-lg p-2 text-vz-dim hover:bg-white/6 hover:text-vz-text"
+          >
+            <X size={16} />
           </button>
         </div>
 
         {/* ── URL bar ── */}
-        <div className="flex items-center gap-3 px-6 py-3.5 border-b border-[#46484c]/15 flex-shrink-0" style={{ background: "rgba(17,20,23,0.3)" }}>
-          <select value={method} onChange={(e) => setMethod(e.target.value)}
-            className={`bg-[#22262b] border border-[#46484c]/40 rounded-lg px-4 py-2.5 text-sm font-extrabold ${mc.text} focus:outline-none focus:border-[#e08efe] flex-shrink-0 cursor-pointer transition-all duration-200 uppercase tracking-wide`}>
-            {methodOptions.map((m) => (<option key={m} value={m} className="text-white">{m}</option>))}
-          </select>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/endpoint"
-            className="flex-1 bg-[#22262b]/60 border border-[#46484c]/30 hover:border-[#46484c]/60 focus:border-[#e08efe] focus:ring-1 focus:ring-[#e08efe]/30 rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder:text-[#46484c] transition-all duration-200" />
-          <button onClick={handleSend} disabled={loading}
-            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 active:scale-95 flex-shrink-0
-              ${loading ? "bg-[#22262b] text-[#73757a] cursor-not-allowed" : "bg-[#e08efe] hover:bg-[#ce7eec] text-[#0c0e12] shadow-lg shadow-[#e08efe]/20 hover:shadow-[#e08efe]/30"}`}>
-            {loading ? (<><RefreshCw size={15} className="animate-spin" /> Sending...</>) : (<><Send size={15} /> Send</>)}
-          </button>
+        <div className="flex-shrink-0 border-b border-vz-line-soft px-4 py-3">
+          <div className="flex items-center gap-2">
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              aria-label="HTTP method"
+              className={`vz-t h-10 flex-shrink-0 cursor-pointer rounded-lg border border-vz-line bg-vz-panel-2 px-2.5 text-[13px] font-bold uppercase focus:border-vz-accent/50 ${mc.text}`}
+            >
+              {METHODS.map((m) => (
+                <option key={m} value={m} className="text-vz-text">
+                  {m}
+                </option>
+              ))}
+            </select>
+
+            <input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://api.example.com/endpoint"
+              aria-label="Request URL"
+              className="vz-mono vz-t h-10 min-w-0 flex-1 rounded-lg border border-vz-line bg-vz-bg px-3 text-[13px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50"
+            />
+
+            {loading ? (
+              <button
+                type="button"
+                onClick={() => abortRef.current?.abort()}
+                className="vz-t flex h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-vz-line bg-vz-panel-2 px-4 text-[13px] font-semibold text-vz-soft hover:text-vz-text"
+              >
+                <Ban size={14} /> Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSend}
+                className="vz-t flex h-10 flex-shrink-0 items-center gap-2 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-5 text-[13px] font-bold text-[#160a1d] hover:opacity-90"
+              >
+                <Send size={14} /> Send
+              </button>
+            )}
+          </div>
+
+          {effectiveUrl !== baseUrl && (
+            <p className="vz-mono mt-2 truncate text-[11px] text-vz-dim" title={effectiveUrl}>
+              <span className="text-vz-soft">→</span> {effectiveUrl}
+            </p>
+          )}
         </div>
 
-        {/* ── Main body — request left, response right ── */}
-        <div className="flex flex-1 overflow-hidden min-h-0">
-
-          {/* ── Left: Request (Headers + Body tabs) ── */}
-          <div className="w-1/2 flex flex-col border-r border-[#46484c]/20">
-            <div className="flex border-b border-[#46484c]/15 flex-shrink-0">
-              {["headers", "body"].map((t) => (
-                <button key={t} onClick={() => setActiveTab(t)}
-                  className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all duration-200 relative ${
-                    activeTab === t ? "text-[#e08efe]" : "text-[#46484c] hover:text-[#a9abb0]"
-                  }`}>
-                  {t}
-                  {activeTab === t && <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-[#e08efe] rounded-full" />}
+        {/* ── Request / response ── */}
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          {/* Request */}
+          <div className="flex min-h-0 flex-1 flex-col border-b border-vz-line-soft lg:w-1/2 lg:border-b-0 lg:border-r">
+            <div className="flex flex-shrink-0 items-center gap-1 border-b border-vz-line-soft px-2">
+              {requestTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setRequestTab(tab.id)}
+                  className={`vz-t relative px-3 py-3 text-[12px] ${
+                    requestTab === tab.id
+                      ? "text-[#e6c4ff] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-vz-accent-2"
+                      : "text-vz-soft hover:text-vz-text"
+                  }`}
+                >
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className="ml-1.5 tabular-nums text-vz-dim">{tab.count}</span>
+                  )}
+                  {tab.alert && (
+                    <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-vz-warn align-middle" />
+                  )}
                 </button>
               ))}
             </div>
 
-            {activeTab === "headers" ? (
-              <div className="flex-1 overflow-auto p-5 space-y-2.5">
-                {headers.map((h, i) => (
-                  <div key={i} className="flex gap-2 items-center" style={{ animation: `crossfadeIn 0.2s ease-out ${i * 30}ms both` }}>
-                    <input value={h.key} onChange={(e) => updateHeader(i, "key", e.target.value)} placeholder="Key"
-                      className="flex-1 bg-[#22262b]/50 border border-[#46484c]/25 hover:border-[#46484c]/50 focus:border-[#e08efe]/60 rounded-lg px-3 py-2 text-xs text-[#f8f9fe] font-mono placeholder:text-[#46484c] transition-all duration-200 min-w-0" />
-                    <input value={h.value} onChange={(e) => updateHeader(i, "value", e.target.value)} placeholder="Value"
-                      className="flex-1 bg-[#22262b]/50 border border-[#46484c]/25 hover:border-[#46484c]/50 focus:border-[#e08efe]/60 rounded-lg px-3 py-2 text-xs text-[#f8f9fe] font-mono placeholder:text-[#46484c] transition-all duration-200 min-w-0" />
-                    <button onClick={() => removeHeader(i)} className="p-1.5 hover:bg-[#ff6e84]/10 rounded-lg text-[#46484c] hover:text-[#ff6e84] transition-all duration-200 flex-shrink-0">
-                      <Trash2 size={13} />
+            {requestTab === "params" && (
+              <div className="vz-scroll min-h-0 flex-1 overflow-auto p-4">
+                {pathVars.length > 0 && (
+                  <section className="mb-5">
+                    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-vz-dim">
+                      Path variables
+                    </h3>
+                    <div className="space-y-2">
+                      {pathVars.map((name) => {
+                        const spec = (node?.params || []).find(
+                          (p) => p.in === "path" && p.name === name,
+                        );
+                        return (
+                          <div key={name} className="flex items-center gap-2">
+                            <span className="vz-mono w-[34%] flex-shrink-0 truncate text-[12px] text-vz-soft">
+                              {name}
+                              {spec?.type ? (
+                                <span className="ml-1.5 text-[11px] text-vz-blue">
+                                  {spec.type}
+                                </span>
+                              ) : null}
+                            </span>
+                            <Field
+                              value={pathValues[name] || ""}
+                              onChange={(e) =>
+                                setPathValues((v) => ({ ...v, [name]: e.target.value }))
+                              }
+                              placeholder="value"
+                              aria-label={`Path variable ${name}`}
+                              className="flex-1"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {missingVars.length > 0 && (
+                      <p className="mt-2 flex items-start gap-1.5 text-[11px] text-vz-warn">
+                        <AlertCircle size={12} className="mt-px flex-shrink-0" />
+                        {missingVars.join(", ")} {missingVars.length === 1 ? "has" : "have"} no
+                        value — the placeholder will be sent as written.
+                      </p>
+                    )}
+                  </section>
+                )}
+
+                <section>
+                  <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-vz-dim">
+                    Query parameters
+                  </h3>
+                  {queryRows.length === 0 && (
+                    <p className="mb-2 text-[12px] text-vz-dim">None.</p>
+                  )}
+                  <div className="space-y-2">
+                    {queryRows.map((row, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={row.enabled}
+                          onChange={(e) => updateQueryRow(i, { enabled: e.target.checked })}
+                          aria-label={`Include ${row.key || "parameter"}`}
+                          className="h-3.5 w-3.5 flex-shrink-0 accent-[#a855f7]"
+                        />
+                        <Field
+                          value={row.key}
+                          onChange={(e) => updateQueryRow(i, { key: e.target.value })}
+                          placeholder="key"
+                          className="flex-1"
+                        />
+                        <Field
+                          value={row.value}
+                          onChange={(e) => updateQueryRow(i, { value: e.target.value })}
+                          placeholder="value"
+                          className="flex-1"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeQueryRow(i)}
+                          aria-label="Remove parameter"
+                          className="vz-t flex-shrink-0 rounded-lg p-1.5 text-vz-dim hover:bg-vz-red/10 hover:text-vz-red"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={addQueryRow}
+                      className="vz-t flex items-center gap-1.5 text-[12px] text-vz-soft hover:text-vz-accent-2"
+                    >
+                      <Plus size={13} /> Add parameter
+                    </button>
+                    {specQuery
+                      .filter((p) => !queryRows.some((row) => row.key === p.name))
+                      .map((p) => (
+                        <button
+                          key={p.name}
+                          type="button"
+                          onClick={() =>
+                            setQueryRows((rows) => [
+                              ...rows,
+                              {
+                                key: p.name,
+                                value: p.example != null ? String(p.example) : "",
+                                enabled: true,
+                              },
+                            ])
+                          }
+                          title={p.description || `Add ${p.name} from the spec`}
+                          className="vz-t vz-mono rounded-md border border-vz-line bg-vz-panel-2 px-2 py-1 text-[11px] text-vz-dim hover:text-vz-text"
+                        >
+                          + {p.name}
+                        </button>
+                      ))}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {requestTab === "headers" && (
+              <div className="vz-scroll min-h-0 flex-1 overflow-auto p-4">
+                {authHint && !hasAuthHeader && (
+                  <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-vz-accent/20 bg-vz-accent/[0.06] px-3 py-2.5">
+                    <Lock size={13} className="flex-shrink-0 text-vz-accent-2" />
+                    <span className="text-[12px] text-vz-soft">{authHint.label}</span>
+                    <button
+                      type="button"
+                      onClick={addAuthHeader}
+                      className="vz-t ml-auto rounded-md border border-vz-line bg-vz-panel-2 px-2 py-1 text-[11px] text-vz-soft hover:text-vz-text"
+                    >
+                      Add header
                     </button>
                   </div>
-                ))}
-                <button onClick={addHeader} className="flex items-center gap-1.5 text-xs text-[#46484c] hover:text-[#e08efe] transition-colors duration-200 mt-3 group font-semibold">
-                  <Plus size={13} className="group-hover:rotate-90 transition-transform duration-300" /> Add Header
-                </button>
-              </div>
-            ) : (
-              <div className="flex-1 flex overflow-hidden">
-                {/* Line numbers */}
-                <div className="flex-shrink-0 py-4 select-none overflow-hidden border-r border-[#46484c]/10" style={{ background: "rgba(0,0,0,0.15)" }}>
-                  {(body || "\n").split("\n").map((_, i) => (
-                    <div key={i} className="text-right pr-3 pl-3 text-[10px] font-mono leading-[1.8]" style={{ color: "rgba(70,72,76,0.5)" }}>
-                      {i + 1}
+                )}
+
+                <div className="space-y-2">
+                  {headers.map((h, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Field
+                        value={h.key}
+                        onChange={(e) => updateHeader(i, "key", e.target.value)}
+                        placeholder="Header"
+                        className="flex-1"
+                      />
+                      <Field
+                        value={h.value}
+                        onChange={(e) => updateHeader(i, "value", e.target.value)}
+                        placeholder="Value"
+                        className="flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeHeader(i)}
+                        aria-label="Remove header"
+                        className="vz-t flex-shrink-0 rounded-lg p-1.5 text-vz-dim hover:bg-vz-red/10 hover:text-vz-red"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   ))}
                 </div>
-                {/* Textarea */}
-                <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder={'{\n  "key": "value"\n}'} spellCheck={false}
-                  className="flex-1 bg-transparent resize-none text-xs font-mono text-[#f8f9fe] placeholder:text-[#46484c] p-4 focus:outline-none"
-                  style={{ lineHeight: "1.8", caretColor: "#e08efe" }} />
+
+                <button
+                  type="button"
+                  onClick={addHeader}
+                  className="vz-t mt-3 flex items-center gap-1.5 text-[12px] text-vz-soft hover:text-vz-accent-2"
+                >
+                  <Plus size={13} /> Add header
+                </button>
+              </div>
+            )}
+
+            {requestTab === "body" && (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex flex-shrink-0 items-center gap-3 border-b border-vz-line-soft px-3 py-2">
+                  <span className="text-[11px] text-vz-dim">
+                    {BODY_METHODS.includes(method)
+                      ? "Sent as the request body"
+                      : `${method} requests are sent without a body`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleFormatBody}
+                    disabled={!body.trim()}
+                    className="vz-t ml-auto flex items-center gap-1.5 text-[12px] text-vz-soft hover:text-vz-text disabled:opacity-35"
+                  >
+                    <Braces size={13} /> Format
+                  </button>
+                </div>
+                <textarea
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder={'{\n  "key": "value"\n}'}
+                  spellCheck={false}
+                  aria-label="Request body"
+                  className="vz-mono vz-scroll min-h-0 flex-1 resize-none bg-transparent p-4 text-[12.5px] text-vz-text placeholder:text-vz-dim focus:outline-none"
+                  style={{ lineHeight: "1.7", caretColor: "#a855f7" }}
+                />
               </div>
             )}
           </div>
 
-          {/* ── Right: Response ── */}
-          <div className="w-1/2 flex flex-col min-w-0">
-            {/* Response header bar */}
-            <div className="flex items-center gap-3 px-5 py-3 border-b border-[#46484c]/15 flex-shrink-0" style={{ background: "rgba(17,20,23,0.3)" }}>
-              <Globe size={14} className="text-[#46484c]" />
-              <span className="text-xs font-bold text-[#73757a] uppercase tracking-widest">Response</span>
-              {response && (
-                <div className="flex items-center gap-3 ml-auto" style={{ animation: "crossfadeIn 0.3s ease-out both" }}>
-                  <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${statusColor(response.status).text} ${statusColor(response.status).bg}`}>
+          {/* Response */}
+          <div className="flex min-h-0 flex-1 flex-col lg:w-1/2">
+            <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-vz-line-soft px-3 py-2">
+              {response ? (
+                <>
+                  {["body", "headers"].map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setResponseTab(tab)}
+                      className={`vz-t rounded-md px-2 py-1 text-[12px] capitalize ${
+                        responseTab === tab
+                          ? "bg-white/8 text-vz-text"
+                          : "text-vz-soft hover:text-vz-text"
+                      }`}
+                    >
+                      {tab}
+                      {tab === "headers" && response.headers.length > 0 && (
+                        <span className="ml-1.5 tabular-nums text-vz-dim">
+                          {response.headers.length}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  <span
+                    className={`ml-auto rounded-md px-2 py-1 text-[11px] font-bold ${statusTone(response.status)}`}
+                  >
                     {response.status} {response.statusText}
                   </span>
-                  <span className="text-[10px] text-[#73757a] flex items-center gap-1 font-mono">
-                    <Clock size={10} /> {response.elapsed}ms
+                  <span className="vz-mono flex items-center gap-1 text-[11px] text-vz-dim">
+                    <Clock size={11} /> {response.elapsed}ms
                   </span>
-                  <span className="text-[10px] text-[#46484c] font-mono">
+                  <span className="vz-mono text-[11px] text-vz-dim">
                     {formatBytes(response.size)}
                   </span>
-                  <span className="text-[10px] text-[#46484c] font-mono">
-                    {lineCount} lines
-                  </span>
-                  <button onClick={handleCopyResponse} className="text-[10px] text-[#46484c] hover:text-[#e08efe] transition-colors flex items-center gap-1">
-                    {responseCopied ? <><CheckCircle size={10} className="text-[#81ecff]" /> Copied</> : <><Copy size={10} /> Copy</>}
+                  <button
+                    type="button"
+                    onClick={handleCopyResponse}
+                    className="vz-t flex items-center gap-1 text-[11px] text-vz-dim hover:text-vz-text"
+                  >
+                    {responseCopied ? (
+                      <>
+                        <Check size={11} className="text-vz-green" /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={11} /> Copy
+                      </>
+                    )}
                   </button>
-                </div>
+                </>
+              ) : (
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-vz-dim">
+                  Response
+                </span>
               )}
             </div>
 
-            {/* Response body with scrollbar */}
-            <div className="flex-1 overflow-auto" style={{
-              scrollbarWidth: "thin",
-              scrollbarColor: "rgba(70,72,76,0.5) transparent",
-            }}>
+            <div className="vz-scroll min-h-0 flex-1 overflow-auto">
               {loading && (
-                <div className="flex flex-col items-center justify-center h-full gap-4">
-                  <div className="relative">
-                    <div className="w-12 h-12 border-2 border-[#e08efe]/20 rounded-full" />
-                    <div className="absolute inset-0 w-12 h-12 border-2 border-transparent border-t-[#e08efe] rounded-full animate-spin" />
-                  </div>
-                  <p className="text-[#73757a] text-sm font-medium">Sending request...</p>
-                  <p className="text-[#46484c] text-xs">Waiting for response from server</p>
+                <div className="flex h-full flex-col items-center justify-center gap-3">
+                  <RefreshCw size={22} className="animate-spin text-vz-accent" />
+                  <p className="text-[13px] text-vz-soft">Sending request…</p>
+                  <p className="text-[12px] text-vz-dim">Cancel with the button above</p>
                 </div>
               )}
 
               {!loading && reqError && (
-                <div className="p-5" style={{ animation: "crossfadeIn 0.3s ease-out both" }}>
-                  <div className="bg-[#ff6e84]/8 border border-[#ff6e84]/15 rounded-xl p-5">
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-[#ff6e84]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <AlertCircle size={16} className="text-[#ff6e84]" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-[#ff6e84] mb-1">Request Failed</p>
-                        <p className="text-xs text-[#a9abb0] leading-relaxed">{reqError}</p>
-                      </div>
+                <div className="p-4">
+                  <div className="flex items-start gap-3 rounded-xl border border-vz-red/20 bg-vz-red/[0.07] p-4">
+                    <AlertCircle size={16} className="mt-0.5 flex-shrink-0 text-vz-red" />
+                    <div>
+                      <p className="text-[13px] font-semibold text-[#fda4af]">
+                        Request failed
+                      </p>
+                      <p className="mt-1 text-[12px] leading-relaxed text-vz-soft">
+                        {reqError}
+                      </p>
                     </div>
                   </div>
                 </div>
               )}
 
-              {!loading && !reqError && response && (
-                <div className="flex flex-1 min-h-0 overflow-auto" style={{ animation: "crossfadeIn 0.3s ease-out both" }}>
-                  {/* Line numbers */}
-                  <div className="flex-shrink-0 py-4 select-none border-r border-[#46484c]/10 sticky left-0" style={{ background: "rgba(0,0,0,0.15)" }}>
-                    {responseText.split("\n").map((_, i) => (
-                      <div key={i} className="text-right pr-3 pl-3 text-[10px] font-mono leading-[1.8]" style={{ color: "rgba(70,72,76,0.5)" }}>
-                        {i + 1}
+              {!loading && !reqError && response && responseTab === "body" && (
+                <div className="p-4">
+                  <JsonView value={responseText} className="text-[12px]" />
+                </div>
+              )}
+
+              {!loading && !reqError && response && responseTab === "headers" && (
+                <div className="p-4">
+                  <div className="space-y-1.5">
+                    {response.headers.map((h) => (
+                      <div key={h.key} className="flex gap-3 text-[12px]">
+                        <span className="vz-mono w-[38%] flex-shrink-0 break-all text-vz-soft">
+                          {h.key}
+                        </span>
+                        <span className="vz-mono min-w-0 flex-1 break-all text-vz-dim">
+                          {h.value}
+                        </span>
                       </div>
                     ))}
                   </div>
-                  {/* Code */}
-                  <pre className="flex-1 p-4 text-xs font-mono text-[#f8f9fe] whitespace-pre-wrap break-words leading-[1.8] overflow-x-auto">
-                    {responseText}
-                  </pre>
+                  <p className="mt-4 text-[11px] leading-relaxed text-vz-dim">
+                    Browsers only expose CORS-safelisted response headers unless the
+                    server sends Access-Control-Expose-Headers.
+                  </p>
                 </div>
               )}
 
               {!loading && !reqError && !response && (
-                <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-                  <div className="w-16 h-16 rounded-2xl bg-[#22262b]/30 border border-[#46484c]/15 flex items-center justify-center">
-                    <Send size={24} className="text-[#46484c]" />
-                  </div>
-                  <p className="text-[#73757a] text-sm font-medium">Hit Send to see the response</p>
-                  <p className="text-[#46484c] text-xs">Response will appear here with syntax highlighting</p>
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                  <span className="grid h-12 w-12 place-items-center rounded-xl border border-vz-line bg-vz-panel-2 text-vz-dim">
+                    <Send size={20} />
+                  </span>
+                  <p className="text-[13px] text-vz-soft">Send the request to see the response</p>
+                  <p className="text-[12px] text-vz-dim">
+                    Status, timing, headers and body appear here
+                  </p>
                 </div>
               )}
             </div>
@@ -296,37 +773,62 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
         </div>
 
         {/* ── Footer ── */}
-        <div className="flex items-center justify-between px-6 py-3 border-t border-[#46484c]/20 flex-shrink-0" style={{ background: "rgba(17,20,23,0.5)" }}>
-          <div className="flex items-center gap-3">
-            <button onClick={handleCopyCurl} className="flex items-center gap-2 text-xs text-[#73757a] hover:text-[#e08efe] transition-all duration-200 group font-mono">
-              {curlCopied ? (<><CheckCircle size={13} className="text-[#81ecff]" /><span className="text-[#81ecff]">Copied!</span></>) : (<><Copy size={13} className="group-hover:scale-110 transition-transform duration-200" /> Copy as cURL</>)}
-            </button>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] text-[#46484c] flex items-center gap-1.5 hidden sm:flex">
-              <Wifi size={10} /> CORS restrictions may apply
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-vz-line-soft px-4 py-2.5">
+          <button
+            type="button"
+            onClick={handleCopyCurl}
+            className="vz-t flex items-center gap-2 text-[12px] text-vz-soft hover:text-vz-text"
+          >
+            {curlCopied ? (
+              <>
+                <Check size={13} className="text-vz-green" /> Copied
+              </>
+            ) : (
+              <>
+                <Copy size={13} /> Copy as cURL
+              </>
+            )}
+          </button>
+
+          <span className="hidden items-center gap-1.5 text-[11px] text-vz-dim sm:flex">
+            <Wifi size={11} /> CORS restrictions may apply
+          </span>
+
+          <div className="ml-auto flex items-center gap-3">
+            <span className="hidden items-center gap-1 sm:flex">
+              {["Ctrl", "Enter"].map((key) => (
+                <kbd
+                  key={key}
+                  className="vz-mono rounded border border-vz-line bg-vz-elev px-1.5 py-0.5 text-[10px] text-vz-dim"
+                >
+                  {key}
+                </kbd>
+              ))}
             </span>
             {hasChanges && onUpdate && (
-              <button onClick={handleUpdate}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200 active:scale-95 ${
+              <button
+                type="button"
+                onClick={handleUpdate}
+                className={`vz-t flex items-center gap-2 rounded-lg px-3.5 py-2 text-[12px] font-semibold ${
                   updateSaved
-                    ? "bg-[#81ecff]/15 text-[#81ecff] border border-[#81ecff]/30"
-                    : "bg-[#e08efe] text-[#0c0e12] hover:bg-[#ce7eec] shadow-lg shadow-[#e08efe]/15"
-                }`}>
-                {updateSaved ? (<><CheckCircle size={13} /> Saved</>) : (<><Save size={13} /> Update Endpoint</>)}
+                    ? "bg-vz-green/15 text-vz-green"
+                    : "bg-gradient-to-r from-[#a855f7] to-[#c760ff] text-[#160a1d] hover:opacity-90"
+                }`}
+              >
+                {updateSaved ? (
+                  <>
+                    <Check size={13} /> Saved
+                  </>
+                ) : (
+                  <>
+                    <Save size={13} /> Update endpoint
+                  </>
+                )}
               </button>
             )}
           </div>
         </div>
       </div>
-
-      {/* Custom animation keyframe */}
-      <style>{`
-        @keyframes playgroundEnter {
-          from { opacity: 0; transform: translateY(30px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-      `}</style>
     </div>
   );
 };

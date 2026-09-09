@@ -83,8 +83,10 @@ const Hero = () => (
       </ul>
     </div>
 
-    <div className="landing-rise min-w-0">
-      <WorkspacePreview />
+    <div className="preview-stage min-w-0">
+      <div className="preview-arrive">
+        <WorkspacePreview />
+      </div>
     </div>
   </section>
 );

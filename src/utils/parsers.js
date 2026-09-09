@@ -23,7 +23,8 @@ export const extractUrlParams = (url) => {
 
   const [pathPart, queryPart] = url.split("?");
 
-  const pathMatches = pathPart.match(/\{[^}/]+\}|:[^/?#]+/g) || [];
+  const pathMatches =
+    pathPart.match(/\{[^}/]+\}|:[a-zA-Z_][a-zA-Z0-9_-]*/g) || [];
   pathMatches.forEach((raw) => {
     const name = raw.startsWith("{") ? raw.slice(1, -1) : raw.slice(1);
     if (name)

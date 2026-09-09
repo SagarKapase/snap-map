@@ -92,7 +92,7 @@ const GLANCE_NODES = [
 const FeatureShowcase = () => (
   <section
     id="features"
-    className="mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-24"
+    className="approach-scene mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-24"
   >
     {/* ── Spec → map ─────────────────────────────── */}
     <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
@@ -122,7 +122,7 @@ const FeatureShowcase = () => (
         </ul>
       </div>
 
-      <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
+      <div className="approach grid min-w-0 grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
         <div className="relative min-w-0 overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel">
           <div className="flex items-center gap-2 border-b border-vz-line-soft px-3 py-2">
             <span className="text-[10px] uppercase tracking-wider text-vz-dim">
@@ -192,11 +192,11 @@ const FeatureShowcase = () => (
     </div>
 
     {/* ── Feature grid ───────────────────────────── */}
-    <div className="mt-20 grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="approach lift-scene mt-20 grid grid-cols-1 gap-4 md:grid-cols-3">
       {PRIMARY.map((feature) => (
         <article
           key={feature.title}
-          className="vz-t rounded-[14px] border border-vz-line bg-gradient-to-b from-vz-panel to-[#0a0f18] p-6 hover:border-[#2c3548]"
+          className="lift-card h-full overflow-hidden rounded-[14px] border border-vz-line bg-gradient-to-b from-vz-panel to-[#0a0f18] p-6"
         >
           <span className="mb-5 grid h-[42px] w-[42px] place-items-center rounded-[11px] border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2">
             <feature.icon size={18} aria-hidden="true" />
@@ -211,11 +211,11 @@ const FeatureShowcase = () => (
       ))}
     </div>
 
-    <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="approach lift-scene mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
       {SECONDARY.map((feature) => (
         <article
           key={feature.title}
-          className="flex items-start gap-3.5 rounded-[12px] border border-vz-line-soft bg-vz-panel/50 p-4"
+          className="lift-card flex items-start gap-3.5 overflow-hidden rounded-[12px] border border-vz-line-soft bg-vz-panel/50 p-4"
         >
           <span className="mt-0.5 grid h-[30px] w-[30px] flex-shrink-0 place-items-center rounded-[9px] border border-vz-line bg-vz-panel-2 text-vz-soft">
             <feature.icon size={14} aria-hidden="true" />

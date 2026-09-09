@@ -32,7 +32,7 @@ const UseCases = () => (
   <section
     id="use-cases"
     aria-labelledby="use-cases-heading"
-    className="mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-20"
+    className="approach-scene mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-20"
   >
     <h2
       id="use-cases-heading"
@@ -41,11 +41,11 @@ const UseCases = () => (
       Built for the moments you meet an API.
     </h2>
 
-    <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div className="approach lift-scene mt-12 grid grid-cols-1 gap-4 md:grid-cols-2">
       {CASES.map((useCase) => (
         <article
           key={useCase.title}
-          className="vz-t rounded-[14px] border border-vz-line bg-vz-panel/60 p-6 hover:border-[#2c3548]"
+          className="lift-card overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel/60 p-6"
         >
           <div className="flex items-start gap-4">
             <span className="grid h-[38px] w-[38px] flex-shrink-0 place-items-center rounded-[10px] border border-vz-line bg-vz-panel-2 text-vz-accent-2">

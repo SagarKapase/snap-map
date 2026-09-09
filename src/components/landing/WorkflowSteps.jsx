@@ -24,7 +24,7 @@ const STEPS = [
 const WorkflowSteps = () => (
   <section
     aria-labelledby="workflow-heading"
-    className="mx-auto max-w-[1500px] px-5 py-16 sm:px-8 lg:py-20"
+    className="approach-scene mx-auto max-w-[1500px] px-5 py-16 sm:px-8 lg:py-20"
   >
     <h2
       id="workflow-heading"
@@ -37,7 +37,7 @@ const WorkflowSteps = () => (
       browser tab you already have open.
     </p>
 
-    <ol className="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-[14px] border border-vz-line bg-vz-line sm:grid-cols-2 lg:grid-cols-4">
+    <ol className="approach mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-[14px] border border-vz-line bg-vz-line sm:grid-cols-2 lg:grid-cols-4">
       {STEPS.map((step) => (
         <li key={step.id} className="bg-vz-bg p-6">
           <span className="vz-mono block text-[11px] font-semibold tracking-[0.14em] text-vz-accent-2">

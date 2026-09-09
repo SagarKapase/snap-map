@@ -118,7 +118,7 @@ const WorkspacePreview = () => (
   <figure className="relative m-0">
     <div
       aria-hidden="true"
-      className="overflow-hidden rounded-[16px] border border-vz-accent/25 bg-gradient-to-b from-[#101420] to-[#090d14] shadow-[0_35px_80px_-20px_rgba(0,0,0,0.75),0_0_60px_-30px_rgba(168,85,247,0.35)]"
+      className="overflow-hidden rounded-[16px] border border-vz-accent/25 bg-gradient-to-b from-[#101420] to-[#090d14] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.95),0_0_70px_-40px_rgba(168,85,247,0.4)]"
     >
       {/* ── App top bar ───────────────────────────── */}
       <div className="flex h-[46px] items-center justify-between gap-3 border-b border-vz-line-soft px-3">
