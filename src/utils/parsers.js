@@ -14,6 +14,103 @@ export const formatLabel = (data) => {
   return "Custom JSON";
 };
 
+// ─── Parameters inferred from a URL string ───
+// Path placeholders ({id} or :id) and query keys are real parts of the spec,
+// so they are surfaced as parameters when the format declares none.
+export const extractUrlParams = (url) => {
+  const params = [];
+  if (!url || typeof url !== "string") return params;
+
+  const [pathPart, queryPart] = url.split("?");
+
+  const pathMatches = pathPart.match(/\{[^}/]+\}|:[^/?#]+/g) || [];
+  pathMatches.forEach((raw) => {
+    const name = raw.startsWith("{") ? raw.slice(1, -1) : raw.slice(1);
+    if (name)
+      params.push({ name, in: "path", required: true, type: "", description: "" });
+  });
+
+  if (queryPart) {
+    queryPart.split("&").forEach((pair) => {
+      if (!pair) return;
+      const [key, value = ""] = pair.split("=");
+      if (key)
+        params.push({
+          name: key,
+          in: "query",
+          required: false,
+          type: "",
+          description: "",
+          example: value,
+        });
+    });
+  }
+
+  return params;
+};
+
+const dedupeParams = (params) => {
+  const seen = new Set();
+  return params.filter((p) => {
+    const key = `${p.in}:${p.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+// ─── OpenAPI / Swagger helpers ───────────────
+const openApiAuth = (spec, operation) => {
+  const schemes =
+    spec.components?.securitySchemes || spec.securityDefinitions || {};
+  const security = operation.security ?? spec.security;
+  if (!Array.isArray(security) || security.length === 0) return [];
+
+  const out = [];
+  security.forEach((requirement) => {
+    Object.entries(requirement || {}).forEach(([name, scopes]) => {
+      const scheme = schemes[name] || {};
+      out.push({
+        name,
+        type: scheme.type || "",
+        scheme: scheme.scheme || "",
+        location: scheme.in || "",
+        headerName: scheme.name || "",
+        scopes: Array.isArray(scopes) ? scopes : [],
+      });
+    });
+  });
+  return out;
+};
+
+const openApiResponses = (operation) => {
+  const responses = operation.responses || {};
+  return Object.entries(responses).map(([status, res]) => {
+    const content = res?.content || {};
+    const contentType = Object.keys(content)[0] || "";
+    const media = contentType ? content[contentType] : null;
+
+    let example = media?.example;
+    if (example === undefined && media?.examples) {
+      example = Object.values(media.examples)[0]?.value;
+    }
+    if (example === undefined) example = media?.schema?.example;
+    // Swagger 2.0 keeps examples on the response object itself
+    if (example === undefined && res?.examples) {
+      example =
+        res.examples["application/json"] ?? Object.values(res.examples)[0];
+    }
+
+    return {
+      status,
+      description: res?.description || "",
+      contentType: contentType || (res?.examples ? "application/json" : ""),
+      example,
+      schema: media?.schema || res?.schema || null,
+    };
+  });
+};
+
 // ─── OpenAPI / Swagger parser ────────────────
 export const parseOpenApi = (data, setStats) => {
   const allNodes = [];
@@ -68,6 +165,29 @@ export const parseOpenApi = (data, setStats) => {
         if (bodyParam?.schema?.example) body = bodyParam.schema.example;
       }
 
+      const declared = [
+        ...(Array.isArray(pathObj.parameters) ? pathObj.parameters : []),
+        ...(Array.isArray(operation.parameters) ? operation.parameters : []),
+      ]
+        .filter((p) => p && p.in !== "body")
+        .map((p) => ({
+          name: p.name,
+          in: p.in || "query",
+          required: !!p.required,
+          type: p.schema?.type || p.type || "",
+          description: p.description || "",
+          example: p.example ?? p.schema?.example,
+        }));
+
+      const params = dedupeParams([...declared, ...extractUrlParams(pathStr)]);
+
+      const headers = params
+        .filter((p) => p.in === "header")
+        .map((p) => ({
+          key: p.name,
+          value: p.example != null ? String(p.example) : "",
+        }));
+
       tags.forEach((tag) => {
         if (!tagGroups[tag]) tagGroups[tag] = [];
         tagGroups[tag].push({
@@ -77,8 +197,16 @@ export const parseOpenApi = (data, setStats) => {
             `${upperMethod} ${pathStr}`,
           method: upperMethod,
           path: `${baseUrl}${pathStr}`,
+          template: pathStr,
           description: operation.description || operation.summary || "",
           body,
+          params,
+          headers,
+          auth: openApiAuth(data, operation),
+          responses: openApiResponses(operation),
+          requestBodySchema:
+            operation.requestBody?.content?.["application/json"]?.schema || null,
+          deprecated: !!operation.deprecated,
         });
       });
 
@@ -95,24 +223,16 @@ export const parseOpenApi = (data, setStats) => {
       type: "folder",
       parentId: "node-root",
       itemCount: endpoints.length,
-      description: "",
+      description:
+        (data.tags || []).find((t) => t.name === tag)?.description || "",
     });
 
     endpoints.forEach((ep) => {
       allNodes.push({
         id: `node-${id++}`,
-        name: ep.name,
         type: "request",
         parentId: folderId,
-        method: ep.method,
-        path: ep.path,
-        description: ep.description,
-        body: ep.body,
-        headers: [
-          { key: "Content-Type", value: "application/json" },
-          { key: "Accept", value: "*/*" },
-          { key: "Authorization", value: "Bearer <token>" },
-        ],
+        ...ep,
       });
     });
   });
@@ -139,12 +259,7 @@ export const parseCustomApi = (data, setStats) => {
   allNodes.push(root);
 
   const normalizeEndpoint = (ep) => {
-    const method = (
-      ep.method ||
-      ep.type ||
-      ep.httpMethod ||
-      "GET"
-    ).toUpperCase();
+    const method = (ep.method || ep.type || ep.httpMethod || "GET").toUpperCase();
     const url = ep.url || ep.path || ep.endpoint || ep.route || "";
     const name = ep.name || ep.title || ep.summary || `${method} ${url}`;
     const description = ep.description || ep.summary || "";
@@ -157,6 +272,53 @@ export const parseCustomApi = (data, setStats) => {
       }
     }
     return { method, url, name, description, body };
+  };
+
+  // Response examples, only when the source JSON actually carries one
+  const customResponses = (ep) => {
+    const raw = ep.response ?? ep.responses ?? ep.example ?? ep.sampleResponse;
+    if (raw == null) return [];
+    if (Array.isArray(raw)) {
+      return raw.filter(Boolean).map((r) => ({
+        status: String(r.status ?? r.code ?? 200),
+        description: r.name || r.description || "",
+        contentType: r.contentType || "application/json",
+        example: r.body ?? r.example ?? r.data ?? r,
+      }));
+    }
+    if (typeof raw === "object" && (raw.status || raw.code || raw.body)) {
+      return [
+        {
+          status: String(raw.status ?? raw.code ?? 200),
+          description: raw.name || raw.description || "",
+          contentType: raw.contentType || "application/json",
+          example: raw.body ?? raw.example ?? raw.data ?? raw,
+        },
+      ];
+    }
+    return [
+      {
+        status: "200",
+        description: "",
+        contentType: "application/json",
+        example: raw,
+      },
+    ];
+  };
+
+  const normalizeHeaders = (ep) => {
+    const raw = ep.headers;
+    if (!raw) return [];
+    if (Array.isArray(raw))
+      return raw
+        .filter((h) => h && (h.key || h.name))
+        .map((h) => ({ key: h.key || h.name, value: String(h.value ?? "") }));
+    if (typeof raw === "object")
+      return Object.entries(raw).map(([key, value]) => ({
+        key,
+        value: String(value ?? ""),
+      }));
+    return [];
   };
 
   const addEndpoints = (endpoints, parentId) => {
@@ -174,11 +336,10 @@ export const parseCustomApi = (data, setStats) => {
         path: norm.url,
         description: norm.description,
         body: norm.body,
-        headers: [
-          { key: "Content-Type", value: "application/json" },
-          { key: "Accept", value: "*/*" },
-          { key: "Authorization", value: "Bearer <token>" },
-        ],
+        params: extractUrlParams(norm.url),
+        headers: normalizeHeaders(ep),
+        auth: [],
+        responses: customResponses(ep),
       });
     });
   };
@@ -230,10 +391,10 @@ export const parseCustomApi = (data, setStats) => {
             path: norm.url,
             description: norm.description,
             body: norm.body,
-            headers: [
-              { key: "Content-Type", value: "application/json" },
-              { key: "Accept", value: "*/*" },
-            ],
+            params: extractUrlParams(norm.url),
+            headers: normalizeHeaders(data),
+            auth: [],
+            responses: customResponses(data),
           });
         }
       }
@@ -243,6 +404,42 @@ export const parseCustomApi = (data, setStats) => {
   root.itemCount = allNodes.length - 1;
   setStats(s);
   return allNodes;
+};
+
+// ─── Postman helpers ─────────────────────────
+const postmanAuth = (auth) => {
+  if (!auth || !auth.type) return [];
+  return [
+    {
+      name: auth.type,
+      type: auth.type,
+      scheme: auth.type === "bearer" ? "bearer" : "",
+      location: "header",
+      headerName: auth.type === "apikey" ? "" : "Authorization",
+      scopes: [],
+    },
+  ];
+};
+
+const postmanResponses = (item) => {
+  const list = Array.isArray(item.response) ? item.response : [];
+  return list.filter(Boolean).map((r) => {
+    let example = r.body;
+    try {
+      if (typeof r.body === "string") example = JSON.parse(r.body);
+    } catch {
+      example = r.body;
+    }
+    const ct = (r.header || []).find(
+      (h) => h && String(h.key).toLowerCase() === "content-type",
+    );
+    return {
+      status: String(r.code ?? r.status ?? ""),
+      description: r.name || r.status || "",
+      contentType: ct?.value || "",
+      example,
+    };
+  });
 };
 
 // ─── Postman collection parser ───────────────
@@ -270,27 +467,53 @@ export const parsePostmanCollection = (data, setStats) => {
         type: "folder",
         parentId,
         itemCount: item.item.length,
-        description:
-          item.description?.content || item.description || "",
+        description: item.description?.content || item.description || "",
       });
       item.item.forEach((child) => processItem(child, nodeId));
     } else {
       const req = item.request || item;
       const url =
-        typeof req.url === "string"
-          ? req.url
-          : req.url?.raw || item.url || "";
+        typeof req.url === "string" ? req.url : req.url?.raw || item.url || "";
       const method = (req.method || item.method || "GET").toUpperCase();
       s[method.toLowerCase()] = (s[method.toLowerCase()] || 0) + 1;
       s.total++;
       let body = null;
       try {
-        body = req.body?.raw
-          ? JSON.parse(req.body.raw)
-          : req.body || null;
+        body = req.body?.raw ? JSON.parse(req.body.raw) : req.body || null;
       } catch {
         body = req.body || null;
       }
+
+      const declared = [];
+      if (req.url && typeof req.url === "object") {
+        (req.url.variable || []).forEach((v) => {
+          if (v?.key)
+            declared.push({
+              name: v.key,
+              in: "path",
+              required: true,
+              type: "",
+              description: v.description?.content || v.description || "",
+              example: v.value,
+            });
+        });
+        (req.url.query || []).forEach((q) => {
+          if (q?.key)
+            declared.push({
+              name: q.key,
+              in: "query",
+              required: false,
+              type: "",
+              description: q.description?.content || q.description || "",
+              example: q.value,
+            });
+        });
+      }
+
+      const headers = (Array.isArray(req.header) ? req.header : [])
+        .filter((h) => h && h.key && !h.disabled)
+        .map((h) => ({ key: h.key, value: String(h.value ?? "") }));
+
       allNodes.push({
         id: nodeId,
         name: item.name,
@@ -304,11 +527,10 @@ export const parsePostmanCollection = (data, setStats) => {
           item.description ||
           "",
         body,
-        headers: [
-          { key: "Content-Type", value: "application/json" },
-          { key: "Accept", value: "*/*" },
-          { key: "Authorization", value: "Bearer <token>" },
-        ],
+        params: dedupeParams([...declared, ...extractUrlParams(url)]),
+        headers,
+        auth: postmanAuth(req.auth || item.auth || data.auth),
+        responses: postmanResponses(item),
       });
     }
   };

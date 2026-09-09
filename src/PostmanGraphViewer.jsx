@@ -1,21 +1,25 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import yaml from "js-yaml";
 import {
-  Upload, Download, ZoomIn, ZoomOut, RotateCcw, Maximize2, Search,
-  ChevronDown, X, Code, Menu, ArrowLeft, Eye, Sparkles,
-  Save, FolderOpen, Share2, GitCompareArrows, Link2, Check, Copy,
-  Activity, Zap, Globe, Server, BarChart3, Users, BookOpen, ShieldAlert,
-  Network,
+  ZoomIn, ZoomOut, RotateCcw, Search, MoreHorizontal, Play, Share2,
+  Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
+  Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
+  Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
 import { generateShareUrl, extractSharedSpec } from "./utils/sharing";
+import {
+  LAYOUT_LABELS, ancestorsOf, buildGroupTree, collectWarnings, countSchemas,
+} from "./utils/analysis";
+import { addRecent, clearRecents, getRecents } from "./utils/recents";
+import BrandMark from "./components/BrandMark";
 import ConnectionLines from "./components/ConnectionLines";
 import GraphCard from "./components/GraphCard";
 import Minimap from "./components/Minimap";
 import JsonInputScreen from "./components/JsonInputScreen";
 import ApiPlaygroundModal from "./components/ApiPlaygroundModal";
-import RequestDetailsPanel from "./components/RequestDetailsPanel";
 import ExportMenu from "./components/ExportMenu";
 import { SaveCollectionModal, CollectionsModal } from "./components/CollectionManager";
 import DiffView from "./components/DiffView";
@@ -29,13 +33,32 @@ import MultiServiceGraph from "./components/MultiServiceGraph";
 import MockServer from "./components/MockServer";
 import LoadTester from "./components/LoadTester";
 import WorkspaceManager from "./components/WorkspaceManager";
+import TopNav from "./components/workspace/TopNav";
+import ApiExplorer from "./components/workspace/ApiExplorer";
+import GraphToolbar from "./components/workspace/GraphToolbar";
+import EndpointInspector from "./components/workspace/EndpointInspector";
+import StatusBar from "./components/workspace/StatusBar";
+import CommandPalette from "./components/workspace/CommandPalette";
+import TableView from "./components/workspace/TableView";
+import RawSpecView from "./components/workspace/RawSpecView";
+
+const CENTER_TABS = [
+  { id: "map", label: "API Map", icon: Waypoints },
+  { id: "table", label: "Table View", icon: Table2 },
+  { id: "raw", label: "Raw Spec", icon: Braces },
+];
 
 const PostmanGraphViewer = () => {
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const paperRef = useRef(null);
+  const canvasShellRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const moreMenuRef = useRef(null);
 
   const [view, setView] = useState("input");
+  const [returnView, setReturnView] = useState("input");
   const [collection, setCollection] = useState(null);
   const [nodes, setNodes] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -47,14 +70,12 @@ const PostmanGraphViewer = () => {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [searchQuery, setSearchQuery] = useState("");
   const [filterMethod, setFilterMethod] = useState("all");
-  const [graphStyle, setGraphStyle] = useState("tree");
-  const [showGraphMenu, setShowGraphMenu] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
+  const [graphStyle, setGraphStyle] = useState("graph");
   const [showPlayground, setShowPlayground] = useState(false);
   const [stats, setStats] = useState({ total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 });
   const [detectedFormat, setDetectedFormat] = useState("");
   const [collapsedFolders, setCollapsedFolders] = useState(new Set());
-  const [showParticles, setShowParticles] = useState(true);
+  const [showParticles, setShowParticles] = useState(false);
   const [showRipple, setShowRipple] = useState(false);
   const [focusedMatchIdx, setFocusedMatchIdx] = useState(0);
   // Phase 1 features
@@ -72,6 +93,20 @@ const PostmanGraphViewer = () => {
   const [showMockServer, setShowMockServer] = useState(false);
   const [showLoadTester, setShowLoadTester] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  // Workspace shell
+  const [centerTab, setCenterTab] = useState("map");
+  const [hoveredNodeId, setHoveredNodeId] = useState(null);
+  const [showPalette, setShowPalette] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [liveResponses, setLiveResponses] = useState({});
+  const [importedAt, setImportedAt] = useState(null);
+  const [recents, setRecents] = useState(() => getRecents());
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -89,15 +124,43 @@ const PostmanGraphViewer = () => {
     return new Set(nodes.filter((n) => n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase())).map((n) => n.id));
   }, [nodes, searchQuery]);
 
+  // Nodes that stay lit while another node is hovered (itself, parent, children)
+  const focusSet = useMemo(() => {
+    if (!hoveredNodeId) return null;
+    const keep = new Set([hoveredNodeId]);
+    const hovered = nodes.find((n) => n.id === hoveredNodeId);
+    if (hovered?.parentId) keep.add(hovered.parentId);
+    nodes.forEach((n) => { if (n.parentId === hoveredNodeId) keep.add(n.id); });
+    return keep;
+  }, [hoveredNodeId, nodes]);
+
+  const groups = useMemo(() => buildGroupTree(nodes), [nodes]);
+  const warnings = useMemo(() => collectWarnings(nodes), [nodes]);
+  const schemaCount = useMemo(() => countSchemas(collection), [collection]);
+
+  // Positions are computed for every node, but collapsed children are not
+  // rendered — bounds, fit and the minimap must follow the visible set only.
+  const visiblePositions = useMemo(
+    () => filteredNodes.map((n) => nodePositions[n.id]).filter(Boolean),
+    [filteredNodes, nodePositions],
+  );
+
+  // Mirrored into a ref so the deferred auto-fit can read the latest visible
+  // set without re-running the layout effect on every collapse toggle.
+  const visibleRef = useRef(visiblePositions);
+  useEffect(() => {
+    visibleRef.current = visiblePositions;
+  }, [visiblePositions]);
+
   const contentBounds = useMemo(() => {
-    const positions = Object.values(nodePositions);
+    const positions = visiblePositions;
     if (!positions.length) return { w: 1600, h: 900 };
     const minX = Math.min(...positions.map((p) => p.x));
     const minY = Math.min(...positions.map((p) => p.y));
     const maxX = Math.max(...positions.map((p) => p.x));
     const maxY = Math.max(...positions.map((p) => p.y));
     return { w: (maxX - minX) + 600, h: (maxY - minY) + 400 };
-  }, [nodePositions]);
+  }, [visiblePositions]);
 
   const calculatePositions = useCallback((nodesData) => {
     const pos = {};
@@ -278,14 +341,14 @@ const PostmanGraphViewer = () => {
           const children = nodesData.filter((c) => c.parentId === item.id);
           if (children.length === 0) return;
 
-          // Child orbit radius: scales with count so they don't overlap
-          const R_CHILD = Math.max(200, children.length * 28);
-
-          // Fan spread: wider for more children, capped at ~130°
-          const fanSpread = Math.min(
-            Math.PI * 0.72,
-            Math.max(0.35, children.length * 0.22),
-          );
+          // Orbit radius and fan angle are derived together so that adjacent
+          // children always sit ~one card width apart along the arc.
+          const CHILD_PITCH = 270;
+          const R_CHILD = Math.max(320, children.length * 120);
+          const fanSpread =
+            children.length > 1
+              ? Math.min(Math.PI * 0.8, (children.length * CHILD_PITCH) / R_CHILD)
+              : 0;
 
           children.forEach((child, ci) => {
             // Single child goes straight out; multiple children fan symmetrically
@@ -327,8 +390,20 @@ const PostmanGraphViewer = () => {
 
   const handleVisualize = useCallback((data) => {
     const parsed = parseCollection(data, setStats);
-    setDetectedFormat(Array.isArray(data) ? "Custom JSON" : formatLabel(data));
-    setCollection(data); setNodes(parsed); setSelectedNode(null); setCollapsedFolders(new Set()); setZoom(1); setPanX(0); setPanY(0); setView("graph");
+    const format = Array.isArray(data) ? "Custom JSON" : formatLabel(data);
+    setDetectedFormat(format);
+    setCollection(data); setNodes(parsed); setSelectedNode(null); setZoom(1); setPanX(0); setPanY(0);
+    setCollapsedFolders(new Set(parsed.filter((n) => n.type === "folder").map((n) => n.id)));
+    setSearchQuery(""); setFilterMethod("all"); setCenterTab("map");
+    setLiveResponses({});
+    setImportedAt(new Date().toISOString());
+    setRecents(addRecent({
+      name: data?.info?.name || data?.info?.title || data?.name || "API Collection",
+      format,
+      endpoints: parsed.filter((n) => n.type === "request").length,
+      data,
+    }));
+    setView("graph");
   }, []);
 
   const handleLoadSample = useCallback((format = "postman") => { handleVisualize(SAMPLE_DATA[format] || SAMPLE_DATA.postman); }, [handleVisualize]);
@@ -344,13 +419,19 @@ const PostmanGraphViewer = () => {
     }
   }, [collection]);
 
-  // ── Auto-load shared spec from URL on mount ──
+  // ── Auto-load a shared spec, or the sample the landing page asked for ──
   useEffect(() => {
     const shared = extractSharedSpec();
     if (shared) {
       // Clean URL without reloading
       window.history.replaceState({}, "", window.location.pathname);
       handleVisualize(shared);
+      return;
+    }
+    const demo = new URLSearchParams(window.location.search).get("demo");
+    if (demo && SAMPLE_DATA[demo]) {
+      window.history.replaceState({}, "", window.location.pathname);
+      handleLoadSample(demo);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -363,7 +444,9 @@ const PostmanGraphViewer = () => {
       // Auto-fit view after layout change so all nodes are visible
       setTimeout(() => {
         if (!canvasRef.current) return;
-        const positions = Object.values(newPos);
+        const positions = visibleRef.current.length
+          ? visibleRef.current
+          : Object.values(newPos);
         if (!positions.length) return;
         const minX = Math.min(...positions.map((p) => p.x));
         const minY = Math.min(...positions.map((p) => p.y));
@@ -371,7 +454,8 @@ const PostmanGraphViewer = () => {
         const maxY = Math.max(...positions.map((p) => p.y)) + 120;
         const cW = canvasRef.current.offsetWidth;
         const cH = canvasRef.current.offsetHeight;
-        const newZoom = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.2);
+        const fitted = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.2);
+        const newZoom = Math.max(fitted, 0.4);
         setZoom(newZoom);
         setPanX(-minX + 40 / newZoom);
         setPanY(-minY + 40 / newZoom);
@@ -400,30 +484,71 @@ const PostmanGraphViewer = () => {
 
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); document.querySelector('input[placeholder*="Search"]')?.focus(); }
-      if (e.key === "Escape") { setSelectedNode(null); setShowPlayground(false); }
-      if (e.key === "Delete" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") setSearchQuery("");
-      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) { e.preventDefault(); const s = 24; if (e.key === "ArrowUp") setPanY((p) => p + s); if (e.key === "ArrowDown") setPanY((p) => p - s); if (e.key === "ArrowLeft") setPanX((p) => p + s); if (e.key === "ArrowRight") setPanX((p) => p - s); }
+      const el = document.activeElement;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setSidebarOpen(true);
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showPalette) { setShowPalette(false); return; }
+        setSelectedNode(null); setShowPlayground(false);
+        return;
+      }
+      if (showPalette) return;
+      if (e.key === "Delete" && !typing) setSearchQuery("");
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        if (typing) return;
+        e.preventDefault(); const s = 24;
+        if (e.key === "ArrowUp") setPanY((p) => p + s);
+        if (e.key === "ArrowDown") setPanY((p) => p - s);
+        if (e.key === "ArrowLeft") setPanX((p) => p + s);
+        if (e.key === "ArrowRight") setPanX((p) => p - s);
+      }
     };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [showPalette]);
 
   useEffect(() => {
-    if (view !== "graph") return; const el = canvasRef.current; if (!el) return;
+    if (view !== "graph" || centerTab !== "map") return; const el = canvasRef.current; if (!el) return;
     const onWheel = (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom((z) => Math.min(3, Math.max(0.3, z * (e.deltaY < 0 ? 1.1 : 0.9)))); } };
     el.addEventListener("wheel", onWheel, { passive: false }); return () => el.removeEventListener("wheel", onWheel);
-  }, [view]);
+  }, [view, centerTab]);
+
+  // Close the overflow menu on an outside click, like the other menus
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onDown = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [moreOpen]);
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   const handleReset = () => { setZoom(1); setPanX(0); setPanY(0); };
   const handleFitView = useCallback(() => {
-    const positions = Object.values(nodePositions); if (!positions.length || !canvasRef.current) return;
+    const positions = visiblePositions; if (!positions.length || !canvasRef.current) return;
     const minX = Math.min(...positions.map((p) => p.x)); const minY = Math.min(...positions.map((p) => p.y));
     const maxX = Math.max(...positions.map((p) => p.x)) + 280; const maxY = Math.max(...positions.map((p) => p.y)) + 110;
     const cW = canvasRef.current.offsetWidth; const cH = canvasRef.current.offsetHeight;
     const newZoom = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.4);
     setZoom(newZoom); setPanX(-minX + 40 / newZoom); setPanY(-minY + 40 / newZoom);
     canvasRef.current.scrollLeft = 0; canvasRef.current.scrollTop = 0;
-  }, [nodePositions]);
+  }, [visiblePositions]);
 
   // ── Focus on a single node: zoom in + scroll to center it ──
   const focusOnNode = useCallback((nodeId) => {
@@ -450,6 +575,50 @@ const PostmanGraphViewer = () => {
     });
   }, [nodePositions]);
 
+  // ── Select from a list (explorer, table, palette) and reveal on the map ──
+  const selectAndReveal = useCallback((node) => {
+    if (!node) return;
+    setCollapsedFolders((prev) => {
+      if (!prev.size) return prev;
+      const chain = ancestorsOf(nodes, node.id);
+      if (!chain.some((id) => prev.has(id))) return prev;
+      const next = new Set(prev);
+      chain.forEach((id) => next.delete(id));
+      return next;
+    });
+    setSelectedNode(node);
+    setInspectorOpen(true);
+    setSidebarOpen(false);
+    // Runs after the canvas has mounted; focusOnNode no-ops when it has not.
+    setTimeout(() => focusOnNode(node.id), 60);
+  }, [nodes, focusOnNode]);
+
+  const openPlayground = useCallback(() => {
+    const target = selectedNode?.type === "request"
+      ? selectedNode
+      : nodes.find((n) => n.type === "request");
+    if (!target) return;
+    if (target !== selectedNode) setSelectedNode(target);
+    setShowPlayground(true);
+  }, [selectedNode, nodes]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else canvasShellRef.current?.requestFullscreen?.();
+  }, []);
+
+  const openTool = useCallback((setter) => {
+    setReturnView("graph");
+    setter(true);
+    setMoreOpen(false);
+  }, []);
+
+  const openFullView = useCallback((next) => {
+    setReturnView(view);
+    setView(next);
+    setMoreOpen(false);
+  }, [view]);
+
   // ── Sorted match list (stable order) ──
   const matchList = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -464,7 +633,7 @@ const PostmanGraphViewer = () => {
 
   // ── Focus on the currently indexed match ──
   useEffect(() => {
-    if (view !== "graph" || matchList.length === 0) return;
+    if (view !== "graph" || centerTab !== "map" || matchList.length === 0) return;
     const idx = Math.min(focusedMatchIdx, matchList.length - 1);
     const target = matchList[idx];
     if (target) {
@@ -472,7 +641,7 @@ const PostmanGraphViewer = () => {
       const timer = setTimeout(() => focusOnNode(target.id), 120);
       return () => clearTimeout(timer);
     }
-  }, [focusedMatchIdx, matchList, view, focusOnNode]);
+  }, [focusedMatchIdx, matchList, view, centerTab, focusOnNode]);
 
   // ── Navigate matches: Enter = next, Shift+Enter = prev ──
   const handleSearchKeyDown = useCallback((e) => {
@@ -495,268 +664,69 @@ const PostmanGraphViewer = () => {
     }
   }, [matchList]);
 
-  return (
-    <div className="w-full h-screen bg-[#0c0e12] text-[#f8f9fe] flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="bg-[#0c0e12] border-b border-[#46484c]/20 px-5 py-3 flex items-center gap-4 backdrop-blur-xl flex-shrink-0 transition-all duration-300 relative z-50">
-        <div className="flex items-center gap-3 flex-shrink-0">
-          {view === "graph" && (
-            <button onClick={() => setView("input")} className="p-1.5 hover:bg-[#22262b] rounded-lg text-[#a9abb0] hover:text-white transition-all duration-200 hover:scale-105 group">
-              <ArrowLeft size={17} className="group-hover:-translate-x-0.5 transition-transform duration-200" />
-            </button>
-          )}
-          <div className="text-xl font-black text-[#e08efe] tracking-tight">Vizroute</div>
-          {view === "graph" && collection && (<span className="text-sm text-[#73757a] truncate max-w-40">{collection.info?.name || "API Collection"}</span>)}
-        </div>
+  // ── Command palette actions (all wired to existing behaviour) ──
+  const commands = useMemo(() => [
+    { id: "import", group: "Actions", icon: Plus, label: "Import API", hint: "Back to the import screen", keywords: "upload paste url new spec", run: () => setView("input") },
+    { id: "search", group: "Actions", icon: Search, label: "Search endpoints", hint: "Ctrl /", keywords: "find filter", run: () => { setSidebarOpen(true); setTimeout(() => searchInputRef.current?.focus(), 30); } },
+    { id: "playground", group: "Actions", icon: Play, label: "Open playground", hint: "Send a real request", keywords: "try request http send", run: openPlayground },
+    { id: "fit", group: "Canvas", icon: Scan, label: "Fit graph", keywords: "zoom fit all", run: () => { setCenterTab("map"); handleFitView(); } },
+    { id: "reset", group: "Canvas", icon: RotateCcw, label: "Reset view", keywords: "zoom 100 pan", run: () => { setCenterTab("map"); handleReset(); } },
+    { id: "focus", group: "Canvas", icon: Crosshair, label: "Center selected node", keywords: "focus", run: () => { if (selectedNode) { setCenterTab("map"); focusOnNode(selectedNode.id); } } },
+    ...GRAPH_STYLES.map((style) => ({
+      id: `layout-${style}`, group: "Layout", icon: Waypoints,
+      label: `Switch layout: ${LAYOUT_LABELS[style] || style}`,
+      keywords: `graph layout ${style}`,
+      run: () => { setCenterTab("map"); setGraphStyle(style); },
+    })),
+    { id: "view-map", group: "Views", icon: Waypoints, label: "Open API Map", keywords: "graph canvas", run: () => setCenterTab("map") },
+    { id: "view-table", group: "Views", icon: Table2, label: "Open Table View", keywords: "list rows", run: () => setCenterTab("table") },
+    { id: "view-raw", group: "Views", icon: Braces, label: "Open Raw Spec", keywords: "json source", run: () => setCenterTab("raw") },
+    { id: "export", group: "Views", icon: Download, label: "Export graph", hint: "PNG, SVG or source JSON", keywords: "png svg json download", run: () => { setCenterTab("map"); setExportOpen(true); } },
+    { id: "share", group: "Views", icon: Link2, label: "Copy share link", keywords: "url share", run: handleShare },
+    { id: "save", group: "Tools", icon: Save, label: "Save to collections", keywords: "store bookmark", run: () => openTool(setShowSaveModal) },
+    { id: "collections", group: "Tools", icon: FolderOpen, label: "My collections", keywords: "saved open", run: () => openTool(setShowCollections) },
+    { id: "docs", group: "Tools", icon: BookOpen, label: "Generate docs", keywords: "documentation markdown", run: () => openTool(setShowDocGenerator) },
+    { id: "health", group: "Tools", icon: Activity, label: "Health monitor", keywords: "uptime ping", run: () => openTool(setShowHealthMonitor) },
+    { id: "flow", group: "Tools", icon: Zap, label: "Test flow builder", keywords: "chain scenario", run: () => openTool(setShowFlowBuilder) },
+    { id: "env", group: "Tools", icon: Globe, label: "Environments", keywords: "variables", run: () => openTool(setShowEnvManager) },
+    { id: "mock", group: "Tools", icon: Server, label: "Mock server", keywords: "stub fake", run: () => openTool(setShowMockServer) },
+    { id: "load", group: "Tools", icon: BarChart3, label: "Load tester", keywords: "benchmark stress", run: () => openTool(setShowLoadTester) },
+    { id: "workspace", group: "Tools", icon: Users, label: "Workspaces", keywords: "team", run: () => openTool(setShowWorkspace) },
+    { id: "autoimport", group: "Tools", icon: Wifi, label: "Auto-import from URL", keywords: "github sync remote", run: () => openTool(setShowAutoImport) },
+    { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
+    { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
+    { id: "multi", group: "Tools", icon: Network, label: "Multi-service graph", keywords: "services dependencies", run: () => openFullView("multiservice") },
+  ], [openPlayground, handleFitView, handleShare, focusOnNode, selectedNode, openTool, openFullView]);
 
-        {view === "graph" && (
-          <div className="flex items-center gap-3 ml-auto">
-            {/* Search */}
-            <div className="relative group">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#73757a] group-focus-within:text-[#a9abb0] transition-colors" />
-              <input type="text" placeholder="Search... (Ctrl+K)" value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className="w-64 bg-[#22262b]/50 border border-[#46484c]/30 rounded-lg py-1.5 pl-9 pr-20 text-sm text-white placeholder:text-[#73757a] focus:border-[#e08efe]/50 focus:ring-1 focus:ring-[#e08efe]/20 transition-all duration-200 backdrop-blur-sm" />
-              {searchQuery && (
-                <>
-                  <span className="absolute right-8 top-1/2 -translate-y-1/2 text-[10px] text-[#a9abb0] font-mono tabular-nums">
-                    {matchList.length > 0 ? (
-                      <><span className="text-[#e08efe] font-bold">{Math.min(focusedMatchIdx + 1, matchList.length)}</span><span className="text-[#73757a]">/{matchList.length}</span></>
-                    ) : (
-                      <span className="text-[#ff6e84]">0</span>
-                    )}
-                  </span>
-                  <button onClick={() => { setSearchQuery(""); setSelectedNode(null); handleFitView(); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#73757a] hover:text-white transition-colors"><X size={13} /></button>
-                </>
-              )}
-            </div>
+  const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
+  const liveResponse = selectedNode ? liveResponses[selectedNode.id] : null;
 
-            {/* Method filter */}
-            <div className="flex items-center gap-0.5 bg-[#22262b]/40 border border-[#46484c]/30 rounded-lg p-1">
-              {["all", "GET", "POST", "PUT", "DELETE"].map((m) => (
-                <button key={m} onClick={() => setFilterMethod(m)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-all duration-200 ${filterMethod === m ? "bg-[#e08efe] text-[#0c0e12] shadow-md shadow-[#e08efe]/20 animate-pill" : "text-[#73757a] hover:text-[#a9abb0]"}`}>
-                  {m === "all" ? "All" : m}
-                </button>
-              ))}
-            </div>
+  const inspector = (
+    <EndpointInspector
+      key={selectedNode?.id || "empty"}
+      node={selectedNode}
+      nodes={nodes}
+      spec={collection}
+      liveResponse={liveResponse}
+      onTest={() => setShowPlayground(true)}
+      onSelectNode={selectAndReveal}
+      onClose={() => setInspectorOpen(false)}
+    />
+  );
 
-            {/* Graph style */}
-            <div className="relative">
-              <button onClick={() => setShowGraphMenu(!showGraphMenu)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#e08efe]/8 border border-[#e08efe]/20 rounded-lg hover:border-[#e08efe]/40 hover:bg-[#e08efe]/12 transition-all duration-200 text-[#e08efe] text-sm font-semibold group">
-                <Code size={14} />{graphStyle.charAt(0).toUpperCase() + graphStyle.slice(1)}
-                <ChevronDown size={14} className={`transition-transform duration-300 ${showGraphMenu ? "rotate-180" : ""}`} />
-              </button>
-              {showGraphMenu && (
-                <div className="absolute right-0 mt-2 w-44 bg-[#22262b]/95 border border-[#46484c]/40 rounded-xl shadow-2xl z-50 backdrop-blur-xl overflow-hidden" style={{ animation: "scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-                  {GRAPH_STYLES.map((s, i) => (
-                    <button key={s} onClick={() => { setGraphStyle(s); setShowGraphMenu(false); }}
-                      className={`w-full text-left px-4 py-2.5 text-sm transition-all duration-200 border-l-2 hover:bg-white/5 ${graphStyle === s ? "text-[#e08efe] border-[#e08efe] bg-[#e08efe]/8" : "text-[#a9abb0] border-transparent"}`}
-                      style={{ animation: `slideInUp 0.2s ease-out ${i * 40}ms both` }}>{s.charAt(0).toUpperCase() + s.slice(1)}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Particles toggle */}
-            <button onClick={() => setShowParticles((v) => !v)}
-              className={`p-2 rounded-lg transition-all duration-200 ${showParticles ? "bg-[#e08efe]/10 text-[#e08efe] border border-[#e08efe]/20" : "text-[#73757a] hover:text-[#a9abb0] hover:bg-[#22262b]"}`}
-              title={showParticles ? "Hide particle flow" : "Show particle flow"}>
-              <Sparkles size={15} />
-            </button>
-
-            <div className="w-px h-5 bg-[#46484c]/30 mx-0.5" />
-
-            {/* Export */}
-            <ExportMenu paperRef={paperRef} graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"} />
-
-            {/* Save to collection */}
-            <button onClick={() => setShowSaveModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg hover:border-[#46484c]/60 hover:bg-[#22262b] transition-all duration-200 text-[#a9abb0] hover:text-white text-sm font-semibold"
-              title="Save to collections">
-              <Save size={14} /> Save
-            </button>
-
-            {/* Share link */}
-            <button onClick={handleShare}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all duration-200 text-sm font-semibold ${
-                shareCopied
-                  ? "bg-[#81ecff]/10 border-[#81ecff]/30 text-[#81ecff]"
-                  : "bg-[#22262b]/60 border-[#46484c]/30 hover:border-[#46484c]/60 hover:bg-[#22262b] text-[#a9abb0] hover:text-white"
-              }`}
-              title="Copy shareable link">
-              {shareCopied ? <><Check size={14} /> Copied!</> : <><Link2 size={14} /> Share</>}
-            </button>
-
-            <div className="w-px h-5 bg-[#46484c]/30 mx-0.5" />
-
-            {/* Health Monitor */}
-            <button onClick={() => setShowHealthMonitor(true)}
-              className="p-2 rounded-lg text-[#a9abb0] hover:text-[#81ecff] hover:bg-[#22262b] transition-all duration-200"
-              title="Health Monitor">
-              <Activity size={15} />
-            </button>
-
-            {/* Flow Builder */}
-            <button onClick={() => setShowFlowBuilder(true)}
-              className="p-2 rounded-lg text-[#a9abb0] hover:text-[#e08efe] hover:bg-[#22262b] transition-all duration-200"
-              title="Test Flow Builder">
-              <Zap size={15} />
-            </button>
-
-            {/* Environment */}
-            <button onClick={() => setShowEnvManager(true)}
-              className={`p-2 rounded-lg transition-all duration-200 ${
-                activeEnvId
-                  ? "bg-[#e08efe]/10 text-[#e08efe] border border-[#e08efe]/20"
-                  : "text-[#a9abb0] hover:text-white hover:bg-[#22262b]"
-              }`}
-              title="Environments">
-              <Globe size={15} />
-            </button>
-
-            {/* Menu */}
-            <div className="relative">
-              <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-white"><Menu size={18} /></button>
-              {showMenu && (
-                <div className="absolute right-0 mt-2 w-52 bg-[#22262b]/95 border border-[#46484c]/40 rounded-xl shadow-2xl z-50 backdrop-blur-xl overflow-hidden" style={{ animation: "scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-                  <button onClick={() => { setShowDocGenerator(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BookOpen size={14} className="text-[#3aa2ff]" /> Generate Docs</button>
-                  <button onClick={() => { setShowMockServer(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Server size={14} className="text-[#81ecff]" /> Mock Server</button>
-                  <button onClick={() => { setShowLoadTester(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BarChart3 size={14} className="text-[#fbbf24]" /> Load Tester</button>
-                  <button onClick={() => { setShowWorkspace(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Users size={14} className="text-[#34d399]" /> Workspace</button>
-                  <div className="border-t border-[#46484c]/30 my-1" />
-                  <button onClick={() => { handleReset(); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><RotateCcw size={14} className="text-[#73757a]" /> Reset View</button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </header>
-
-      {/* Stats bar */}
-      {view === "graph" && (
-        <div className="bg-[#111417]/60 border-b border-[#46484c]/15 px-5 py-2 flex items-center gap-6 flex-shrink-0 backdrop-blur-sm" style={{ animation: "slideInUp 0.3s ease-out both" }}>
-          {[
-            { label: "TOTAL", val: stats.total, cls: "text-white" },
-            { label: "GET", val: stats.get, cls: "text-emerald-400", dot: "bg-emerald-500" },
-            { label: "POST", val: stats.post, cls: "text-amber-400", dot: "bg-amber-500" },
-            { label: "PUT", val: stats.put, cls: "text-blue-400", dot: "bg-blue-500" },
-            { label: "PATCH", val: stats.patch, cls: "text-purple-400", dot: "bg-purple-500" },
-            { label: "DELETE", val: stats.delete, cls: "text-red-400", dot: "bg-red-500" },
-          ].map(({ label, val, cls, dot }) => (
-            <div key={label} className="flex items-center gap-2">
-              {dot && <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />}
-              <span className="text-xs text-[#73757a] font-bold">{label}</span>
-              <span className={`text-sm font-bold ${cls}`}>{val}</span>
-            </div>
-          ))}
-          {detectedFormat && (
-            <div className="ml-auto flex items-center gap-1.5 bg-[#22262b]/60 border border-[#46484c]/30 rounded-full px-3 py-1 text-xs font-bold text-[#a9abb0]">
-              <Code size={10} className="text-[#e08efe]" />{detectedFormat}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Main content */}
-      {view === "input" ? (
-        <JsonInputScreen
-          onVisualize={handleVisualize}
-          onLoadSample={handleLoadSample}
-          onOpenCollections={() => setShowCollections(true)}
-          onOpenDiff={() => setView("diff")}
-          onOpenAutoImport={() => setShowAutoImport(true)}
-          onOpenBreaking={() => setView("breaking")}
-          onOpenMultiService={() => setView("multiservice")}
+  const modals = (
+    <>
+      {showPlayground && selectedNode?.type === "request" && (
+        <ApiPlaygroundModal
+          node={selectedNode}
+          onClose={() => setShowPlayground(false)}
+          onUpdate={(nodeId, updates) => {
+            setNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, ...updates } : n));
+            setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
+          }}
+          onResponse={(nodeId, result) => setLiveResponses((prev) => ({ ...prev, [nodeId]: result }))}
         />
-      ) : view === "diff" ? (
-        <DiffView onBack={() => setView("input")} />
-      ) : view === "breaking" ? (
-        <BreakingChangeDetector onBack={() => setView("input")} />
-      ) : view === "multiservice" ? (
-        <MultiServiceGraph onBack={() => setView("input")} />
-      ) : (
-        <div className="flex-1 flex overflow-hidden" style={{ animation: "fadeIn 0.35s ease-out both" }}>
-          <div className="flex-1 relative overflow-hidden">
-            {/* Background ambient blurs */}
-            <div className="absolute pointer-events-none" style={{ top: "-5%", left: "-5%", width: "35%", height: "35%", background: "rgba(224,142,254,0.03)", filter: "blur(100px)", borderRadius: "50%", zIndex: 0 }} />
-            <div className="absolute pointer-events-none" style={{ bottom: "10%", right: "5%", width: "25%", height: "25%", background: "rgba(58,162,255,0.03)", filter: "blur(80px)", borderRadius: "50%", zIndex: 0 }} />
-
-            <div ref={canvasRef} className="absolute inset-0 overflow-auto"
-              onClick={(e) => { if (e.target === canvasRef.current || e.target === paperRef.current) setSelectedNode(null); }}>
-              {/* Paper — dot grid from reference */}
-              <div ref={paperRef} className="relative" style={{
-                width: contentBounds.w * zoom, height: contentBounds.h * zoom, minWidth: "100%", minHeight: "100%",
-                backgroundImage: `radial-gradient(circle, rgba(70,72,76,0.4) 1px, transparent 1px)`,
-                backgroundSize: `${40 * zoom}px ${40 * zoom}px`,
-                backgroundColor: "#111417",
-              }}>
-                {/* Ripple effect */}
-                {showRipple && nodePositions["node-root"] && (
-                  <div className="absolute pointer-events-none" style={{
-                    left: (nodePositions["node-root"].x + 112 + panX) * zoom, top: (nodePositions["node-root"].y + 50 + panY) * zoom,
-                    width: 80, height: 80, marginLeft: -40, marginTop: -40, borderRadius: "50%",
-                    border: "2px solid rgba(224,142,254,0.25)", animation: "ripple 0.6s ease-out both", zIndex: 5,
-                  }} />
-                )}
-
-                <div className="absolute inset-0 pointer-events-none" style={{ transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0" }}>
-                  <ConnectionLines nodes={filteredNodes} nodePositions={nodePositions} graphStyle={graphStyle} showParticles={showParticles} />
-                </div>
-
-                <div className="absolute inset-0 pointer-events-none" style={{
-                  transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0",
-                  transition: draggedNodeId ? "none" : "transform 0.18s cubic-bezier(0.34,1.56,0.64,1)",
-                }}>
-                  {filteredNodes.map((node, idx) => {
-                    const pos = nodePositions[node.id] || { x: 100, y: 100 };
-                    return (
-                      <GraphCard key={node.id} node={node} position={pos}
-                        isSelected={selectedNode?.id === node.id} isDragging={draggedNodeId === node.id}
-                        isHighlighted={highlightedIds.has(node.id)} isCollapsed={collapsedFolders.has(node.id)}
-                        entranceDelay={Math.min(idx * 35, 500)}
-                        onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onSelect={() => setSelectedNode(node)} onCopy={() => {}}
-                        onToggleCollapse={node.type === "folder" ? toggleFolderCollapse : undefined} />
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Toolbar */}
-            <div className="absolute bottom-5 left-5 flex items-center gap-1 bg-[#0c0e12]/85 border border-[#46484c]/30 rounded-xl p-1.5 z-30 backdrop-blur-xl shadow-2xl shadow-black/40"
-              style={{ animation: "slideInUp 0.4s cubic-bezier(0.34,1.56,0.64,1) 300ms both" }}>
-              <button onClick={() => setZoom((z) => Math.min(3, z * 1.2))} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Zoom In"><ZoomIn size={15} /></button>
-              <span className="text-xs text-[#a9abb0] w-10 text-center font-mono font-bold tabular-nums">{(zoom * 100).toFixed(0)}%</span>
-              <button onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Zoom Out"><ZoomOut size={15} /></button>
-              <div className="w-px h-5 bg-[#46484c]/40 mx-0.5" />
-              <button onClick={handleFitView} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Fit All"><Maximize2 size={15} /></button>
-              <button onClick={handleReset} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Reset"><RotateCcw size={15} /></button>
-            </div>
-
-            <Minimap nodes={filteredNodes} nodePositions={nodePositions} canvasRef={canvasRef} zoom={zoom} panX={panX} panY={panY} />
-
-            {filteredNodes.length === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="text-center" style={{ animation: "scaleIn 0.4s ease-out both" }}>
-                  <Search size={40} className="text-[#46484c] mx-auto mb-3" /><p className="text-[#73757a]">No nodes match your search</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <RequestDetailsPanel node={selectedNode} onClose={() => setSelectedNode(null)} onTest={() => setShowPlayground(true)} />
-        </div>
       )}
-
-      {showPlayground && selectedNode && <ApiPlaygroundModal node={selectedNode} onClose={() => setShowPlayground(false)}
-        onUpdate={(nodeId, updates) => {
-          setNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, ...updates } : n));
-          setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
-        }}
-      />}
 
       {/* Collection modals */}
       {showSaveModal && collection && (
@@ -782,17 +752,10 @@ const PostmanGraphViewer = () => {
         />
       )}
       {showHealthMonitor && (
-        <HealthMonitor
-          nodes={nodes}
-          onClose={() => setShowHealthMonitor(false)}
-        />
+        <HealthMonitor nodes={nodes} onClose={() => setShowHealthMonitor(false)} />
       )}
       {showFlowBuilder && (
-        <FlowBuilder
-          nodes={nodes}
-          onClose={() => setShowFlowBuilder(false)}
-          activeEnv={activeEnvId ? undefined : undefined}
-        />
+        <FlowBuilder nodes={nodes} onClose={() => setShowFlowBuilder(false)} />
       )}
       {showEnvManager && (
         <EnvironmentManager
@@ -817,7 +780,391 @@ const PostmanGraphViewer = () => {
       )}
 
       <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
-        onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { try { const text = ev.target.result; let data; try { data = JSON.parse(text); } catch { data = yaml.load(text); } if (data && typeof data === "object") handleVisualize(data); } catch {} }; reader.readAsText(file); e.target.value = ""; }} />
+        onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { try { const text = ev.target.result; let data; try { data = JSON.parse(text); } catch { data = yaml.load(text); } if (data && typeof data === "object") handleVisualize(data); } catch { /* ignore unreadable file */ } }; reader.readAsText(file); e.target.value = ""; }} />
+    </>
+  );
+
+  // ─── Workspace (after a spec is parsed) ───────────────────────
+  if (view === "graph") {
+    return (
+      <div className="flex h-screen w-full flex-col overflow-hidden bg-vz-bg text-vz-text">
+        <TopNav
+          onNavigateHome={() => navigate("/")}
+          onOpenPalette={() => setShowPalette(true)}
+          onOpenCollections={() => openTool(setShowCollections)}
+          onOpenDocs={() => openTool(setShowDocGenerator)}
+          onOpenGithubImport={() => openTool(setShowAutoImport)}
+          onOpenWorkspaceManager={() => openTool(setShowWorkspace)}
+          onOpenEnvManager={() => openTool(setShowEnvManager)}
+          onResetView={() => { setCenterTab("map"); handleReset(); }}
+          onGoWorkspace={() => setCenterTab("map")}
+          recents={recents}
+          onOpenRecent={(r) => r.data && handleVisualize(r.data)}
+          onClearRecents={() => setRecents(clearRecents())}
+          showParticles={showParticles}
+          onToggleParticles={() => setShowParticles((v) => !v)}
+          showMinimap={showMinimap}
+          onToggleMinimap={() => setShowMinimap((v) => !v)}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid((v) => !v)}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          onToggleInspector={() => setInspectorOpen((v) => !v)}
+        />
+
+        <div className="relative flex min-h-0 flex-1 gap-2.5 overflow-hidden p-2.5">
+          {sidebarOpen && (
+            <div className="fixed inset-0 z-[35] bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
+          )}
+          {inspectorOpen && (
+            <div className="fixed inset-0 z-[35] bg-black/50 xl:hidden" onClick={() => setInspectorOpen(false)} />
+          )}
+
+          {/* Explorer */}
+          <aside
+            className={`z-40 w-[300px] flex-shrink-0 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel ${
+              sidebarOpen ? "fixed bottom-[50px] left-2.5 top-[70px] flex" : "hidden"
+            } lg:relative lg:inset-auto lg:flex xl:w-[312px]`}
+          >
+            <ApiExplorer
+              key={importedAt || "explorer"}
+              collection={collection}
+              detectedFormat={detectedFormat}
+              nodes={nodes}
+              groups={groups}
+              endpointCount={endpointCount}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onSearchKeyDown={handleSearchKeyDown}
+              searchInputRef={searchInputRef}
+              matchCount={matchList.length}
+              matchIndex={focusedMatchIdx}
+              selectedNodeId={selectedNode?.id}
+              onSelectNode={selectAndReveal}
+              onImport={() => setView("input")}
+              recents={recents}
+              onOpenRecent={(r) => r.data && handleVisualize(r.data)}
+              onSeeAllRecents={() => openTool(setShowCollections)}
+            />
+          </aside>
+
+          {/* Centre workspace */}
+          <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel">
+            <div className="flex h-[56px] flex-shrink-0 items-center justify-between gap-3 border-b border-vz-line-soft px-3">
+              <div className="flex items-center gap-1 rounded-[9px] border border-vz-line-soft bg-vz-bg p-1">
+                {CENTER_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setCenterTab(tab.id)}
+                    className={`vz-t flex items-center gap-1.5 rounded-[7px] px-2.5 py-[7px] text-[12px] ${
+                      centerTab === tab.id
+                        ? "bg-vz-accent/18 text-vz-text"
+                        : "text-vz-soft hover:text-vz-text"
+                    }`}
+                  >
+                    <tab.icon size={13} />
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={openPlayground}
+                  className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
+                >
+                  <Play size={14} />
+                  <span className="hidden sm:inline">Playground</span>
+                </button>
+
+                <ExportMenu
+                  paperRef={paperRef}
+                  graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"}
+                  spec={collection}
+                  open={exportOpen}
+                  onOpenChange={setExportOpen}
+                />
+
+                <div className="relative" ref={moreMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setMoreOpen((v) => !v)}
+                    title="More tools"
+                    className="vz-t flex h-9 w-9 items-center justify-center rounded-lg border border-vz-line bg-vz-panel-2 text-vz-soft hover:text-vz-text"
+                  >
+                    <MoreHorizontal size={15} />
+                  </button>
+                  {moreOpen && (
+                    <div className="vz-scroll absolute right-0 z-50 mt-2 max-h-[calc(100vh-200px)] w-60 overflow-auto rounded-xl border border-vz-line bg-vz-panel shadow-2xl shadow-black/50">
+                        {[
+                          { label: "Save to collections", icon: Save, run: () => openTool(setShowSaveModal) },
+                          { label: "Health monitor", icon: Activity, run: () => openTool(setShowHealthMonitor) },
+                          { label: "Test flow builder", icon: Zap, run: () => openTool(setShowFlowBuilder) },
+                          { label: "Environments", icon: Globe, run: () => openTool(setShowEnvManager) },
+                          { label: "Mock server", icon: Server, run: () => openTool(setShowMockServer) },
+                          { label: "Load tester", icon: BarChart3, run: () => openTool(setShowLoadTester) },
+                          { label: "Auto-import", icon: Wifi, run: () => openTool(setShowAutoImport) },
+                          { label: "API diff", icon: GitCompareArrows, run: () => openFullView("diff") },
+                          { label: "Breaking changes", icon: ShieldAlert, run: () => openFullView("breaking") },
+                          { label: "Multi-service graph", icon: Network, run: () => openFullView("multiservice") },
+                        ].map((item) => (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={item.run}
+                            className="vz-t flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] text-vz-soft hover:bg-white/4 hover:text-vz-text"
+                          >
+                            <item.icon size={14} className="text-vz-dim" />
+                            {item.label}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className={`vz-t flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-[13px] font-semibold ${
+                    shareCopied
+                      ? "bg-vz-green/15 text-vz-green"
+                      : "bg-gradient-to-r from-[#a855f7] to-[#c45cff] text-[#160a1d] hover:opacity-90"
+                  }`}
+                >
+                  {shareCopied ? <><Check size={14} /> Copied</> : <><Share2 size={14} /> Share</>}
+                </button>
+              </div>
+            </div>
+
+            <div className="relative min-h-0 flex-1">
+              {centerTab === "map" ? (
+                <div ref={canvasShellRef} className="vz-canvas-shell absolute inset-0 overflow-hidden bg-[#0a0e16]">
+                  <GraphToolbar
+                    graphStyle={graphStyle}
+                    onChangeStyle={setGraphStyle}
+                    zoom={zoom}
+                    onFit={handleFitView}
+                    onResetZoom={handleReset}
+                    onFocusSelected={() => selectedNode && focusOnNode(selectedNode.id)}
+                    canFocus={!!selectedNode}
+                    onToggleFullscreen={toggleFullscreen}
+                    isFullscreen={isFullscreen}
+                    filterMethod={filterMethod}
+                    onFilterMethod={setFilterMethod}
+                    stats={stats}
+                  />
+
+                  <div
+                    ref={canvasRef}
+                    className="absolute inset-0 overflow-auto vz-scroll"
+                    onClick={(e) => { if (e.target === canvasRef.current || e.target === paperRef.current) setSelectedNode(null); }}
+                  >
+                    <div
+                      ref={paperRef}
+                      className="relative"
+                      style={{
+                        width: contentBounds.w * zoom,
+                        height: contentBounds.h * zoom,
+                        minWidth: "100%",
+                        minHeight: "100%",
+                        backgroundColor: "#0a0e16",
+                        backgroundImage: showGrid
+                          ? "radial-gradient(circle, rgba(115,125,150,0.22) 1px, transparent 1px)"
+                          : "none",
+                        backgroundSize: `${21 * zoom}px ${21 * zoom}px`,
+                      }}
+                    >
+                      {showRipple && nodePositions["node-root"] && (
+                        <div className="pointer-events-none absolute" style={{
+                          left: (nodePositions["node-root"].x + 112 + panX) * zoom,
+                          top: (nodePositions["node-root"].y + 50 + panY) * zoom,
+                          width: 80, height: 80, marginLeft: -40, marginTop: -40, borderRadius: "50%",
+                          border: "2px solid rgba(168,85,247,0.25)", animation: "ripple 0.6s ease-out both", zIndex: 5,
+                        }} />
+                      )}
+
+                      <div className="pointer-events-none absolute inset-0" style={{ transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0" }}>
+                        <ConnectionLines
+                          nodes={filteredNodes}
+                          nodePositions={nodePositions}
+                          graphStyle={graphStyle}
+                          showParticles={showParticles}
+                          activeId={hoveredNodeId || selectedNode?.id || null}
+                        />
+                      </div>
+
+                      <div className="pointer-events-none absolute inset-0" style={{
+                        transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0",
+                        transition: draggedNodeId ? "none" : "transform 0.15s cubic-bezier(0.2,0,0,1)",
+                      }}>
+                        {filteredNodes.map((node, idx) => {
+                          const pos = nodePositions[node.id] || { x: 100, y: 100 };
+                          return (
+                            <GraphCard key={node.id} node={node} position={pos}
+                              isSelected={selectedNode?.id === node.id} isDragging={draggedNodeId === node.id}
+                              isHighlighted={highlightedIds.has(node.id)} isCollapsed={collapsedFolders.has(node.id)}
+                              isDimmed={focusSet ? !focusSet.has(node.id) : false}
+                              entranceDelay={Math.min(idx * 12, 220)}
+                              onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                              onSelect={() => { setSelectedNode(node); setInspectorOpen(true); }}
+                              onHoverChange={setHoveredNodeId}
+                              onCopy={() => {}}
+                              onToggleCollapse={node.type === "folder" ? toggleFolderCollapse : undefined} />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {showMinimap && (
+                    <Minimap nodes={filteredNodes} nodePositions={nodePositions} canvasRef={canvasRef}
+                      zoom={zoom} panX={panX} panY={panY} selectedId={selectedNode?.id} />
+                  )}
+
+                  <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5">
+                    <button type="button" onClick={() => setZoom((z) => Math.min(3, z * 1.2))} title="Zoom in"
+                      className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
+                      <ZoomIn size={15} />
+                    </button>
+                    <button type="button" onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))} title="Zoom out"
+                      className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
+                      <ZoomOut size={15} />
+                    </button>
+                    <button type="button" onClick={handleReset} title="Reset view"
+                      className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
+                      <RotateCcw size={15} />
+                    </button>
+                  </div>
+
+                  {filteredNodes.length === 0 && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <Search size={34} className="mx-auto mb-3 text-vz-line" />
+                        <p className="text-[13px] text-vz-dim">No nodes match the current search or filter</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : centerTab === "table" ? (
+                <div className="absolute inset-0">
+                  <TableView
+                    nodes={filteredNodes}
+                    selectedNodeId={selectedNode?.id}
+                    onSelectNode={(n) => { setSelectedNode(n); setInspectorOpen(true); }}
+                    onShowInMap={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+                  />
+                </div>
+              ) : (
+                <div className="absolute inset-0">
+                  <RawSpecView spec={collection} title={collection?.info?.name || collection?.info?.title || "spec"} />
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Inspector */}
+          <aside
+            className={`z-40 w-[330px] flex-shrink-0 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel ${
+              inspectorOpen ? "fixed bottom-[50px] right-2.5 top-[70px] flex" : "hidden"
+            } xl:relative xl:inset-auto xl:flex`}
+          >
+            {inspector}
+          </aside>
+        </div>
+
+        <StatusBar
+          endpointCount={endpointCount}
+          schemaCount={schemaCount}
+          warnings={warnings}
+          detectedFormat={detectedFormat}
+          importedAt={importedAt}
+          activeEnvName={activeEnvId ? "Environment active" : null}
+          onSelectWarning={(w) => {
+            const node = nodes.find((n) => n.id === w.nodeId);
+            if (node) { setCenterTab("map"); selectAndReveal(node); }
+          }}
+        />
+
+        {showPalette && (
+          <CommandPalette
+            onClose={() => setShowPalette(false)}
+            commands={commands}
+            endpoints={nodes}
+            onSelectEndpoint={selectAndReveal}
+          />
+        )}
+
+        {modals}
+      </div>
+    );
+  }
+
+  // ─── Import screen and the full-page tools ────────────────────
+  return (
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-vz-bg text-vz-text">
+      <header className="relative z-50 flex h-[60px] flex-shrink-0 items-center justify-between gap-4 border-b border-vz-line-soft bg-vz-bg px-4 sm:px-5">
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          title="Back to the Vizroute home page"
+          className="vz-t flex items-center gap-2 rounded-lg px-1 py-0.5 hover:opacity-80"
+        >
+          <BrandMark size={24} />
+          <span className="text-[17px] font-bold tracking-tight text-vz-text">
+            Vizroute
+          </span>
+        </button>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowCollections(true)}
+            className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel px-3 text-[13px] text-vz-soft hover:text-vz-text"
+          >
+            <FolderOpen size={14} />
+            <span className="hidden sm:inline">Collections</span>
+          </button>
+          <a
+            href="https://github.com/SagarKapase/snap-map"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel px-3 text-[13px] text-vz-soft hover:text-vz-text"
+          >
+            <Github size={14} />
+            <span className="hidden sm:inline">GitHub</span>
+          </a>
+          {nodes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setView("graph")}
+              className="vz-t flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-3.5 text-[13px] font-semibold text-[#160a1d] hover:opacity-90"
+            >
+              <Waypoints size={14} /> Back to map
+            </button>
+          )}
+        </div>
+      </header>
+
+      {view === "input" ? (
+        <JsonInputScreen
+          onVisualize={handleVisualize}
+          onLoadSample={handleLoadSample}
+          onOpenCollections={() => setShowCollections(true)}
+          onOpenDiff={() => openFullView("diff")}
+          onOpenAutoImport={() => setShowAutoImport(true)}
+          onOpenBreaking={() => openFullView("breaking")}
+          onOpenMultiService={() => openFullView("multiservice")}
+        />
+      ) : view === "diff" ? (
+        <DiffView onBack={() => setView(returnView)} />
+      ) : view === "breaking" ? (
+        <BreakingChangeDetector onBack={() => setView(returnView)} />
+      ) : (
+        <MultiServiceGraph onBack={() => setView(returnView)} />
+      )}
+
+      {modals}
     </div>
   );
 };

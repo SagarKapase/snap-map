@@ -1,5 +1,140 @@
 @import "tailwindcss";
 
+/* ─── Workspace design tokens ──────────────── */
+@theme {
+  --color-vz-bg: #080b12;
+  --color-vz-panel: #0f141d;
+  --color-vz-panel-2: #121824;
+  --color-vz-elev: #161d2a;
+  --color-vz-line: #222a39;
+  --color-vz-line-soft: #1a2230;
+  --color-vz-text: #f6f7fb;
+  --color-vz-soft: #a4acbc;
+  --color-vz-dim: #6f7788;
+  --color-vz-accent: #a855f7;
+  --color-vz-accent-2: #c45cff;
+  --color-vz-green: #34d399;
+  --color-vz-blue: #60a5fa;
+  --color-vz-orange: #fb923c;
+  --color-vz-red: #f43f5e;
+  --color-vz-warn: #fbbf24;
+}
+
+:root {
+  --vz-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* In-page anchors glide; the reduced-motion block below turns this off */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  /* Painted behind the app so overscroll and the lazy-route fallback never
+     flash white on a dark UI. */
+  background-color: var(--color-vz-bg);
+  color: var(--color-vz-text);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Compact, consistent interaction timing across the workspace */
+.vz-t {
+  transition:
+    background-color 150ms var(--vz-ease),
+    border-color 150ms var(--vz-ease),
+    color 150ms var(--vz-ease),
+    opacity 150ms var(--vz-ease),
+    box-shadow 150ms var(--vz-ease);
+}
+
+.vz-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3446 transparent;
+}
+
+.vz-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Visible keyboard focus everywhere, without a ring on mouse clicks */
+:focus-visible {
+  outline: 2px solid var(--color-vz-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ─── Landing page ─────────────────────────── */
+
+/* Two static, very low opacity radials behind the hero. No animation. */
+.landing-glow {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 900px;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 28% 8%,
+      rgba(168, 85, 247, 0.09),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 82% 20%,
+      rgba(56, 85, 170, 0.07),
+      transparent 32%
+    );
+}
+
+/* Single restrained entrance for the product preview */
+@keyframes landingRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing-rise {
+  animation: landingRise 0.42s cubic-bezier(0.2, 0, 0, 1) 60ms both;
+}
+
+/* Honour the OS motion preference across the whole app */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The graph canvas is positioned absolutely in flow; in the top layer it
+   needs to fill the screen instead. */
+.vz-canvas-shell:fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Canvas dot grid for the workspace theme */
+.vz-canvas-grid {
+  background-color: #0a0e16;
+  background-image: radial-gradient(
+    circle,
+    rgba(115, 125, 150, 0.22) 1px,
+    transparent 1px
+  );
+}
+
 /* ─── Core animations (preserved) ─────────── */
 @keyframes nodeEntrance {
   from { opacity: 0; transform: translateY(14px); }
@@ -196,15 +331,6 @@ input:focus, textarea:focus { outline: none; }
 }
 .node-position-transition.dragging {
   transition: none;
-}
-
-/* ─── Landing page background — rising particles ─ */
-@keyframes riseParticle {
-  0%   { transform: translateY(0) translateX(0); opacity: 0; }
-  5%   { opacity: 0.8; }
-  50%  { translateX: 20px; }
-  90%  { opacity: 0.6; }
-  100% { transform: translateY(-110vh) translateX(30px); opacity: 0; }
 }
 
 /* ─── Glass panel from reference ───────────── */

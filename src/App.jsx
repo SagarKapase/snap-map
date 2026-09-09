@@ -1,16 +1,19 @@
 import "./App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
+import LandingPage from "./pages/LandingPage";
 
-const LandingPage = lazy(() => import("./pages/LandingPage"));
-const PricingPage = lazy(() => import("./pages/PricingPage"));
+// The landing page is the entry route, so it ships in the main chunk.
+// The workspace is loaded on demand.
 const PostmanGraphViewer = lazy(() => import("./PostmanGraphViewer"));
 
 const Loader = () => (
-  <div className="w-full h-screen bg-[#0c0e12] flex items-center justify-center">
+  <div className="flex h-screen w-full items-center justify-center bg-vz-bg">
     <div className="text-center">
-      <div className="text-2xl font-black text-[#e08efe] mb-3 tracking-tight">Vizroute</div>
-      <div className="w-8 h-8 border-2 border-[#e08efe]/30 border-t-[#e08efe] rounded-full animate-spin mx-auto" />
+      <div className="mb-3 text-2xl font-extrabold tracking-tight text-vz-accent-2">
+        Vizroute
+      </div>
+      <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-vz-accent/30 border-t-vz-accent" />
     </div>
   </div>
 );
@@ -21,8 +24,10 @@ function App() {
       <Suspense fallback={<Loader />}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/workspace" element={<PostmanGraphViewer />} />
+          {/* Kept so older links and bookmarks keep working */}
           <Route path="/app" element={<PostmanGraphViewer />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

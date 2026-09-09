@@ -1,10 +1,22 @@
 import { useState, useRef, useEffect } from "react";
-import { Download, Image, FileCode2, Loader2, Check } from "lucide-react";
+import {
+  Download,
+  Image,
+  FileCode2,
+  Loader2,
+  Check,
+  Braces,
+  ChevronDown,
+} from "lucide-react";
 // Lazy-load html2canvas to avoid bloating the main bundle
 const loadHtml2Canvas = () => import("html2canvas").then((m) => m.default);
 
-const ExportMenu = ({ paperRef, graphTitle = "API Graph" }) => {
-  const [open, setOpen] = useState(false);
+// `open`/`onOpenChange` are optional: pass them to let the command palette
+// open this menu without duplicating the export logic.
+const ExportMenu = ({ paperRef, graphTitle = "API Graph", spec = null, open: openProp, onOpenChange }) => {
+  const [openLocal, setOpenLocal] = useState(false);
+  const open = openProp !== undefined ? openProp : openLocal;
+  const setOpen = onOpenChange || setOpenLocal;
   const [exporting, setExporting] = useState(null); // "png" | "svg" | null
   const [done, setDone] = useState(null);
   const menuRef = useRef(null);
@@ -154,51 +166,84 @@ const ExportMenu = ({ paperRef, graphTitle = "API Graph" }) => {
     setTimeout(() => setDone(null), 2000);
   };
 
+  const handleExportJSON = () => {
+    if (!spec) return;
+    try {
+      const blob = new Blob([JSON.stringify(spec, null, 2)], {
+        type: "application/json",
+      });
+      downloadBlob(blob, `${safeName}.json`);
+      setDone("json");
+      setTimeout(() => setDone(null), 2000);
+    } catch {
+      // silent
+    }
+  };
+
   return (
     <div className="relative" ref={menuRef}>
       <button
+        type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg hover:border-[#46484c]/60 hover:bg-[#22262b] transition-all duration-200 text-[#a9abb0] hover:text-white text-sm font-semibold"
+        className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
       >
         <Download size={14} />
         Export
+        <ChevronDown
+          size={12}
+          className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+        />
       </button>
 
       {open && (
-        <div
-          className="absolute right-0 mt-2 w-52 bg-[#22262b]/95 border border-[#46484c]/40 rounded-xl shadow-2xl z-50 backdrop-blur-xl overflow-hidden"
-          style={{ animation: "scaleIn 0.15s ease-out both" }}
-        >
+        <div className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-vz-line bg-vz-panel shadow-2xl shadow-black/50">
           <button
+            type="button"
             onClick={handleExportPNG}
             disabled={!!exporting}
-            className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200 disabled:opacity-50"
+            className="vz-t flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] text-vz-soft hover:bg-white/4 hover:text-vz-text disabled:opacity-50"
           >
             {exporting === "png" ? (
-              <Loader2 size={14} className="text-[#e08efe] animate-spin" />
+              <Loader2 size={14} className="animate-spin text-vz-accent" />
             ) : done === "png" ? (
-              <Check size={14} className="text-[#81ecff]" />
+              <Check size={14} className="text-vz-green" />
             ) : (
-              <Image size={14} className="text-[#e08efe]" />
+              <Image size={14} className="text-vz-accent" />
             )}
             Export as PNG
-            <span className="ml-auto text-[10px] text-[#73757a]">2x</span>
+            <span className="ml-auto text-[11px] text-vz-dim">2x</span>
           </button>
           <button
+            type="button"
             onClick={handleExportSVG}
             disabled={!!exporting}
-            className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200 disabled:opacity-50"
+            className="vz-t flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] text-vz-soft hover:bg-white/4 hover:text-vz-text disabled:opacity-50"
           >
             {exporting === "svg" ? (
-              <Loader2 size={14} className="text-[#3aa2ff] animate-spin" />
+              <Loader2 size={14} className="animate-spin text-vz-blue" />
             ) : done === "svg" ? (
-              <Check size={14} className="text-[#81ecff]" />
+              <Check size={14} className="text-vz-green" />
             ) : (
-              <FileCode2 size={14} className="text-[#3aa2ff]" />
+              <FileCode2 size={14} className="text-vz-blue" />
             )}
             Export as SVG
-            <span className="ml-auto text-[10px] text-[#73757a]">vector</span>
+            <span className="ml-auto text-[11px] text-vz-dim">vector</span>
           </button>
+          {spec && (
+            <button
+              type="button"
+              onClick={handleExportJSON}
+              className="vz-t flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] text-vz-soft hover:bg-white/4 hover:text-vz-text"
+            >
+              {done === "json" ? (
+                <Check size={14} className="text-vz-green" />
+              ) : (
+                <Braces size={14} className="text-vz-green" />
+              )}
+              Export source spec
+              <span className="ml-auto text-[11px] text-vz-dim">json</span>
+            </button>
+          )}
         </div>
       )}
     </div>

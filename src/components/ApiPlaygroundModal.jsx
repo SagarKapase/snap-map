@@ -2,13 +2,18 @@ import { useState, useMemo } from "react";
 import { X, Send, Plus, Trash2, Globe, RefreshCw, AlertCircle, CheckCircle, Copy, Terminal, Clock, Wifi, Save } from "lucide-react";
 import { methodColor } from "../utils/constants";
 
-const ApiPlaygroundModal = ({ node, onClose, onUpdate }) => {
+const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
   const [method, setMethod] = useState(node?.method || "GET");
   const [url, setUrl] = useState(node?.path || "");
-  const [headers, setHeaders] = useState([
-    { key: "Content-Type", value: "application/json" },
-    { key: "Accept", value: "*/*" },
-  ]);
+  // Prefer headers declared by the spec; fall back to sensible client defaults.
+  const [headers, setHeaders] = useState(() =>
+    node?.headers?.length
+      ? node.headers.map((h) => ({ key: h.key, value: h.value }))
+      : [
+          { key: "Content-Type", value: "application/json" },
+          { key: "Accept", value: "*/*" },
+        ],
+  );
   const [body, setBody] = useState(node?.body ? JSON.stringify(node.body, null, 2) : "");
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -61,7 +66,10 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate }) => {
       let data;
       try { data = JSON.parse(text); } catch { data = text; }
       const size = new Blob([text]).size;
-      setResponse({ status: res.status, statusText: res.statusText, elapsed, data, isJson: typeof data === "object", size });
+      const result = { status: res.status, statusText: res.statusText, elapsed, data, isJson: typeof data === "object", size };
+      setResponse(result);
+      // Surface the real response to the inspector for this endpoint
+      if (node?.id) onResponse?.(node.id, { ...result, at: new Date().toISOString() });
     } catch (err) {
       setReqError(err.message.includes("Failed to fetch") ? "Network error — CORS may be blocking this request." : "Request failed: " + err.message);
     } finally { setLoading(false); }
