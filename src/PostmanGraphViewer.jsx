@@ -6,15 +6,22 @@ import {
   Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
   Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
   Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
+  AlertCircle,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
-import { generateShareUrl, extractSharedSpec } from "./utils/sharing";
+import {
+  generateShareUrl, extractSharedSpec, downloadSpecFile,
+} from "./utils/sharing";
 import {
   LAYOUT_LABELS, ancestorsOf, buildGroupTree, countSchemas,
 } from "./utils/analysis";
+import {
+  computePositions, fitZoom, measureNodes,
+  LOD_ZOOM, MAX_ZOOM, MIN_ZOOM, SCALE_SAFE_AT,
+} from "./utils/layout";
 import { auditSpec } from "./utils/audit";
-import { addRecent, clearRecents, getRecents } from "./utils/recents";
+import { addRecent, clearRecents, getRecents, loadRecentData } from "./utils/recents";
 import BrandMark from "./components/BrandMark";
 import ConnectionLines from "./components/ConnectionLines";
 import GraphCard from "./components/GraphCard";
@@ -51,6 +58,13 @@ const CENTER_TABS = [
   { id: "audit", label: "Audit", icon: ShieldCheck },
 ];
 
+// Past these thresholds the canvas stops doing per-card work that only pays
+// off while every card is legible anyway.
+const CULL_ABOVE = 220;     // start clipping to the viewport
+const ANIMATE_UPTO = 150;   // entrance animation
+const HOVER_FOCUS_UPTO = 250; // dim-siblings-on-hover
+const VIEWPORT_MARGIN = 600; // graph px kept rendered outside the viewport
+
 const PostmanGraphViewer = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -64,7 +78,10 @@ const PostmanGraphViewer = () => {
   const [collection, setCollection] = useState(null);
   const [nodes, setNodes] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [nodePositions, setNodePositions] = useState({});
+  // Dragged cards override the computed layout. Keyed by a layout signature so
+  // a style change or a re-pack drops stale overrides instead of stranding
+  // cards at coordinates the new layout never produced.
+  const [dragOverrides, setDragOverrides] = useState({ base: null, moved: {} });
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -108,17 +125,46 @@ const PostmanGraphViewer = () => {
   const [liveResponses, setLiveResponses] = useState({});
   const [importedAt, setImportedAt] = useState(null);
   const [recents, setRecents] = useState(() => getRecents());
+  // Scroll position of the canvas, tracked so the render set can be clipped
+  // to what is actually on screen.
+  const [viewport, setViewport] = useState({ left: 0, top: 0, w: 0, h: 0 });
+  const [shareState, setShareState] = useState(null);
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
   }, []);
 
-  const filteredNodes = useMemo(() => nodes.filter((n) => {
-    if (n.parentId && collapsedFolders.has(n.parentId)) return false;
-    const ms = n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase());
-    const mf = filterMethod === "all" || n.method === filterMethod || n.type !== "request";
-    return ms && mf;
-  }), [nodes, searchQuery, filterMethod, collapsedFolders]);
+  const isLarge = nodes.length > SCALE_SAFE_AT;
+
+  // Search and method filter, ignoring which groups happen to be collapsed.
+  // The table and the list views want every match, not only the ones whose
+  // group is open on the map.
+  const listNodes = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return nodes.filter((n) => {
+      const ms =
+        !q ||
+        n.name.toLowerCase().includes(q) ||
+        n.path?.toLowerCase().includes(q);
+      const mf =
+        filterMethod === "all" || n.method === filterMethod || n.type !== "request";
+      return ms && mf;
+    });
+  }, [nodes, searchQuery, filterMethod]);
+
+  // What the map is allowed to show: the above, minus collapsed children.
+  const filteredNodes = useMemo(
+    () => listNodes.filter((n) => !(n.parentId && collapsedFolders.has(n.parentId))),
+    [listNodes, collapsedFolders],
+  );
+
+  // What the layout is computed from. On a large spec the collapsed groups are
+  // packed on their own, so the first view is dense instead of a field of
+  // holes where the hidden endpoints would have gone.
+  const layoutNodes = useMemo(() => {
+    if (!isLarge) return nodes;
+    return nodes.filter((n) => !(n.parentId && collapsedFolders.has(n.parentId)));
+  }, [isLarge, nodes, collapsedFolders]);
 
   const highlightedIds = useMemo(() => {
     if (!searchQuery) return new Set();
@@ -127,13 +173,13 @@ const PostmanGraphViewer = () => {
 
   // Nodes that stay lit while another node is hovered (itself, parent, children)
   const focusSet = useMemo(() => {
-    if (!hoveredNodeId) return null;
+    if (!hoveredNodeId || filteredNodes.length > HOVER_FOCUS_UPTO) return null;
     const keep = new Set([hoveredNodeId]);
     const hovered = nodes.find((n) => n.id === hoveredNodeId);
     if (hovered?.parentId) keep.add(hovered.parentId);
     nodes.forEach((n) => { if (n.parentId === hoveredNodeId) keep.add(n.id); });
     return keep;
-  }, [hoveredNodeId, nodes]);
+  }, [hoveredNodeId, nodes, filteredNodes.length]);
 
   const groups = useMemo(() => buildGroupTree(nodes), [nodes]);
   const audit = useMemo(
@@ -142,255 +188,86 @@ const PostmanGraphViewer = () => {
   );
   const schemaCount = useMemo(() => countSchemas(collection), [collection]);
 
-  // Positions are computed for every node, but collapsed children are not
-  // rendered — bounds, fit and the minimap must follow the visible set only.
-  const visiblePositions = useMemo(
-    () => filteredNodes.map((n) => nodePositions[n.id]).filter(Boolean),
+  const calculatePositions = useCallback(
+    (nodesData) => computePositions(nodesData, graphStyle, { large: isLarge }),
+    [graphStyle, isLarge],
+  );
+
+  // Layout runs against the currently visible tree, so collapsing a group on a
+  // large spec re-packs the map instead of leaving a hole behind.
+  const basePositions = useMemo(
+    () => calculatePositions(layoutNodes),
+    [layoutNodes, calculatePositions],
+  );
+
+  const nodePositions = useMemo(() => {
+    if (dragOverrides.base !== basePositions) return basePositions;
+    if (!Object.keys(dragOverrides.moved).length) return basePositions;
+    return { ...basePositions, ...dragOverrides.moved };
+  }, [basePositions, dragOverrides]);
+
+  const moveNode = useCallback((nodeId, position) => {
+    setDragOverrides((prev) => ({
+      base: basePositions,
+      moved: {
+        ...(prev.base === basePositions ? prev.moved : {}),
+        [nodeId]: position,
+      },
+    }));
+  }, [basePositions]);
+
+  // Bounds of what the map is currently showing — drives the paper size, the
+  // fit buttons and the minimap.
+  const visibleBounds = useMemo(
+    () => measureNodes(filteredNodes, nodePositions),
     [filteredNodes, nodePositions],
   );
 
-  // Mirrored into a ref so the deferred auto-fit can read the latest visible
-  // set without re-running the layout effect on every collapse toggle.
-  const visibleRef = useRef(visiblePositions);
+  // Mirrored into a ref so the deferred auto-fit can read the latest bounds
+  // without re-running the layout effect on every collapse toggle.
+  const boundsRef = useRef(visibleBounds);
   useEffect(() => {
-    visibleRef.current = visiblePositions;
-  }, [visiblePositions]);
+    boundsRef.current = visibleBounds;
+  }, [visibleBounds]);
+
+  // Revealing a node expands its group, which re-packs the layout. The
+  // deferred scroll therefore has to read the positions that exist when it
+  // runs, not the ones captured when it was scheduled.
+  const positionsRef = useRef(nodePositions);
+  useEffect(() => {
+    positionsRef.current = nodePositions;
+  }, [nodePositions]);
 
   const contentBounds = useMemo(() => {
-    const positions = visiblePositions;
-    if (!positions.length) return { w: 1600, h: 900 };
-    const minX = Math.min(...positions.map((p) => p.x));
-    const minY = Math.min(...positions.map((p) => p.y));
-    const maxX = Math.max(...positions.map((p) => p.x));
-    const maxY = Math.max(...positions.map((p) => p.y));
-    return { w: (maxX - minX) + 600, h: (maxY - minY) + 400 };
-  }, [visiblePositions]);
+    if (!visibleBounds) return { w: 1600, h: 900 };
+    return { w: visibleBounds.width + 400, h: visibleBounds.height + 300 };
+  }, [visibleBounds]);
 
-  const calculatePositions = useCallback((nodesData) => {
-    const pos = {};
-    const root = nodesData.find((n) => n.type === "root");
-    if (!root) return pos;
-    pos[root.id] = { x: 120, y: 300 };
-    const rootFolders = nodesData.filter((n) => n.parentId === root.id && n.type === "folder");
-    const rootRequests = nodesData.filter((n) => n.parentId === root.id && n.type === "request");
-    const isFlatCollection = rootFolders.length === 0 && rootRequests.length > 0;
+  // Cards are laid out absolutely across a canvas that can run to thousands of
+  // pixels; only the ones near the viewport need to exist in the DOM. Parents
+  // of visible cards are kept so their edges still have an anchor.
+  const renderNodes = useMemo(() => {
+    if (filteredNodes.length <= CULL_ABOVE || !viewport.w) return filteredNodes;
 
-    if (graphStyle === "tree") {
-      // ── Top-down vertical tree layout ────────────────────
-      // Root at top-center, children spread horizontally below
-      const CARD_H = { root: 110, folder: 80, request: 85 };
-      const CARD_W = { root: 240, folder: 208, request: 256 };
-      const SIBLING_GAP = 24;   // horizontal gap between sibling subtrees
-      const LEVEL_GAP = 60;     // vertical gap between card bottom → child top
-      const TREE_PAD_Y = 50;    // top padding
+    const left = viewport.left - VIEWPORT_MARGIN;
+    const top = viewport.top - VIEWPORT_MARGIN;
+    const right = viewport.left + viewport.w + VIEWPORT_MARGIN;
+    const bottom = viewport.top + viewport.h + VIEWPORT_MARGIN;
 
-      // Build children lookup
-      const childrenOf = {};
-      nodesData.forEach((n) => {
-        if (n.parentId) {
-          if (!childrenOf[n.parentId]) childrenOf[n.parentId] = [];
-          childrenOf[n.parentId].push(n);
-        }
-      });
+    const keep = new Set();
+    filteredNodes.forEach((n) => {
+      const p = nodePositions[n.id];
+      if (!p) return;
+      if (p.x > right || p.y > bottom || p.x + 260 < left || p.y + 110 < top) return;
+      keep.add(n.id);
+      if (n.parentId) keep.add(n.parentId);
+    });
+    return filteredNodes.filter((n) => keep.has(n.id));
+  }, [filteredNodes, nodePositions, viewport]);
 
-      // 1. Bottom-up: calculate the horizontal width each subtree needs
-      const subtreeWidth = {};
-      const calcSubtreeW = (nodeId) => {
-        if (subtreeWidth[nodeId] !== undefined) return subtreeWidth[nodeId];
-        const nd = nodesData.find((n) => n.id === nodeId);
-        const w = CARD_W[nd?.type || "request"];
-        const children = childrenOf[nodeId] || [];
-        if (children.length === 0) {
-          subtreeWidth[nodeId] = w;
-          return w;
-        }
-        const totalChildW = children.reduce((sum, ch) => sum + calcSubtreeW(ch.id), 0)
-          + (children.length - 1) * SIBLING_GAP;
-        // Subtree is at least as wide as the node itself
-        subtreeWidth[nodeId] = Math.max(totalChildW, w);
-        return subtreeWidth[nodeId];
-      };
-      calcSubtreeW(root.id);
+  const simplified = zoom < LOD_ZOOM;
+  const animateCards = renderNodes.length <= ANIMATE_UPTO;
 
-      // 2. Top-down: position nodes, centering parents above children
-      const placeNode = (nodeId, xCenter, y) => {
-        const nd = nodesData.find((n) => n.id === nodeId);
-        const w = CARD_W[nd?.type || "request"];
-        const h = CARD_H[nd?.type || "request"];
-        const children = childrenOf[nodeId] || [];
-
-        // Place this node centered at xCenter
-        pos[nodeId] = { x: xCenter - w / 2, y };
-
-        if (children.length === 0) return;
-
-        // Calculate total width of children subtrees
-        const totalChildW = children.reduce((sum, ch) => sum + subtreeWidth[ch.id], 0)
-          + (children.length - 1) * SIBLING_GAP;
-
-        // Start X: center the children block under this node
-        let cx = xCenter - totalChildW / 2;
-        const childY = y + h + LEVEL_GAP;
-
-        children.forEach((ch) => {
-          const chSubW = subtreeWidth[ch.id];
-          // Place child centered in its subtree allocation
-          placeNode(ch.id, cx + chSubW / 2, childY);
-          cx += chSubW + SIBLING_GAP;
-        });
-      };
-
-      // Start: center root horizontally based on total subtree width
-      const totalW = subtreeWidth[root.id];
-      placeNode(root.id, totalW / 2 + 60, TREE_PAD_Y);
-    } else if (graphStyle === "flowchart") {
-      let y = 60;
-      if (isFlatCollection) { rootRequests.forEach((node) => { pos[node.id] = { x: 440, y }; y += 110; }); pos[root.id] = { x: 120, y: Math.max(0, (y - 110) / 2 - 30) }; }
-      else { rootFolders.forEach((node) => { pos[node.id] = { x: 420, y }; let childY = y - 30; nodesData.forEach((child) => { if (child.parentId !== node.id) return; pos[child.id] = { x: 740, y: childY }; childY += 110; }); y += Math.max(180, nodesData.filter((c) => c.parentId === node.id).length * 110 + 40); }); rootRequests.forEach((node) => { pos[node.id] = { x: 420, y }; y += 110; }); }
-    } else if (graphStyle === "radial") {
-      // ── Concentric-ring radial layout ────────────────────
-      // Root at center, folders in ring 1, each folder's requests arc in ring 2
-      const RW = { root: 240, folder: 208, request: 256 };
-      const RH = { root: 110, folder: 80, request: 85 };
-      const CX = 800, CY = 550;
-
-      pos[root.id] = { x: CX - RW.root / 2, y: CY - RH.root / 2 };
-
-      if (isFlatCollection) {
-        // No folders — requests orbit root directly
-        const r = Math.max(280, rootRequests.length * 50);
-        rootRequests.forEach((node, i) => {
-          const a = (i / rootRequests.length) * Math.PI * 2 - Math.PI / 2;
-          pos[node.id] = {
-            x: CX + Math.cos(a) * r - RW.request / 2,
-            y: CY + Math.sin(a) * r - RH.request / 2,
-          };
-        });
-      } else {
-        // Ring 1: folders (+ bare requests treated as ring items)
-        const ringItems = [...rootFolders, ...rootRequests];
-        const ringCount = ringItems.length || 1;
-        const R1 = Math.max(300, ringCount * 55);
-
-        // Pre-calculate how much angular space each ring item needs
-        // Folders with children need more arc, bare requests need minimal
-        const childCounts = ringItems.map((item) =>
-          item.type === "folder" ? nodesData.filter((c) => c.parentId === item.id).length : 0,
-        );
-        const totalWeight = childCounts.reduce((s, c) => s + Math.max(1, c), 0);
-
-        let currentAngle = -Math.PI / 2; // start from top
-
-        ringItems.forEach((item, i) => {
-          const weight = Math.max(1, childCounts[i]);
-          const arcSize = (weight / totalWeight) * Math.PI * 2;
-          const itemAngle = currentAngle + arcSize / 2; // center of this item's arc
-
-          const ix = CX + Math.cos(itemAngle) * R1;
-          const iy = CY + Math.sin(itemAngle) * R1;
-          const w = RW[item.type] || RW.request;
-          const h = RH[item.type] || RH.request;
-          pos[item.id] = { x: ix - w / 2, y: iy - h / 2 };
-
-          // Ring 2: fan children outward from this folder
-          if (item.type === "folder") {
-            const children = nodesData.filter((c) => c.parentId === item.id);
-            if (children.length > 0) {
-              const R2 = Math.max(200, children.length * 26);
-              // Fan within this item's arc allocation (with padding)
-              const fanArc = arcSize * 0.8;
-              children.forEach((child, ci) => {
-                const ca = children.length === 1
-                  ? itemAngle
-                  : itemAngle - fanArc / 2 + (ci / (children.length - 1)) * fanArc;
-                pos[child.id] = {
-                  x: ix + Math.cos(ca) * R2 - RW.request / 2,
-                  y: iy + Math.sin(ca) * R2 - RH.request / 2,
-                };
-              });
-            }
-          }
-
-          currentAngle += arcSize;
-        });
-      }
-    } else if (graphStyle === "graph") {
-      // ── Clustered orbital graph layout ───────────────────
-      // Root at center → folders in a ring → requests fan outward from each folder
-      const CW = { root: 240, folder: 208, request: 256 };
-      const CH = { root: 110, folder: 80, request: 85 };
-      const CX = 750, CY = 500;
-
-      // Place root at dead center
-      pos[root.id] = { x: CX - CW.root / 2, y: CY - CH.root / 2 };
-
-      // All direct children of root form the orbital ring
-      const ringItems = nodesData.filter((n) => n.parentId === root.id);
-      const ringCount = ringItems.length || 1;
-
-      // Adaptive ring radius: more items = bigger ring
-      const R_RING = Math.max(300, ringCount * 55);
-
-      ringItems.forEach((item, i) => {
-        // Evenly distribute around the circle, starting from top (−π/2)
-        const angle = (i / ringCount) * Math.PI * 2 - Math.PI / 2;
-        const ix = CX + Math.cos(angle) * R_RING;
-        const iy = CY + Math.sin(angle) * R_RING;
-        const w = CW[item.type] || CW.request;
-        const h = CH[item.type] || CH.request;
-        pos[item.id] = { x: ix - w / 2, y: iy - h / 2 };
-
-        // If this ring item is a folder, fan its children outward
-        if (item.type === "folder") {
-          const children = nodesData.filter((c) => c.parentId === item.id);
-          if (children.length === 0) return;
-
-          // Orbit radius and fan angle are derived together so that adjacent
-          // children always sit ~one card width apart along the arc.
-          const CHILD_PITCH = 270;
-          const R_CHILD = Math.max(320, children.length * 120);
-          const fanSpread =
-            children.length > 1
-              ? Math.min(Math.PI * 0.8, (children.length * CHILD_PITCH) / R_CHILD)
-              : 0;
-
-          children.forEach((child, ci) => {
-            // Single child goes straight out; multiple children fan symmetrically
-            const ca =
-              children.length === 1
-                ? angle
-                : angle - fanSpread / 2 + (ci / (children.length - 1)) * fanSpread;
-
-            const rx = ix + Math.cos(ca) * R_CHILD;
-            const ry = iy + Math.sin(ca) * R_CHILD;
-            pos[child.id] = { x: rx - CW.request / 2, y: ry - CH.request / 2 };
-          });
-        }
-      });
-    } else {
-      // mindmap
-      const CHILD_STEP = 94, GROUP_GAP = 68, ROOT_X = 660, FOLD_X_L = 360, CHILD_X_L = 40, FOLD_X_R = 956, CHILD_X_R = 1228;
-      if (isFlatCollection) { const lefts = rootRequests.filter((_, i) => i % 2 === 0); const rights = rootRequests.filter((_, i) => i % 2 !== 0); const totalH = Math.max(lefts.length, rights.length) * CHILD_STEP + GROUP_GAP; pos[root.id] = { x: ROOT_X, y: totalH / 2 - 44 }; lefts.forEach((node, i) => { pos[node.id] = { x: CHILD_X_L, y: i * CHILD_STEP }; }); rights.forEach((node, i) => { pos[node.id] = { x: CHILD_X_R, y: i * CHILD_STEP }; }); }
-      else { const lefts = [], rights = []; rootFolders.forEach((n, fi) => (fi % 2 === 0 ? lefts : rights).push(n)); const numChildren = (f) => nodesData.filter((c) => c.parentId === f.id).length; const groupH = (f) => Math.max(1, numChildren(f)) * CHILD_STEP + GROUP_GAP; const totalH = (arr) => arr.reduce((s, f) => s + groupH(f), 0); const maxH = Math.max(totalH(lefts), totalH(rights), 260); pos[root.id] = { x: ROOT_X, y: maxH / 2 - 44 }; const placeGroup = (arr, folderX, childX) => { let y = 0; arr.forEach((folder) => { const children = nodesData.filter((c) => c.parentId === folder.id); const gh = groupH(folder); const usable = gh - GROUP_GAP; pos[folder.id] = { x: folderX, y: y + usable / 2 - 40 }; const span = (children.length - 1) * CHILD_STEP; const start = y + usable / 2 - span / 2 - 44; children.forEach((child, ci) => { pos[child.id] = { x: childX, y: start + ci * CHILD_STEP }; }); y += gh; }); }; placeGroup(lefts, FOLD_X_L, CHILD_X_L); placeGroup(rights, FOLD_X_R, CHILD_X_R); rootRequests.forEach((node, i) => { pos[node.id] = { x: CHILD_X_R, y: totalH(rights) + i * CHILD_STEP }; }); }
-    }
-
-    // ── Normalize: shift all positions so nothing is negative + add padding ──
-    const allPos = Object.values(pos);
-    if (allPos.length > 0) {
-      const PAD = 50;
-      const minX = Math.min(...allPos.map((p) => p.x));
-      const minY = Math.min(...allPos.map((p) => p.y));
-      if (minX < PAD || minY < PAD) {
-        const shiftX = minX < PAD ? PAD - minX : 0;
-        const shiftY = minY < PAD ? PAD - minY : 0;
-        Object.keys(pos).forEach((id) => {
-          pos[id] = { x: pos[id].x + shiftX, y: pos[id].y + shiftY };
-        });
-      }
-    }
-
-    return pos;
-  }, [graphStyle]);
 
   const handleVisualize = useCallback((data) => {
     const parsed = parseCollection(data, setStats);
@@ -412,15 +289,39 @@ const PostmanGraphViewer = () => {
 
   const handleLoadSample = useCallback((format = "postman") => { handleVisualize(SAMPLE_DATA[format] || SAMPLE_DATA.postman); }, [handleVisualize]);
 
+  // Recent entries only carry metadata; the spec is fetched on demand.
+  const handleOpenRecent = useCallback(async (entry) => {
+    const data = await loadRecentData(entry);
+    if (data) handleVisualize(data);
+  }, [handleVisualize]);
+
   // ── Share link handler ─────────────────────
+  // A link carries the whole spec in its query string. Past a few tens of
+  // kilobytes that link is rejected by every proxy in the path, so the spec
+  // is handed over as a file rather than as a URL nobody can open.
   const handleShare = useCallback(() => {
     if (!collection) return;
-    const url = generateShareUrl(collection);
-    if (url) {
-      navigator.clipboard.writeText(url);
+    const result = generateShareUrl(collection);
+    if (result.ok) {
+      navigator.clipboard?.writeText(result.url);
+      setShareState(null);
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2500);
+      return;
     }
+    setShareState({
+      bytes: result.bytes,
+      urlLength: result.urlLength || 0,
+    });
+  }, [collection]);
+
+  const handleShareDownload = useCallback(() => {
+    if (!collection) return;
+    downloadSpecFile(
+      collection,
+      collection?.info?.name || collection?.info?.title || "api-spec",
+    );
+    setShareState(null);
   }, [collection]);
 
   // ── Auto-load a shared spec, or the sample the landing page asked for ──
@@ -439,35 +340,38 @@ const PostmanGraphViewer = () => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-fit, but only when the spec or the layout actually changed —
+  // collapsing a group should re-pack without yanking the viewport.
+  const fitSignature = `${graphStyle}|${importedAt || ""}`;
+  const lastFitRef = useRef(null);
   useEffect(() => {
-    if (nodes.length > 0) {
-      const newPos = calculatePositions(nodes);
-      setNodePositions(newPos);
-      setShowRipple(true);
-      setTimeout(() => setShowRipple(false), 600);
-      // Auto-fit view after layout change so all nodes are visible
-      setTimeout(() => {
-        if (!canvasRef.current) return;
-        const positions = visibleRef.current.length
-          ? visibleRef.current
-          : Object.values(newPos);
-        if (!positions.length) return;
-        const minX = Math.min(...positions.map((p) => p.x));
-        const minY = Math.min(...positions.map((p) => p.y));
-        const maxX = Math.max(...positions.map((p) => p.x)) + 280;
-        const maxY = Math.max(...positions.map((p) => p.y)) + 120;
-        const cW = canvasRef.current.offsetWidth;
-        const cH = canvasRef.current.offsetHeight;
-        const fitted = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.2);
-        const newZoom = Math.max(fitted, 0.4);
-        setZoom(newZoom);
-        setPanX(-minX + 40 / newZoom);
-        setPanY(-minY + 40 / newZoom);
-        canvasRef.current.scrollLeft = 0;
-        canvasRef.current.scrollTop = 0;
-      }, 60);
-    }
-  }, [graphStyle, nodes, calculatePositions]);
+    if (nodes.length === 0 || lastFitRef.current === fitSignature) return;
+    lastFitRef.current = fitSignature;
+    const rippleOn = setTimeout(() => setShowRipple(true), 0);
+    const ripple = setTimeout(() => setShowRipple(false), 620);
+    const fit = setTimeout(() => {
+      const el = canvasRef.current;
+      const bounds = boundsRef.current;
+      if (!el || !bounds) return;
+      const newZoom = fitZoom(bounds, el.offsetWidth, el.offsetHeight, 1.2);
+      setZoom(newZoom);
+      setPanX(-bounds.minX + 40 / newZoom);
+      setPanY(-bounds.minY + 40 / newZoom);
+      el.scrollLeft = 0;
+      el.scrollTop = 0;
+    }, 80);
+    return () => {
+      clearTimeout(rippleOn);
+      clearTimeout(ripple);
+      clearTimeout(fit);
+    };
+  }, [fitSignature, nodes.length]);
+
+  // Stable identity so memoised cards are not invalidated every render.
+  const handleSelectNode = useCallback((node) => {
+    setSelectedNode(node);
+    setInspectorOpen(true);
+  }, []);
 
   const handleNodeMouseDown = useCallback((e, nodeId) => {
     if (e.button !== 0) return; e.preventDefault();
@@ -480,11 +384,11 @@ const PostmanGraphViewer = () => {
 
   useEffect(() => {
     if (!draggedNodeId) return;
-    const onMove = (e) => { const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return; const scrollLeft = canvasRef.current?.scrollLeft || 0; const scrollTop = canvasRef.current?.scrollTop || 0; const mx = (e.clientX - rect.left + scrollLeft) / zoom - panX; const my = (e.clientY - rect.top + scrollTop) / zoom - panY; setNodePositions((prev) => ({ ...prev, [draggedNodeId]: { x: mx - dragOffset.x, y: my - dragOffset.y } })); };
+    const onMove = (e) => { const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return; const scrollLeft = canvasRef.current?.scrollLeft || 0; const scrollTop = canvasRef.current?.scrollTop || 0; const mx = (e.clientX - rect.left + scrollLeft) / zoom - panX; const my = (e.clientY - rect.top + scrollTop) / zoom - panY; moveNode(draggedNodeId, { x: mx - dragOffset.x, y: my - dragOffset.y }); };
     const onUp = () => setDraggedNodeId(null);
     document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-  }, [draggedNodeId, dragOffset, zoom, panX, panY]);
+  }, [draggedNodeId, dragOffset, zoom, panX, panY, moveNode]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -522,10 +426,56 @@ const PostmanGraphViewer = () => {
   }, [showPalette]);
 
   useEffect(() => {
-    if (view !== "graph" || centerTab !== "map") return; const el = canvasRef.current; if (!el) return;
-    const onWheel = (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom((z) => Math.min(3, Math.max(0.3, z * (e.deltaY < 0 ? 1.1 : 0.9)))); } };
+    if (view !== "graph" || centerTab !== "map") return undefined;
+    const el = canvasRef.current; if (!el) return undefined;
+    const onWheel = (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.1 : 0.9)))); } };
     el.addEventListener("wheel", onWheel, { passive: false }); return () => el.removeEventListener("wheel", onWheel);
   }, [view, centerTab]);
+
+  // Track the visible slice of the canvas in graph coordinates. Coalesced to
+  // one update per frame so a scroll gesture costs a single re-render.
+  useEffect(() => {
+    if (view !== "graph" || centerTab !== "map") return undefined;
+    const el = canvasRef.current;
+    if (!el) return undefined;
+
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      setViewport((prev) => {
+        const next = {
+          left: el.scrollLeft / zoom - panX,
+          top: el.scrollTop / zoom - panY,
+          w: el.clientWidth / zoom,
+          h: el.clientHeight / zoom,
+        };
+        if (
+          Math.abs(next.left - prev.left) < 1 &&
+          Math.abs(next.top - prev.top) < 1 &&
+          Math.abs(next.w - prev.w) < 1 &&
+          Math.abs(next.h - prev.h) < 1
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(read);
+    };
+
+    read();
+    el.addEventListener("scroll", schedule, { passive: true });
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null;
+    observer?.observe(el);
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", schedule);
+      observer?.disconnect();
+    };
+  }, [view, centerTab, zoom, panX, panY]);
 
   useEffect(() => {
     const onFs = () => setIsFullscreen(!!document.fullscreenElement);
@@ -535,18 +485,19 @@ const PostmanGraphViewer = () => {
 
   const handleReset = () => { setZoom(1); setPanX(0); setPanY(0); };
   const handleFitView = useCallback(() => {
-    const positions = visiblePositions; if (!positions.length || !canvasRef.current) return;
-    const minX = Math.min(...positions.map((p) => p.x)); const minY = Math.min(...positions.map((p) => p.y));
-    const maxX = Math.max(...positions.map((p) => p.x)) + 280; const maxY = Math.max(...positions.map((p) => p.y)) + 110;
-    const cW = canvasRef.current.offsetWidth; const cH = canvasRef.current.offsetHeight;
-    const newZoom = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.4);
-    setZoom(newZoom); setPanX(-minX + 40 / newZoom); setPanY(-minY + 40 / newZoom);
-    canvasRef.current.scrollLeft = 0; canvasRef.current.scrollTop = 0;
-  }, [visiblePositions]);
+    const el = canvasRef.current;
+    if (!visibleBounds || !el) return;
+    const newZoom = fitZoom(visibleBounds, el.offsetWidth, el.offsetHeight, 1.4);
+    setZoom(newZoom);
+    setPanX(-visibleBounds.minX + 40 / newZoom);
+    setPanY(-visibleBounds.minY + 40 / newZoom);
+    el.scrollLeft = 0;
+    el.scrollTop = 0;
+  }, [visibleBounds]);
 
   // ── Focus on a single node: zoom in + scroll to center it ──
   const focusOnNode = useCallback((nodeId) => {
-    const pos = nodePositions[nodeId];
+    const pos = positionsRef.current[nodeId];
     if (!pos || !canvasRef.current) return;
     const el = canvasRef.current;
     const cW = el.offsetWidth;
@@ -567,7 +518,7 @@ const PostmanGraphViewer = () => {
         behavior: "smooth",
       });
     });
-  }, [nodePositions]);
+  }, []);
 
   // ── Select from a list (explorer, table, palette) and reveal on the map ──
   const selectAndReveal = useCallback((node) => {
@@ -674,7 +625,7 @@ const PostmanGraphViewer = () => {
     { id: "view-table", group: "Views", icon: Table2, label: "Open Table View", keywords: "list rows", run: () => setCenterTab("table") },
     { id: "view-raw", group: "Views", icon: Braces, label: "Open Raw Spec", keywords: "json source", run: () => setCenterTab("raw") },
     { id: "view-audit", group: "Views", icon: ShieldCheck, label: "Open audit", hint: "Lint, security and quality checks", keywords: "lint score security quality issues", run: () => setCenterTab("audit") },
-    { id: "export", group: "Views", icon: Download, label: "Export graph", hint: "PNG, SVG or source JSON", keywords: "png svg json download", run: () => { setCenterTab("map"); setExportOpen(true); } },
+    { id: "export", group: "Views", icon: Download, label: "Export or convert", hint: "OpenAPI, Swagger, Postman, PNG, SVG, CSV", keywords: "png svg json yaml download openapi swagger postman convert http csv", run: () => { setCenterTab("map"); setExportOpen(true); } },
     { id: "share", group: "Views", icon: Link2, label: "Copy share link", keywords: "url share", run: handleShare },
     { id: "save", group: "Tools", icon: Save, label: "Save to collections", keywords: "store bookmark", run: () => openTool(setShowSaveModal) },
     { id: "collections", group: "Tools", icon: FolderOpen, label: "My collections", keywords: "saved open", run: () => openTool(setShowCollections) },
@@ -760,7 +711,7 @@ const PostmanGraphViewer = () => {
 
       {/* Phase 3 modals */}
       {showDocGenerator && collection && (
-        <DocGenerator collection={collection} detectedFormat={detectedFormat} onBack={() => setShowDocGenerator(false)} />
+        <DocGenerator collection={collection} onBack={() => setShowDocGenerator(false)} />
       )}
       {showMockServer && collection && (
         <MockServer collection={collection} onClose={() => setShowMockServer(false)} />
@@ -792,7 +743,7 @@ const PostmanGraphViewer = () => {
           onResetView={() => { setCenterTab("map"); handleReset(); }}
           onGoWorkspace={() => setCenterTab("map")}
           recents={recents}
-          onOpenRecent={(r) => r.data && handleVisualize(r.data)}
+          onOpenRecent={handleOpenRecent}
           onClearRecents={() => setRecents(clearRecents())}
           showParticles={showParticles}
           onToggleParticles={() => setShowParticles((v) => !v)}
@@ -835,7 +786,7 @@ const PostmanGraphViewer = () => {
               onSelectNode={selectAndReveal}
               onImport={() => setView("input")}
               recents={recents}
-              onOpenRecent={(r) => r.data && handleVisualize(r.data)}
+              onOpenRecent={handleOpenRecent}
               onSeeAllRecents={() => openTool(setShowCollections)}
             />
           </aside>
@@ -872,24 +823,61 @@ const PostmanGraphViewer = () => {
                 </button>
 
                 <ExportMenu
-                  paperRef={paperRef}
+                  nodes={filteredNodes}
+                  allNodes={nodes}
+                  positions={nodePositions}
+                  graphStyle={graphStyle}
                   graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"}
                   spec={collection}
+                  sourceFormat={detectedFormat}
                   open={exportOpen}
                   onOpenChange={setExportOpen}
                 />
 
-                <button
-                  type="button"
-                  onClick={handleShare}
-                  className={`vz-t flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-[13px] font-semibold ${
-                    shareCopied
-                      ? "bg-vz-green/15 text-vz-green"
-                      : "bg-gradient-to-r from-[#a855f7] to-[#c45cff] text-[#160a1d] hover:opacity-90"
-                  }`}
-                >
-                  {shareCopied ? <><Check size={14} /> Copied</> : <><Share2 size={14} /> Share</>}
-                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className={`vz-t flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-[13px] font-semibold ${
+                      shareCopied
+                        ? "bg-vz-green/15 text-vz-green"
+                        : "bg-gradient-to-r from-[#a855f7] to-[#c45cff] text-[#160a1d] hover:opacity-90"
+                    }`}
+                  >
+                    {shareCopied ? <><Check size={14} /> Copied</> : <><Share2 size={14} /> Share</>}
+                  </button>
+
+                  {shareState && (
+                    <div className="absolute right-0 z-50 mt-2 w-[300px] rounded-xl border border-vz-line bg-vz-panel p-3.5 shadow-2xl shadow-black/50">
+                      <p className="flex items-start gap-2 text-[12.5px] leading-relaxed text-vz-soft">
+                        <AlertCircle size={13} className="mt-0.5 flex-shrink-0 text-vz-warn" />
+                        <span>
+                          This specification is{" "}
+                          <strong className="text-vz-text">
+                            {(shareState.bytes / 1_048_576).toFixed(1)} MB
+                          </strong>
+                          {" "}— too large to travel in a link. Send the file instead.
+                        </span>
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleShareDownload}
+                          className="vz-t flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-vz-accent/18 text-[12.5px] font-semibold text-vz-text hover:bg-vz-accent/26"
+                        >
+                          <Download size={13} /> Download spec
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShareState(null)}
+                          className="vz-t h-8 rounded-lg border border-vz-line px-3 text-[12.5px] text-vz-soft hover:text-vz-text"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -942,7 +930,7 @@ const PostmanGraphViewer = () => {
 
                       <div className="pointer-events-none absolute inset-0" style={{ transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0" }}>
                         <ConnectionLines
-                          nodes={filteredNodes}
+                          nodes={renderNodes}
                           nodePositions={nodePositions}
                           graphStyle={graphStyle}
                           showParticles={showParticles}
@@ -954,18 +942,20 @@ const PostmanGraphViewer = () => {
                         transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0",
                         transition: draggedNodeId ? "none" : "transform 0.15s cubic-bezier(0.2,0,0,1)",
                       }}>
-                        {filteredNodes.map((node, idx) => {
-                          const pos = nodePositions[node.id] || { x: 100, y: 100 };
+                        {renderNodes.map((node, idx) => {
+                          const pos = nodePositions[node.id];
+                          if (!pos) return null;
                           return (
                             <GraphCard key={node.id} node={node} position={pos}
                               isSelected={selectedNode?.id === node.id} isDragging={draggedNodeId === node.id}
                               isHighlighted={highlightedIds.has(node.id)} isCollapsed={collapsedFolders.has(node.id)}
                               isDimmed={focusSet ? !focusSet.has(node.id) : false}
-                              entranceDelay={Math.min(idx * 12, 220)}
-                              onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
-                              onSelect={() => { setSelectedNode(node); setInspectorOpen(true); }}
-                              onHoverChange={setHoveredNodeId}
-                              onCopy={() => {}}
+                              simplified={simplified}
+                              animate={animateCards}
+                              entranceDelay={animateCards ? Math.min(idx * 12, 220) : 0}
+                              onMouseDown={handleNodeMouseDown}
+                              onSelect={handleSelectNode}
+                              onHoverChange={filteredNodes.length <= HOVER_FOCUS_UPTO ? setHoveredNodeId : undefined}
                               onToggleCollapse={node.type === "folder" ? toggleFolderCollapse : undefined} />
                           );
                         })}
@@ -975,15 +965,16 @@ const PostmanGraphViewer = () => {
 
                   {showMinimap && (
                     <Minimap nodes={filteredNodes} nodePositions={nodePositions} canvasRef={canvasRef}
-                      zoom={zoom} panX={panX} panY={panY} selectedId={selectedNode?.id} />
+                      zoom={zoom} panX={panX} panY={panY} selectedId={selectedNode?.id}
+                      viewportRect={viewport} />
                   )}
 
                   <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5">
-                    <button type="button" onClick={() => setZoom((z) => Math.min(3, z * 1.2))} title="Zoom in"
+                    <button type="button" onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))} title="Zoom in"
                       className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
                       <ZoomIn size={15} />
                     </button>
-                    <button type="button" onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))} title="Zoom out"
+                    <button type="button" onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))} title="Zoom out"
                       className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
                       <ZoomOut size={15} />
                     </button>
@@ -1005,7 +996,7 @@ const PostmanGraphViewer = () => {
               ) : centerTab === "table" ? (
                 <div className="absolute inset-0">
                   <TableView
-                    nodes={filteredNodes}
+                    nodes={listNodes}
                     selectedNodeId={selectedNode?.id}
                     onSelectNode={(n) => { setSelectedNode(n); setInspectorOpen(true); }}
                     onShowInMap={(n) => { setCenterTab("map"); selectAndReveal(n); }}

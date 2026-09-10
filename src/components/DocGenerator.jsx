@@ -7,6 +7,12 @@ import { HTTP_METHODS } from "../utils/constants";
 
 const METHOD_COLOR = { GET: "#34d399", POST: "#fbbf24", PUT: "#60a5fa", PATCH: "#a78bfa", DELETE: "#f87171" };
 
+// The preview is a preview. A 1,671-operation spec renders roughly a
+// hundred thousand elements if every parameter table is mounted at once,
+// while the downloads and the copy button always carry the whole document.
+const PREVIEW_GROUPS = 12;
+const PREVIEW_TEXT_CHARS = 200_000;
+
 const extractDocs = (data) => {
   if (!data) return null;
   const doc = { title: "", version: "", description: "", baseUrl: "", groups: [] };
@@ -115,13 +121,27 @@ th{color:#a9abb0;font-weight:600;text-transform:uppercase;font-size:0.7rem;lette
   return html;
 };
 
-const DocGenerator = ({ collection, detectedFormat, onBack }) => {
+const DocGenerator = ({ collection, onBack }) => {
   const [format, setFormat] = useState("preview"); // preview | markdown | html
   const [copied, setCopied] = useState(false);
+  const [groupLimit, setGroupLimit] = useState(PREVIEW_GROUPS);
 
   const doc = useMemo(() => extractDocs(collection), [collection]);
   const markdown = useMemo(() => doc ? generateMarkdown(doc) : "", [doc]);
   const htmlContent = useMemo(() => doc ? generateHTML(doc) : "", [doc]);
+
+  const rawText = format === "html" ? htmlContent : markdown;
+  const rawPreview = useMemo(
+    () =>
+      rawText.length > PREVIEW_TEXT_CHARS
+        ? `${rawText.slice(0, PREVIEW_TEXT_CHARS)}${String.fromCharCode(10)}… ${(rawText.length - PREVIEW_TEXT_CHARS).toLocaleString()} more characters — use the download buttons for the full document.`
+        : rawText,
+    [rawText],
+  );
+  const totalEndpoints = useMemo(
+    () => (doc ? doc.groups.reduce((n, g) => n + g.endpoints.length, 0) : 0),
+    [doc],
+  );
 
   const downloadFile = (content, filename, mime) => {
     const blob = new Blob([content], { type: mime });
@@ -186,7 +206,7 @@ const DocGenerator = ({ collection, detectedFormat, onBack }) => {
               {doc.baseUrl && <span className="font-mono text-xs text-[#81ecff]">{doc.baseUrl}</span>}
             </div>
             {doc.description && <p className="text-[#a9abb0] mb-6 leading-relaxed">{doc.description}</p>}
-            {doc.groups.map((group) => (
+            {doc.groups.slice(0, groupLimit).map((group) => (
               <div key={group.name} className="mb-8">
                 <h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-[#46484c]/20">{group.name}</h2>
                 {group.endpoints.map((ep, i) => (
@@ -213,10 +233,21 @@ const DocGenerator = ({ collection, detectedFormat, onBack }) => {
                 ))}
               </div>
             ))}
+
+            {doc.groups.length > groupLimit && (
+              <button
+                onClick={() => setGroupLimit((n) => n + PREVIEW_GROUPS)}
+                className="w-full rounded-xl border border-[#46484c]/25 py-3 text-sm text-[#a9abb0] hover:text-white hover:bg-[#22262b] transition-colors"
+              >
+                Show more — {groupLimit.toLocaleString()} of{" "}
+                {doc.groups.length.toLocaleString()} groups shown
+                {totalEndpoints > 0 && `, ${totalEndpoints.toLocaleString()} endpoints in the download`}
+              </button>
+            )}
           </div>
         ) : (
           <pre className="p-8 font-mono text-xs text-[#a9abb0] whitespace-pre-wrap break-words leading-relaxed">
-            {format === "html" ? htmlContent : markdown}
+            {rawPreview}
           </pre>
         )}
       </div>

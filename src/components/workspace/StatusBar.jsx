@@ -11,6 +11,8 @@ import {
 import { timeAgo } from "../../utils/analysis";
 import { FormatMark } from "../icons/BrandIcons";
 
+const MAX_POPOVER_NOTICES = 50;
+
 const StatusBar = ({
   endpointCount,
   score,
@@ -42,6 +44,9 @@ const StatusBar = ({
   }, [open]);
 
   const realWarnings = warnings.filter((w) => w.level === "warn");
+  // The popover is a peek, not the list — a large spec reports four figures of
+  // notices and the audit tab is where they are actually read.
+  const shownWarnings = warnings.slice(0, MAX_POPOVER_NOTICES);
   const notices = warnings.length;
   const noticeLabel = realWarnings.length
     ? `${realWarnings.length} ${realWarnings.length === 1 ? "warning" : "warnings"}`
@@ -94,7 +99,7 @@ const StatusBar = ({
                 Spec notices
               </p>
               <div className="vz-scroll max-h-64 overflow-auto py-1">
-                {warnings.map((w) => (
+                {shownWarnings.map((w) => (
                   <button
                     key={w.id}
                     type="button"
@@ -115,6 +120,21 @@ const StatusBar = ({
                     </span>
                   </button>
                 ))}
+
+                {warnings.length > shownWarnings.length && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenAudit?.();
+                      setOpen(false);
+                    }}
+                    className="vz-t flex w-full items-center gap-2 border-t border-vz-line-soft px-3 py-2 text-left text-[12px] text-vz-soft hover:bg-white/4 hover:text-vz-text"
+                  >
+                    <ShieldCheck size={12} className="flex-shrink-0" />
+                    {(warnings.length - shownWarnings.length).toLocaleString()} more
+                    — open the audit
+                  </button>
+                )}
               </div>
             </div>
           )}

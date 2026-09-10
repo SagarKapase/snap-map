@@ -67,8 +67,14 @@ const extractMockEndpoints = (data) => {
   return eps;
 };
 
+// A large spec produces well over a thousand mock entries, each with two
+// selects and an editor. Filter and page them rather than mounting the lot.
+const LIST_LIMIT = 100;
+
 const MockServer = ({ collection, onClose }) => {
   const [endpoints, setEndpoints] = useState(() => extractMockEndpoints(collection));
+  const [query, setQuery] = useState("");
+  const [listLimit, setListLimit] = useState(LIST_LIMIT);
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [copied, setCopied] = useState(null);
   const [globalDelay, setGlobalDelay] = useState(0);
@@ -103,6 +109,20 @@ const MockServer = ({ collection, onClose }) => {
     const a = document.createElement("a"); a.href = url; a.download = "mock-server-config.json"; a.click();
     URL.revokeObjectURL(url);
   };
+
+  // Indices travel with each row so the existing update handlers keep
+  // addressing the real position in `endpoints`.
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const withIndex = endpoints.map((ep, idx) => ({ ep, idx }));
+    if (!q) return withIndex;
+    return withIndex.filter(
+      ({ ep }) =>
+        ep.path.toLowerCase().includes(q) ||
+        String(ep.name || "").toLowerCase().includes(q) ||
+        ep.method.toLowerCase() === q,
+    );
+  }, [endpoints, query]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ animation: "fadeIn 0.2s ease-out both" }}>
@@ -146,14 +166,23 @@ const MockServer = ({ collection, onClose }) => {
         </div>
 
         {/* Endpoint list */}
+        <div className="px-6 py-2.5 border-b border-[#46484c]/15 flex-shrink-0">
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setListLimit(LIST_LIMIT); }}
+            placeholder="Filter by path, name or method"
+            className="w-full bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#73757a] focus:border-[#e08efe]/50 focus:outline-none"
+          />
+        </div>
+
         <div className="flex-1 overflow-auto p-4 space-y-2">
-          {endpoints.map((ep, idx) => {
+          {matches.slice(0, listLimit).map(({ ep, idx }, i) => {
             const badge = METHOD_BADGE[ep.method] || "";
             const isExpanded = expandedIdx === idx;
             return (
               <div key={`${ep.method}-${ep.path}-${idx}`}
                 className={`rounded-xl border transition-all duration-200 ${isExpanded ? "border-[#e08efe]/30 bg-[#e08efe]/5" : "border-[#46484c]/20 bg-[#171a1e]/40"}`}
-                style={{ animation: `slideInUp 0.15s ease-out ${idx * 15}ms both` }}>
+                style={i < 30 ? { animation: `slideInUp 0.15s ease-out ${i * 15}ms both` } : undefined}>
                 <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 ${badge}`}>{ep.method}</span>
                   <div className="flex-1 min-w-0">
@@ -199,6 +228,19 @@ const MockServer = ({ collection, onClose }) => {
               </div>
             );
           })}
+
+          {matches.length > listLimit && (
+            <button
+              onClick={() => setListLimit((n) => n + LIST_LIMIT)}
+              className="w-full rounded-xl border border-[#46484c]/25 py-2.5 text-xs text-[#a9abb0] hover:text-white hover:bg-[#22262b] transition-colors"
+            >
+              Show more ({(matches.length - listLimit).toLocaleString()} hidden)
+            </button>
+          )}
+
+          {matches.length === 0 && (
+            <p className="py-10 text-center text-xs text-[#73757a]">No endpoints match that filter.</p>
+          )}
         </div>
       </div>
     </div>

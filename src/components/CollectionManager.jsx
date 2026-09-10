@@ -3,20 +3,27 @@ import {
   FolderOpen, Save, Trash2, X, Clock, FileJson, Globe, Braces,
   ChevronRight, AlertCircle, Check, Loader2,
 } from "lucide-react";
+import { putPayload, getPayload, deletePayload, safeSetItem } from "../utils/store";
 
 const STORAGE_KEY = "vizroute_collections";
+const PAYLOAD_PREFIX = "collection:";
+
+// Only the metadata is kept in localStorage. A single real spec is larger
+// than the whole localStorage quota allows, and setItem throws rather than
+// degrading — the save used to fail with an uncaught QuotaExceededError.
+const payloadKey = (id) => `${PAYLOAD_PREFIX}${id}`;
 
 const getCollections = () => {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 };
 
-const saveCollections = (collections) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(collections));
-};
+const saveCollections = (collections) =>
+  safeSetItem(STORAGE_KEY, JSON.stringify(collections));
 
 const formatIcon = (format) => {
   if (format?.includes("OpenAPI") || format?.includes("Swagger")) return Globe;
@@ -46,9 +53,12 @@ export const SaveCollectionModal = ({ data, format, onClose, onSaved }) => {
 
   useEffect(() => { inputRef.current?.select(); }, []);
 
-  const handleSave = () => {
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
+    setError("");
     const collections = getCollections();
     const entry = {
       id: `col_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -56,7 +66,6 @@ export const SaveCollectionModal = ({ data, format, onClose, onSaved }) => {
       format: format || "Unknown",
       savedAt: new Date().toISOString(),
       nodeCount: 0,
-      data,
     };
     // Count nodes roughly
     if (data?.paths) entry.nodeCount = Object.keys(data.paths).length;
@@ -66,15 +75,30 @@ export const SaveCollectionModal = ({ data, format, onClose, onSaved }) => {
       walk(data.item);
       entry.nodeCount = c;
     }
-    collections.unshift(entry);
-    // Keep max 20
-    if (collections.length > 20) collections.length = 20;
-    saveCollections(collections);
-    setTimeout(() => {
+    const stored = await putPayload(payloadKey(entry.id), data);
+    if (!stored) {
       setSaving(false);
-      onSaved?.(entry);
-      onClose();
-    }, 300);
+      setError(
+        "Browser storage refused this specification — it is too large, or storage is disabled for this site.",
+      );
+      return;
+    }
+
+    collections.unshift(entry);
+    // Keep max 20, and drop the payloads that fall off the end with them.
+    const evicted = collections.splice(20);
+    evicted.forEach((c) => deletePayload(payloadKey(c.id)));
+
+    if (!saveCollections(collections)) {
+      await deletePayload(payloadKey(entry.id));
+      setSaving(false);
+      setError("Could not write to browser storage.");
+      return;
+    }
+
+    setSaving(false);
+    onSaved?.(entry);
+    onClose();
   };
 
   return (
@@ -111,6 +135,11 @@ export const SaveCollectionModal = ({ data, format, onClose, onSaved }) => {
             <span className="px-2 py-1 bg-[#22262b] rounded border border-[#46484c]/20 font-mono">{format || "Unknown"}</span>
             <span>Saved to browser storage</span>
           </div>
+          {error && (
+            <p className="rounded-lg border border-[#ff6e84]/25 bg-[#ff6e84]/[0.07] px-3 py-2 text-xs leading-relaxed text-[#fda4af]">
+              {error}
+            </p>
+          )}
         </div>
         <div className="px-6 py-4 border-t border-[#46484c]/20 flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-[#46484c]/30 text-[#a9abb0] text-sm font-semibold hover:bg-[#22262b] transition-colors">
@@ -135,18 +164,27 @@ export const CollectionsModal = ({ onClose, onLoad }) => {
   const [collections, setCollections] = useState(getCollections());
   const [deleting, setDeleting] = useState(null);
 
+  const [loadError, setLoadError] = useState("");
+
   const handleDelete = (id) => {
     setDeleting(id);
     setTimeout(() => {
       const updated = collections.filter((c) => c.id !== id);
       saveCollections(updated);
+      deletePayload(payloadKey(id));
       setCollections(updated);
       setDeleting(null);
     }, 200);
   };
 
-  const handleLoad = (entry) => {
-    onLoad(entry.data);
+  const handleLoad = async (entry) => {
+    // Entries written before the payload split still carry `data` inline.
+    const data = entry.data || (await getPayload(payloadKey(entry.id)));
+    if (!data) {
+      setLoadError(`"${entry.name}" is no longer in browser storage.`);
+      return;
+    }
+    onLoad(data);
     onClose();
   };
 
@@ -169,6 +207,12 @@ export const CollectionsModal = ({ onClose, onLoad }) => {
             </button>
           </div>
         </div>
+
+        {loadError && (
+          <p className="flex-shrink-0 border-b border-[#46484c]/20 bg-[#ff6e84]/[0.07] px-6 py-2.5 text-xs text-[#fda4af]">
+            {loadError}
+          </p>
+        )}
 
         <div className="flex-1 overflow-auto">
           {collections.length === 0 ? (

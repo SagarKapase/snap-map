@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Activity, Play, Pause, RefreshCw, X, Wifi, AlertCircle, Clock,
   CheckCircle, XCircle, Loader2, ArrowDown, ArrowUp,
@@ -21,15 +21,33 @@ const getStatus = (result) => {
   return "error";
 };
 
+// Every ping is a real HTTP request. On a spec with a couple of thousand
+// operations "Ping All" used to fire all of them, five at a time, with no
+// cap and no confirmation — minutes of traffic aimed at somebody's API (or,
+// when the spec uses a relative server URL, at this app's own origin).
+const DEFAULT_BATCH = 25;
+const CONFIRM_ABOVE = 50;
+const LIST_LIMIT = 200;
+
 const HealthMonitor = ({ nodes, onClose }) => {
   const [results, setResults] = useState({}); // nodeId → { status, latency, error, timestamp }
   const [running, setRunning] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [interval, setIntervalSec] = useState(30);
   const [sortBy, setSortBy] = useState("name"); // name | latency | status
+  const [scope, setScope] = useState(DEFAULT_BATCH);
+  const [confirming, setConfirming] = useState(false);
+  const [listLimit, setListLimit] = useState(LIST_LIMIT);
   const intervalRef = useRef(null);
 
-  const requestNodes = nodes.filter((n) => n.type === "request" && n.path);
+  const requestNodes = useMemo(
+    () => nodes.filter((n) => n.type === "request" && n.path),
+    [nodes],
+  );
+  const targets = useMemo(
+    () => (scope === "all" ? requestNodes : requestNodes.slice(0, scope)),
+    [requestNodes, scope],
+  );
 
   const pingEndpoint = useCallback(async (node) => {
     setResults((prev) => ({ ...prev, [node.id]: { ...prev[node.id], checking: true } }));
@@ -68,12 +86,20 @@ const HealthMonitor = ({ nodes, onClose }) => {
   const pingAll = useCallback(async () => {
     setRunning(true);
     // Ping in batches of 5 to avoid overwhelming
-    for (let i = 0; i < requestNodes.length; i += 5) {
-      const batch = requestNodes.slice(i, i + 5);
+    for (let i = 0; i < targets.length; i += 5) {
+      const batch = targets.slice(i, i + 5);
       await Promise.allSettled(batch.map((n) => pingEndpoint(n)));
     }
     setRunning(false);
-  }, [requestNodes, pingEndpoint]);
+  }, [targets, pingEndpoint]);
+
+  const requestPing = useCallback(() => {
+    if (targets.length > CONFIRM_ABOVE) {
+      setConfirming(true);
+      return;
+    }
+    pingAll();
+  }, [targets.length, pingAll]);
 
   // Auto-refresh
   useEffect(() => {
@@ -85,7 +111,7 @@ const HealthMonitor = ({ nodes, onClose }) => {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [autoRefresh, interval, pingAll]);
 
-  const sortedNodes = [...requestNodes].sort((a, b) => {
+  const sortedNodes = [...targets].sort((a, b) => {
     if (sortBy === "latency") return (results[b.id]?.latency || 0) - (results[a.id]?.latency || 0);
     if (sortBy === "status") {
       const sa = getStatus(results[a.id]), sb = getStatus(results[b.id]);
@@ -96,10 +122,10 @@ const HealthMonitor = ({ nodes, onClose }) => {
   });
 
   const summary = {
-    healthy: requestNodes.filter((n) => getStatus(results[n.id]) === "healthy").length,
-    warning: requestNodes.filter((n) => getStatus(results[n.id]) === "warning").length,
-    error: requestNodes.filter((n) => getStatus(results[n.id]) === "error").length,
-    unknown: requestNodes.filter((n) => getStatus(results[n.id]) === "unknown" || !results[n.id]).length,
+    healthy: targets.filter((n) => getStatus(results[n.id]) === "healthy").length,
+    warning: targets.filter((n) => getStatus(results[n.id]) === "warning").length,
+    error: targets.filter((n) => getStatus(results[n.id]) === "error").length,
+    unknown: targets.filter((n) => getStatus(results[n.id]) === "unknown" || !results[n.id]).length,
   };
 
   const METHOD_BADGE = {
@@ -120,7 +146,9 @@ const HealthMonitor = ({ nodes, onClose }) => {
             <div className="flex items-center gap-2">
               <Activity size={18} className="text-[#e08efe]" />
               <h2 className="font-bold text-white text-lg">Health Monitor</h2>
-              <span className="text-xs text-[#73757a] bg-[#22262b] px-2 py-0.5 rounded-full">{requestNodes.length} endpoints</span>
+              <span className="text-xs text-[#73757a] bg-[#22262b] px-2 py-0.5 rounded-full">
+                {targets.length.toLocaleString()} of {requestNodes.length.toLocaleString()} endpoints
+              </span>
             </div>
             <button onClick={onClose} className="p-1.5 hover:bg-[#22262b] rounded-lg transition-colors">
               <X size={16} className="text-[#a9abb0]" />
@@ -131,13 +159,24 @@ const HealthMonitor = ({ nodes, onClose }) => {
         {/* Controls */}
         <div className="px-6 py-3 border-b border-[#46484c]/15 flex items-center gap-3 flex-shrink-0">
           <button
-            onClick={pingAll}
+            onClick={requestPing}
             disabled={running}
             className="px-4 py-2 rounded-lg text-xs font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] disabled:opacity-50 flex items-center gap-2"
           >
             {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            {running ? "Checking..." : "Ping All"}
+            {running ? `Checking ${targets.length}...` : `Ping ${targets.length}`}
           </button>
+
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value === "all" ? "all" : Number(e.target.value))}
+            className="bg-[#22262b] border border-[#46484c]/30 rounded px-2 py-1.5 text-[10px] text-[#a9abb0] focus:outline-none"
+          >
+            {[10, 25, 50, 100, 250].filter((n) => n < requestNodes.length).map((n) => (
+              <option key={n} value={n}>First {n}</option>
+            ))}
+            <option value="all">All {requestNodes.length.toLocaleString()}</option>
+          </select>
 
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-[10px] text-[#73757a] uppercase tracking-widest">Auto</span>
@@ -181,7 +220,7 @@ const HealthMonitor = ({ nodes, onClose }) => {
 
         {/* Endpoint list */}
         <div className="flex-1 overflow-auto p-4 space-y-1.5">
-          {sortedNodes.map((node, i) => {
+          {sortedNodes.slice(0, listLimit).map((node, i) => {
             const r = results[node.id];
             const status = r?.checking ? "checking" : getStatus(r);
             const cfg = STATUS_CONFIG[status];
@@ -190,7 +229,11 @@ const HealthMonitor = ({ nodes, onClose }) => {
               <div
                 key={node.id}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${cfg.border} ${cfg.bg} transition-all duration-200`}
-                style={{ animation: `slideInUp 0.2s ease-out ${i * 15}ms both` }}
+                style={
+                  i < 30
+                    ? { animation: `slideInUp 0.2s ease-out ${i * 15}ms both` }
+                    : undefined
+                }
               >
                 <Icon size={16} style={{ color: cfg.color }} className={status === "checking" ? "animate-spin" : ""} />
                 <span className={`text-[10px] font-bold uppercase flex-shrink-0 ${METHOD_BADGE[node.method] || "text-[#a9abb0]"}`}>
@@ -215,7 +258,46 @@ const HealthMonitor = ({ nodes, onClose }) => {
               </div>
             );
           })}
+
+          {sortedNodes.length > listLimit && (
+            <button
+              onClick={() => setListLimit((n) => n + LIST_LIMIT)}
+              className="w-full rounded-xl border border-[#46484c]/25 py-2.5 text-xs text-[#a9abb0] hover:text-white hover:bg-[#22262b] transition-colors"
+            >
+              Show more ({(sortedNodes.length - listLimit).toLocaleString()} hidden)
+            </button>
+          )}
         </div>
+
+        {confirming && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 p-6">
+            <div className="w-full max-w-sm rounded-xl border border-[#46484c]/30 bg-[#12151b] p-5">
+              <div className="flex items-center gap-2">
+                <AlertCircle size={16} className="text-amber-400" />
+                <h3 className="text-sm font-bold text-white">Send {targets.length.toLocaleString()} live requests?</h3>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-[#a9abb0]">
+                Each endpoint is checked with a real HTTP request. If the
+                specification uses a relative server URL these are aimed at this
+                site, not at the API.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => { setConfirming(false); pingAll(); }}
+                  className="flex-1 rounded-lg bg-[#e08efe] py-2 text-xs font-bold text-[#0c0e12] hover:bg-[#ce7eec] transition-colors"
+                >
+                  Run the checks
+                </button>
+                <button
+                  onClick={() => setConfirming(false)}
+                  className="rounded-lg border border-[#46484c]/30 px-4 py-2 text-xs text-[#a9abb0] hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

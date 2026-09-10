@@ -5,6 +5,15 @@ import { toJsonText } from "../../utils/format";
 
 const RawSpecView = ({ spec, title = "spec" }) => {
   const text = useMemo(() => toJsonText(spec), [spec]);
+  // A 6 MB document is 205,525 lines; counting them inside JSX meant walking
+  // the whole string and allocating that array on every render.
+  const stats = useMemo(
+    () => ({
+      lines: text ? text.split("\n").length : 0,
+      kb: text.length / 1024,
+    }),
+    [text],
+  );
   const [copied, setCopied] = useState(false);
 
   const safeName = String(title).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
@@ -34,8 +43,10 @@ const RawSpecView = ({ spec, title = "spec" }) => {
           Source specification
         </span>
         <span className="vz-mono text-[11px] text-vz-dim">
-          {text.split("\n").length.toLocaleString()} lines ·{" "}
-          {(text.length / 1024).toFixed(1)} KB
+          {stats.lines.toLocaleString()} lines ·{" "}
+          {stats.kb > 1024
+            ? `${(stats.kb / 1024).toFixed(1)} MB`
+            : `${stats.kb.toFixed(1)} KB`}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           <button

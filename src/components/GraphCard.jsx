@@ -1,15 +1,45 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Copy, Check, ChevronRight, Boxes, Layers } from "lucide-react";
 import { methodColor } from "../utils/constants";
 import MethodBadge from "./workspace/MethodBadge";
 import { displayPath } from "../utils/format";
 
-// Card sizes are mirrored by the layout maths in PostmanGraphViewer and by
-// ConnectionLines — keep width/min-height in sync with CARD_DIM there.
+// Card sizes are mirrored by utils/graphGeometry — keep width/min-height in
+// sync with CARD_DIM there.
 const SHELL = {
   root: "w-60 min-h-[110px]",
   folder: "w-52 min-h-[80px]",
   request: "w-64 min-h-[85px]",
+};
+
+const DIM = {
+  root: { w: 240, h: 110 },
+  folder: { w: 208, h: 80 },
+  request: { w: 256, h: 85 },
+};
+
+/**
+ * Zoomed far out a card is a few pixels across, so its twelve elements of
+ * text, icons and badges cost a full layout for something nobody can read.
+ * The placeholder keeps the shape and the colour and nothing else.
+ */
+const PlaceholderCard = ({ node, position, isSelected, isHighlighted, accent }) => {
+  const dim = DIM[node.type] || DIM.request;
+  return (
+    <div
+      data-node-id={node.id}
+      className="pointer-events-none absolute rounded-md"
+      style={{
+        left: position.x,
+        top: position.y,
+        width: dim.w,
+        height: dim.h,
+        background: isSelected ? "#3b1d63" : "#1b2231",
+        border: `2px solid ${isSelected || isHighlighted ? "#a855f7" : accent}`,
+        zIndex: isSelected ? 50 : 10,
+      }}
+    />
+  );
 };
 
 const GraphCard = ({
@@ -20,6 +50,8 @@ const GraphCard = ({
   isHighlighted,
   isCollapsed,
   isDimmed,
+  simplified,
+  animate = true,
   onMouseDown,
   onSelect,
   onCopy,
@@ -31,6 +63,20 @@ const GraphCard = ({
   const [hovered, setHovered] = useState(false);
 
   const mc = node.type === "request" ? methodColor(node.method) : null;
+
+  if (simplified) {
+    return (
+      <PlaceholderCard
+        node={node}
+        position={position}
+        isSelected={isSelected}
+        isHighlighted={isHighlighted}
+        accent={
+          node.type === "root" ? "#a855f7" : node.type === "folder" ? "#60a5fa" : mc.dot
+        }
+      />
+    );
+  }
 
   const handleCopy = (e) => {
     e.stopPropagation();
@@ -72,13 +118,15 @@ const GraphCard = ({
         zIndex: isSelected ? 50 : isDragging ? 45 : hovered ? 30 : 10,
         opacity: isDimmed ? 0.4 : 1,
         transition: "opacity 150ms cubic-bezier(0.2,0,0,1)",
-        animation: `nodeEntrance 0.28s ease-out ${entranceDelay}ms both`,
+        animation: animate
+          ? `nodeEntrance 0.28s ease-out ${entranceDelay}ms both`
+          : undefined,
       }}
     >
       <div
         className={`pointer-events-auto vz-t cursor-grab rounded-xl border p-3.5 active:cursor-grabbing ${SHELL[node.type] || SHELL.request} ${surface}`}
-        onMouseDown={onMouseDown}
-        onClick={onSelect}
+        onMouseDown={(e) => onMouseDown?.(e, node.id)}
+        onClick={() => onSelect?.(node)}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >
@@ -177,4 +225,6 @@ const GraphCard = ({
   );
 };
 
-export default GraphCard;
+// Memoised: on a large graph the canvas re-renders on every hover, drag frame
+// and pan step, and without this every mounted card re-rendered with it.
+export default memo(GraphCard);

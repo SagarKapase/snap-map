@@ -35,6 +35,11 @@ const PUBLIC_EXAMPLES = [
 
 const SAMPLE_ICONS = { postman: PostmanIcon, openapi: OpenApiIcon, custom: JsonIcon };
 
+// Beyond this many characters the editor is bypassed entirely.
+const EDITOR_LIMIT = 600_000;
+// The gutter never renders more numbers than this, however long the file is.
+const MAX_GUTTER_LINES = 5_000;
+
 const JsonInputScreen = ({
   onVisualize,
   onLoadSample,
@@ -44,7 +49,12 @@ const JsonInputScreen = ({
   onOpenBreaking,
   onOpenMultiService,
 }) => {
+  // A 6.4 MB spec is 205,525 lines. Holding that in a controlled textarea
+  // means React re-renders the whole value on every keystroke, the gutter
+  // mounts one element per line, and the validity memos re-parse megabytes.
+  // Past this size the editor is skipped and the parsed spec is held aside.
   const [jsonText, setJsonText] = useState("");
+  const [bigSpec, setBigSpec] = useState(null); // { data, name, chars }
   const [error, setError] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const [isFormatting, setIsFormatting] = useState(false);
@@ -71,22 +81,29 @@ const JsonInputScreen = ({
     }
     return null;
   };
-  const validate = (text) => tryParse(text) !== null;
+
+  // Parsed once per change of the text, rather than once per derived value.
+  // The two memos below used to call tryParse independently, so every edit
+  // cost two full JSON.parse passes over the whole document.
+  const parsedInput = useMemo(() => {
+    if (bigSpec) return bigSpec.data;
+    if (!jsonText.trim()) return null;
+    const value = tryParse(jsonText);
+    return value && typeof value === "object" ? value : null;
+  }, [jsonText, bigSpec]);
 
   const detectedInputFormat = useMemo(() => {
-    if (!jsonText.trim()) return null;
-    const p = tryParse(jsonText);
+    const p = parsedInput;
     if (!p || typeof p !== "object") return null;
     if (p.openapi) return `OpenAPI ${p.openapi}`;
     if (p.swagger) return `Swagger ${p.swagger}`;
     if (p.info && p.item && Array.isArray(p.item)) return "Postman";
     if (Array.isArray(p)) return "Custom Array";
     return "Custom JSON";
-  }, [jsonText]);
+  }, [parsedInput]);
 
   const quickStats = useMemo(() => {
-    if (!jsonText.trim()) return null;
-    const p = tryParse(jsonText);
+    const p = parsedInput;
     if (!p || typeof p !== "object") return null;
     if (p.openapi || p.swagger) {
       let ops = 0;
@@ -136,24 +153,30 @@ const JsonInputScreen = ({
       ];
     }
     return null;
-  }, [jsonText]);
+  }, [parsedInput]);
 
   const handleVisualize = () => {
-    if (!jsonText.trim()) {
+    if (!bigSpec && !jsonText.trim()) {
       setError("Paste or upload an API specification first.");
       return;
     }
-    const data = tryParse(jsonText);
-    if (data && typeof data === "object") {
+    if (parsedInput) {
       setError("");
-      onVisualize(data);
+      onVisualize(parsedInput);
     } else {
       setError("Invalid JSON/YAML — cannot parse");
     }
   };
 
+  const clearInput = () => {
+    setBigSpec(null);
+    setJsonText("");
+    setLoadedFileName("");
+    setError("");
+  };
+
   const handleFormat = () => {
-    if (!jsonText.trim()) return;
+    if (bigSpec || !jsonText.trim()) return;
     setIsFormatting(true);
     const parsed = tryParse(jsonText);
     if (parsed && typeof parsed === "object") {
@@ -165,6 +188,28 @@ const JsonInputScreen = ({
     setTimeout(() => setIsFormatting(false), 400);
   };
 
+  /**
+   * Take a specification that has already parsed. Small documents go into the
+   * editor as before; large ones are held as parsed data with a summary card,
+   * which is what keeps a multi-megabyte import from locking the tab.
+   */
+  const acceptText = (text, parsed, name) => {
+    setError("");
+    setActiveTab("editor");
+    setLoadedFileName(name || "");
+    if (text.length > EDITOR_LIMIT) {
+      setJsonText("");
+      setBigSpec({
+        data: parsed,
+        name: name || "specification",
+        chars: text.length,
+      });
+    } else {
+      setBigSpec(null);
+      setJsonText(text);
+    }
+  };
+
   const handleFileRead = (file) => {
     const validExts = [".json", ".yaml", ".yml"];
     if (!file || !validExts.some((ext) => file.name.toLowerCase().endsWith(ext))) {
@@ -173,16 +218,13 @@ const JsonInputScreen = ({
     }
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = e.target.result;
+      const text = String(e.target.result || "");
       const parsed = tryParse(text);
-      if (parsed && typeof parsed === "object") {
-        setJsonText(text);
-        setLoadedFileName(file.name);
-        setError("");
-        setActiveTab("editor");
-      } else {
+      if (!parsed || typeof parsed !== "object") {
         setError("Invalid file");
+        return;
       }
+      acceptText(text, parsed, file.name);
     };
     reader.readAsText(file);
   };
@@ -207,9 +249,11 @@ const JsonInputScreen = ({
       const parsed = tryParse(text);
       if (!parsed || typeof parsed !== "object")
         throw new Error("Response is not valid JSON or YAML");
-      setJsonText(typeof text === "string" ? text : JSON.stringify(parsed, null, 2));
-      setLoadedFileName(urlInput.split("/").pop() || "remote-spec");
-      setActiveTab("editor");
+      acceptText(
+        typeof text === "string" ? text : JSON.stringify(parsed, null, 2),
+        parsed,
+        urlInput.split("/").pop() || "remote-spec",
+      );
       setUrlError("");
     } catch (e) {
       const msg = e.message || "";
@@ -227,9 +271,14 @@ const JsonInputScreen = ({
     try {
       const text = await navigator.clipboard.readText();
       if (text.trim()) {
-        setJsonText(text);
-        setError("");
-        setLoadedFileName("");
+        const parsed = tryParse(text);
+        if (parsed && typeof parsed === "object") acceptText(text, parsed, "");
+        else {
+          setBigSpec(null);
+          setJsonText(text);
+          setError("");
+          setLoadedFileName("");
+        }
       }
     } catch {
       setError("Clipboard access denied — paste manually with Ctrl+V");
@@ -245,7 +294,7 @@ const JsonInputScreen = ({
 
   useEffect(() => {
     const h = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && jsonText.trim()) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && (bigSpec || jsonText.trim())) {
         e.preventDefault();
         handleVisualize();
       }
@@ -259,9 +308,12 @@ const JsonInputScreen = ({
       lineNumRef.current.scrollTop = textareaRef.current.scrollTop;
   };
 
-  const lineCount = jsonText.split("\n").length;
-  const charCount = jsonText.length;
-  const isValid = jsonText.trim() && validate(jsonText);
+  const lineCount = useMemo(
+    () => (jsonText ? jsonText.split("\n").length : 0),
+    [jsonText],
+  );
+  const charCount = bigSpec ? bigSpec.chars : jsonText.length;
+  const isValid = Boolean(parsedInput);
 
   const tools = [
     { label: "Collections", icon: FolderOpen, run: onOpenCollections },
@@ -362,21 +414,62 @@ const JsonInputScreen = ({
 
           {/* Body */}
           <div className="relative h-[clamp(300px,46vh,460px)]">
-            {activeTab === "editor" && (
+            {activeTab === "editor" && bigSpec ? (
+              <div className="flex h-full items-center justify-center p-6">
+                <div className="w-full max-w-[520px] rounded-xl border border-vz-line bg-vz-panel-2 p-6 text-center">
+                  <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl border border-vz-line bg-vz-panel text-vz-accent-2">
+                    <FileJson size={20} />
+                  </span>
+                  <p className="text-[14px] font-semibold text-vz-text">
+                    {bigSpec.name}
+                  </p>
+                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-vz-soft">
+                    {(bigSpec.chars / 1_048_576).toFixed(1)} MB parsed and ready. The
+                    text editor is skipped for files this large — it would have to
+                    re-render megabytes on every keystroke.
+                  </p>
+                  {quickStats && (
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      {quickStats.map((stat) => (
+                        <span
+                          key={stat.label}
+                          className="rounded-md border border-vz-line-soft bg-vz-bg px-2.5 py-1 text-[11.5px] text-vz-soft"
+                        >
+                          <strong className="tabular-nums text-vz-text">
+                            {stat.value.toLocaleString()}
+                          </strong>{" "}
+                          {stat.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={clearInput}
+                    className="vz-t mt-5 inline-flex items-center gap-1.5 rounded-lg border border-vz-line px-3 py-1.5 text-[12.5px] text-vz-soft hover:text-vz-text"
+                  >
+                    <X size={12} /> Choose a different file
+                  </button>
+                </div>
+              </div>
+            ) : activeTab === "editor" ? (
               <div className="flex h-full">
                 <div
                   ref={lineNumRef}
                   aria-hidden="true"
                   className="hidden w-11 flex-shrink-0 select-none overflow-hidden border-r border-vz-line-soft bg-black/20 py-4 sm:block"
                 >
-                  {Array.from({ length: Math.max(lineCount, 24) }, (_, i) => (
-                    <div
-                      key={i}
-                      className="vz-mono pr-2.5 text-right text-[11px] leading-[1.7] text-vz-line"
-                    >
-                      {i + 1}
-                    </div>
-                  ))}
+                  {Array.from(
+                    { length: Math.min(Math.max(lineCount, 24), MAX_GUTTER_LINES) },
+                    (_, i) => (
+                      <div
+                        key={i}
+                        className="vz-mono pr-2.5 text-right text-[11px] leading-[1.7] text-vz-line"
+                      >
+                        {i + 1}
+                      </div>
+                    ),
+                  )}
                 </div>
 
                 <div className="relative min-w-0 flex-1">
@@ -436,6 +529,7 @@ const JsonInputScreen = ({
                     ref={textareaRef}
                     value={jsonText}
                     onChange={(e) => {
+                      setBigSpec(null);
                       setJsonText(e.target.value);
                       setError("");
                       setLoadedFileName("");
@@ -448,7 +542,7 @@ const JsonInputScreen = ({
                   />
                 </div>
               </div>
-            )}
+            ) : null}
 
             {activeTab === "upload" && (
               <div className="flex h-full items-center justify-center p-6">
@@ -611,7 +705,7 @@ const JsonInputScreen = ({
               <button
                 type="button"
                 onClick={handleVisualize}
-                disabled={!jsonText.trim()}
+                disabled={!isValid}
                 className="vz-t flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-5 text-[13px] font-bold text-[#160a1d] hover:opacity-90 disabled:cursor-not-allowed disabled:border disabled:border-vz-line disabled:bg-none disabled:bg-vz-panel-2 disabled:text-vz-dim"
               >
                 Build map

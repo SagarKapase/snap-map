@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import {
   X, Play, Pause, BarChart3, Clock, AlertCircle, CheckCircle,
   Loader2, Target, TrendingUp, Zap,
@@ -13,8 +13,27 @@ const percentile = (arr, p) => {
   return sorted[Math.max(0, idx)];
 };
 
+// A native <select> with a couple of thousand <option> elements is slow to
+// open and impossible to scan — filter it down first.
+const OPTION_LIMIT = 200;
+
 const LoadTester = ({ nodes, onClose }) => {
-  const requestNodes = nodes.filter((n) => n.type === "request" && n.path);
+  const requestNodes = useMemo(
+    () => nodes.filter((n) => n.type === "request" && n.path),
+    [nodes],
+  );
+  const [endpointQuery, setEndpointQuery] = useState("");
+  const options = useMemo(() => {
+    const q = endpointQuery.trim().toLowerCase();
+    const list = q
+      ? requestNodes.filter(
+          (n) =>
+            n.path.toLowerCase().includes(q) ||
+            String(n.name || "").toLowerCase().includes(q),
+        )
+      : requestNodes;
+    return list.slice(0, OPTION_LIMIT);
+  }, [requestNodes, endpointQuery]);
   const [selectedNodeId, setSelectedNodeId] = useState(requestNodes[0]?.id || "");
   const [concurrency, setConcurrency] = useState(5);
   const [totalRequests, setTotalRequests] = useState(20);
@@ -129,12 +148,25 @@ const LoadTester = ({ nodes, onClose }) => {
           {/* Endpoint selector */}
           <div>
             <label className="text-[10px] font-bold uppercase tracking-widest text-[#a9abb0] block mb-2">Target Endpoint</label>
+            {requestNodes.length > OPTION_LIMIT && (
+              <input
+                value={endpointQuery}
+                onChange={(e) => setEndpointQuery(e.target.value)}
+                placeholder={`Filter ${requestNodes.length.toLocaleString()} endpoints`}
+                className="w-full mb-2 bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg px-4 py-2 text-xs text-white placeholder:text-[#73757a] focus:border-[#e08efe]/50 focus:outline-none"
+              />
+            )}
             <select value={selectedNodeId} onChange={(e) => setSelectedNodeId(e.target.value)}
               className="w-full bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg px-4 py-2.5 text-sm text-white focus:border-[#e08efe]/50 focus:ring-1 focus:ring-[#e08efe]/20 transition-all">
-              {requestNodes.map((n) => (
+              {options.map((n) => (
                 <option key={n.id} value={n.id}>{n.method} — {n.name} — {n.path}</option>
               ))}
             </select>
+            {requestNodes.length > options.length && (
+              <p className="mt-1.5 text-[10px] text-[#73757a]">
+                Showing {options.length} of {requestNodes.length.toLocaleString()} — narrow the filter to reach the rest.
+              </p>
+            )}
           </div>
 
           {/* Config */}

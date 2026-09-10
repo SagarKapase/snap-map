@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback } from "react";
+import { memo, useMemo, useRef, useCallback } from "react";
 
 const MINIMAP_W = 196;
 const MINIMAP_H = 130;
@@ -10,6 +10,10 @@ const CARD_DIM = {
   request: { w: 256, h: 85 },
 };
 
+// A 196x130 thumbnail cannot show two thousand cards — past this many, drop
+// to the groups, which is the only structure legible at that size anyway.
+const DETAIL_LIMIT = 400;
+
 const Minimap = ({
   nodes,
   nodePositions,
@@ -18,8 +22,14 @@ const Minimap = ({
   panX,
   panY,
   selectedId,
+  viewportRect,
 }) => {
   const minimapRef = useRef(null);
+
+  const marks = useMemo(
+    () => (nodes.length > DETAIL_LIMIT ? nodes.filter((n) => n.type !== "request") : nodes),
+    [nodes],
+  );
 
   const { scale, offsetX, offsetY } = useMemo(() => {
     const positions = Object.values(nodePositions);
@@ -45,20 +55,18 @@ const Minimap = ({
     };
   }, [nodePositions]);
 
+  // The rectangle arrives in graph coordinates from the canvas, which tracks
+  // its own scrolling — reading the DOM here would only be right on the frames
+  // where something else happened to re-render this component.
   const viewport = useMemo(() => {
-    if (!canvasRef?.current) return null;
-    const el = canvasRef.current;
-    const vx = el.scrollLeft / zoom - panX;
-    const vy = el.scrollTop / zoom - panY;
-    const vw = el.clientWidth / zoom;
-    const vh = el.clientHeight / zoom;
+    if (!viewportRect || !viewportRect.w) return null;
     return {
-      x: vx * scale + offsetX,
-      y: vy * scale + offsetY,
-      w: vw * scale,
-      h: vh * scale,
+      x: viewportRect.left * scale + offsetX,
+      y: viewportRect.top * scale + offsetY,
+      w: viewportRect.w * scale,
+      h: viewportRect.h * scale,
     };
-  }, [canvasRef, zoom, panX, panY, scale, offsetX, offsetY]);
+  }, [viewportRect, scale, offsetX, offsetY]);
 
   const handleClick = useCallback(
     (e) => {
@@ -86,7 +94,7 @@ const Minimap = ({
       style={{ width: MINIMAP_W, height: MINIMAP_H }}
     >
       <svg width={MINIMAP_W} height={MINIMAP_H} className="absolute inset-0">
-        {nodes.map((node) => {
+        {marks.map((node) => {
           const pos = nodePositions[node.id];
           if (!pos) return null;
           const dim = CARD_DIM[node.type] || CARD_DIM.request;
@@ -124,4 +132,4 @@ const Minimap = ({
   );
 };
 
-export default Minimap;
+export default memo(Minimap);

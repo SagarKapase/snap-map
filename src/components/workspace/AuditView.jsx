@@ -10,6 +10,12 @@ const SEVERITIES = [
 
 const SEVERITY_LABEL = { error: "errors", warning: "warnings", info: "notes" };
 
+// A real spec produces four figures of findings — the Shopware admin API
+// alone reports 1,014. Rendering every one costs tens of thousands of DOM
+// nodes for a list nobody reads past the first screen, so each category
+// opens with a slice and grows on request.
+const PER_CATEGORY = 40;
+
 const SEVERITY_STYLE = {
   error: { icon: AlertCircle, tone: "text-vz-red", chip: "bg-vz-red/14 text-[#fda4af]" },
   warning: { icon: AlertTriangle, tone: "text-vz-warn", chip: "bg-vz-warn/14 text-vz-warn" },
@@ -24,6 +30,13 @@ const scoreBar = (score) =>
 
 const AuditView = ({ audit, onSelectNode, nodes = [] }) => {
   const [severity, setSeverity] = useState("all");
+  const [expanded, setExpanded] = useState({});
+
+  // Reset the per-category limits whenever the filter changes.
+  const showAll = (category) =>
+    setExpanded((prev) => ({ ...prev, [`${severity}:${category}`]: true }));
+  const limitFor = (category) =>
+    expanded[`${severity}:${category}`] ? Infinity : PER_CATEGORY;
 
   const visible = useMemo(
     () =>
@@ -132,7 +145,10 @@ const AuditView = ({ audit, onSelectNode, nodes = [] }) => {
           </div>
         ) : (
           <div className="mt-5 space-y-6">
-            {grouped.map(([category, items]) => (
+            {grouped.map(([category, items]) => {
+              const limit = limitFor(category);
+              const shown = items.length > limit ? items.slice(0, limit) : items;
+              return (
               <section key={category}>
                 <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-vz-dim">
                   {category}
@@ -140,7 +156,7 @@ const AuditView = ({ audit, onSelectNode, nodes = [] }) => {
                 </h3>
 
                 <div className="overflow-hidden rounded-[12px] border border-vz-line">
-                  {items.map((finding, i) => {
+                  {shown.map((finding, i) => {
                     const style = SEVERITY_STYLE[finding.severity];
                     const target = finding.nodeId ? nodeById.get(finding.nodeId) : null;
                     const clickable = Boolean(target);
@@ -189,9 +205,20 @@ const AuditView = ({ audit, onSelectNode, nodes = [] }) => {
                       </div>
                     );
                   })}
+
+                  {shown.length < items.length && (
+                    <button
+                      type="button"
+                      onClick={() => showAll(category)}
+                      className="vz-t flex w-full items-center justify-center gap-1.5 border-t border-vz-line-soft bg-vz-panel px-3.5 py-2.5 text-[12px] text-vz-soft hover:bg-white/3 hover:text-vz-text"
+                    >
+                      Show the remaining {(items.length - shown.length).toLocaleString()}
+                    </button>
+                  )}
                 </div>
               </section>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
