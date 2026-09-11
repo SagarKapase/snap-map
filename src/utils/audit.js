@@ -1,3 +1,5 @@
+import { validateExample } from "./validateSchema";
+
 /**
  * Static audit of a loaded specification.
  *
@@ -80,7 +82,7 @@ const collectSecrets = (value, hits, trail = "") => {
   }
 };
 
-export const auditSpec = ({ spec, nodes = [], format = "" } = {}) => {
+export const auditSpec = ({ spec, nodes = [], format = "", flow = null } = {}) => {
   const findings = [];
   const add = (rule, severity, category, title, detail, nodeId) =>
     findings.push({
@@ -317,6 +319,110 @@ export const auditSpec = ({ spec, nodes = [], format = "" } = {}) => {
         `${requests.length} operations`);
     }
   }
+
+  // ── Collection rules: variables, credentials and saved examples ──
+  // These read the fields the Postman parser fills in, so they stay silent
+  // on a plain OpenAPI import rather than reporting absent things as faults.
+
+  nodes.forEach((node) => {
+    (node.variables || []).forEach((variable) => {
+      if (SECRET_PATTERNS.some((re) => re.test(String(variable.value || "")))) {
+        add("secret-in-variable", "error", CATEGORY.SECURITY,
+          "Credential stored in a collection variable",
+          `${variable.key} on ${node.name}`, node.id);
+      }
+    });
+  });
+
+  requests.forEach((node) => {
+    const url = String(node.path || "");
+
+    if (/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/i.test(url)) {
+      add("localhost-url", "warning", CATEGORY.STRUCTURE,
+        "Points at a local address",
+        `${label(node)} — nobody else on the team can run this`, node.id);
+    }
+
+    (node.headers || []).forEach((header) => {
+      const key = String(header.key || "").toLowerCase();
+      const value = String(header.value || "");
+      if (!value || value.includes("{{")) return;
+      if (key === "authorization") {
+        add("hardcoded-auth", "error", CATEGORY.SECURITY,
+          "Authorization header holds a literal value",
+          `${label(node)} — use a variable so the token is not shared`, node.id);
+      } else if (/^(x-api-key|api-key|apikey|x-auth-token)$/.test(key)) {
+        add("hardcoded-key-header", "error", CATEGORY.SECURITY,
+          `${header.key} header holds a literal value`,
+          label(node), node.id);
+      }
+    });
+
+    if ((node.disabledHeaders || []).length) {
+      add("disabled-header", "info", CATEGORY.STRUCTURE,
+        "Request carries disabled headers",
+        `${label(node)} — ${node.disabledHeaders.map((h) => h.key).join(", ")}`,
+        node.id);
+    }
+
+    if (node.scripts && !(node.responses || []).length) {
+      add("no-saved-example", "info", CATEGORY.DOCS,
+        "No saved response example",
+        `${label(node)} — anyone reading this cannot tell what it returns`,
+        node.id);
+    }
+  });
+
+  // ── Variable flow ────────────────────────────────────────────
+  if (flow) {
+    (flow.missing || []).forEach((entry) => {
+      add("undeclared-variable", "error", CATEGORY.STRUCTURE,
+        `{{${entry.name}}} is used but never set`,
+        `Read by ${entry.nodeIds.length} request${entry.nodeIds.length === 1 ? "" : "s"}, and no script or variable provides it`,
+        entry.nodeIds[0]);
+    });
+
+    (flow.orderingIssues || []).forEach((issue) => {
+      const producer = nodes.find((n) => n.id === issue.producer);
+      const consumer = nodes.find((n) => n.id === issue.consumer);
+      add("variable-ordering", "warning", CATEGORY.STRUCTURE,
+        `{{${issue.variable}}} is read before it is set`,
+        `${consumer?.name || "a request"} runs before ${producer?.name || "the request that sets it"}`,
+        issue.consumer);
+    });
+
+    (flow.unused || []).forEach((entry) => {
+      add("unused-variable", "info", CATEGORY.CONSISTENCY,
+        `${entry.name} is declared but never used`,
+        `Declared on the ${entry.source}`, null);
+    });
+  }
+
+  // ── Examples against their own schemas ───────────────────────
+  // Purely a comparison of two things the document already contains.
+  requests.forEach((node) => {
+    (node.responses || []).forEach((response) => {
+      if (!response.schema || response.example === undefined) return;
+      const { checked, issues } = validateExample(response.example, response.schema, spec);
+      if (!checked || !issues.length) return;
+      const first = issues[0];
+      add("example-schema-mismatch", "warning", CATEGORY.RESPONSES,
+        `Response example does not match its schema`,
+        `${label(node)} ${response.status} — ${first.path}: ${first.message}${issues.length > 1 ? ` (+${issues.length - 1} more)` : ""}`,
+        node.id);
+    });
+
+    if (node.requestBodySchema && node.body !== undefined && node.body !== null) {
+      const { checked, issues } = validateExample(node.body, node.requestBodySchema, spec);
+      if (checked && issues.length) {
+        const first = issues[0];
+        add("body-schema-mismatch", "warning", CATEGORY.STRUCTURE,
+          "Request body example does not match its schema",
+          `${label(node)} — ${first.path}: ${first.message}${issues.length > 1 ? ` (+${issues.length - 1} more)` : ""}`,
+          node.id);
+      }
+    }
+  });
 
   // ── Score ────────────────────────────────────────────────────
   const byRule = new Map();

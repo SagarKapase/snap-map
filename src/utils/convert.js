@@ -1251,6 +1251,21 @@ const postmanFromNodes = ({ spec, nodes }, notes) => {
   return out;
 };
 
+/**
+ * Postman items for an arbitrary set of endpoints.
+ *
+ * Used to turn the gaps a coverage report finds into requests that can be
+ * merged straight into an existing collection.
+ */
+export const postmanItemsForNodes = (nodes = [], name = "Generated") => {
+  const requests = nodes.filter((n) => n.type === "request");
+  if (!requests.length) return [];
+  const root = { id: "node-root", type: "root", name, parentId: null };
+  const flat = [root, ...requests.map((node) => ({ ...node, parentId: "node-root" }))];
+  const collection = postmanFromNodes({ spec: null, nodes: flat }, noteBook());
+  return collection.item || [];
+};
+
 // ─── Nodes → .http request file ──────────────
 
 const httpFromNodes = ({ spec, nodes }, notes) => {

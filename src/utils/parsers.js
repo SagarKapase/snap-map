@@ -4,6 +4,9 @@ import { HTTP_METHODS } from "./constants";
 export const detectFormat = (data) => {
   if (data.openapi || data.swagger) return "openapi";
   if (data.info && data.item && Array.isArray(data.item)) return "postman";
+  // A v1 collection has no `item`; without this it fell through to the
+  // generic JSON parser and came out as a shapeless list.
+  if (!data.item && Array.isArray(data.requests)) return "postman";
   return "custom";
 };
 
@@ -11,6 +14,7 @@ export const formatLabel = (data) => {
   if (data.openapi) return `OpenAPI ${data.openapi}`;
   if (data.swagger) return `Swagger ${data.swagger}`;
   if (data.info && data.item && Array.isArray(data.item)) return "Postman";
+  if (!data.item && Array.isArray(data.requests)) return "Postman v1";
   return "Custom JSON";
 };
 
@@ -416,18 +420,238 @@ export const parseCustomApi = (data, setStats) => {
 };
 
 // ─── Postman helpers ─────────────────────────
-const postmanAuth = (auth) => {
-  if (!auth || !auth.type) return [];
+
+/**
+ * A Postman v1 collection has a flat `requests` array and its own folder
+ * shape. Rather than teach the parser two layouts, v1 is reshaped into the
+ * v2 item tree once, up front.
+ */
+export const isPostmanV1 = (data) =>
+  !!data &&
+  typeof data === "object" &&
+  !data.item &&
+  Array.isArray(data.requests) &&
+  (typeof data.name === "string" || typeof data.id === "string");
+
+const v1RequestToItem = (request) => {
+  const headers = [];
+  // v1 kept headers as a raw header block, one per line.
+  String(request.headers || "")
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const idx = line.indexOf(":");
+      if (idx > 0) {
+        headers.push({
+          key: line.slice(0, idx).trim(),
+          value: line.slice(idx + 1).trim(),
+        });
+      }
+    });
+
+  const events = [];
+  if (request.preRequestScript) {
+    events.push({
+      listen: "prerequest",
+      script: { exec: String(request.preRequestScript).split(/\r?\n/) },
+    });
+  }
+  if (request.tests) {
+    events.push({
+      listen: "test",
+      script: { exec: String(request.tests).split(/\r?\n/) },
+    });
+  }
+
+  return {
+    name: request.name || request.url || "Request",
+    event: events,
+    request: {
+      method: request.method || "GET",
+      header: headers,
+      url: request.url || "",
+      description: request.description || "",
+      body: request.rawModeData
+        ? { mode: "raw", raw: request.rawModeData }
+        : undefined,
+    },
+  };
+};
+
+export const postmanV1ToV2 = (data) => {
+  const byFolder = new Map();
+  (data.folders || []).forEach((folder) => byFolder.set(folder.id, folder));
+
+  const claimed = new Set();
+  const folders = (data.folders || []).map((folder) => {
+    const order = folder.order || folder.collection_order || [];
+    order.forEach((id) => claimed.add(id));
+    const requests = order
+      .map((id) => (data.requests || []).find((r) => r.id === id))
+      .filter(Boolean);
+    return {
+      name: folder.name || "Folder",
+      description: folder.description || "",
+      item: requests.map(v1RequestToItem),
+    };
+  });
+
+  const loose = (data.requests || [])
+    .filter((r) => !claimed.has(r.id))
+    .map(v1RequestToItem);
+
+  return {
+    info: {
+      name: data.name || "API Collection",
+      description: data.description || "",
+      schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    },
+    item: [...folders, ...loose],
+  };
+};
+
+/**
+ * A Postman environment or globals export is not a collection — it carries
+ * `values` and a variable scope. It is recognised here so the import screen
+ * can route it to the environment store instead of trying to graph it.
+ */
+export const isPostmanVariableFile = (data) =>
+  !!data &&
+  typeof data === "object" &&
+  Array.isArray(data.values) &&
+  !data.item &&
+  !data.requests;
+
+export const readPostmanVariableFile = (data) => ({
+  name: data.name || "Imported environment",
+  scope: data._postman_variable_scope === "globals" ? "globals" : "environment",
+  variables: (data.values || [])
+    .filter((v) => v && v.key)
+    .map((v) => ({
+      key: v.key,
+      value: String(v.value ?? ""),
+      enabled: v.enabled !== false,
+      secret: v.type === "secret",
+    })),
+});
+
+/** `[{key, value, disabled}]` → the flat shape the rest of the app uses. */
+const readVariableList = (list) => {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((v) => {
+    if (!v || !v.key) return;
+    out.push({
+      key: v.key,
+      value: v.value === undefined || v.value === null ? "" : String(v.value),
+      disabled: v.disabled === true,
+      secret: v.type === "secret",
+    });
+  });
+  return out;
+};
+
+/**
+ * Postman auth is inherited: a request with no auth of its own uses its
+ * folder's, then the collection's. Reading only the request — which is what
+ * the parser used to do — reported most collections as requiring nothing.
+ */
+const postmanAuth = (auth, inherited = false) => {
+  if (!auth || !auth.type || auth.type === "noauth") return [];
+  const type = String(auth.type);
+  const detail = Array.isArray(auth[type]) ? auth[type] : [];
+  const field = (key) => detail.find((d) => d?.key === key)?.value;
+
   return [
     {
-      name: auth.type,
-      type: auth.type,
-      scheme: auth.type === "bearer" ? "bearer" : "",
-      location: "header",
-      headerName: auth.type === "apikey" ? "" : "Authorization",
+      name: type,
+      type,
+      scheme: type === "bearer" ? "bearer" : type === "basic" ? "basic" : "",
+      location: type === "apikey" ? String(field("in") || "header") : "header",
+      headerName:
+        type === "apikey"
+          ? String(field("key") || "")
+          : type === "noauth"
+            ? ""
+            : "Authorization",
       scopes: [],
+      inherited,
+      // The credential itself is nearly always a {{variable}}; keeping the
+      // raw values is what lets the flow analysis see auth as a consumer.
+      values: detail
+        .filter((d) => d && d.key)
+        .map((d) => ({ key: d.key, value: String(d.value ?? "") })),
     },
   ];
+};
+
+/** `event: [{listen, script: {exec: [...]}}]` → `{ prerequest, test }`. */
+const readScripts = (item) => {
+  const out = { prerequest: "", test: "" };
+  (Array.isArray(item?.event) ? item.event : []).forEach((event) => {
+    if (!event || event.disabled) return;
+    const exec = event.script?.exec;
+    const text = Array.isArray(exec) ? exec.join("\n") : String(exec || "");
+    if (!text.trim()) return;
+    const slot = event.listen === "prerequest" ? "prerequest" : "test";
+    out[slot] = out[slot] ? `${out[slot]}\n${text}` : text;
+  });
+  return out;
+};
+
+/**
+ * Postman supports six body modes; only `raw` was read before, so a
+ * form-data or GraphQL request looked like it had no body at all.
+ */
+const readBody = (req) => {
+  const body = req?.body;
+  if (!body || !body.mode) return { body: null, bodyMode: "none", formFields: [] };
+
+  if (body.mode === "raw") {
+    const raw = body.raw ?? "";
+    let parsed = raw;
+    try {
+      parsed = typeof raw === "string" && raw.trim() ? JSON.parse(raw) : raw;
+    } catch {
+      parsed = raw; // a template with {{vars}} in it is not valid JSON
+    }
+    return {
+      body: raw === "" ? null : parsed,
+      bodyMode: "raw",
+      rawBody: typeof raw === "string" ? raw : "",
+      language: body.options?.raw?.language || "",
+      formFields: [],
+    };
+  }
+
+  if (body.mode === "formdata" || body.mode === "urlencoded") {
+    const fields = (Array.isArray(body[body.mode]) ? body[body.mode] : [])
+      .filter((f) => f && f.key)
+      .map((f) => ({
+        key: f.key,
+        value: f.type === "file" ? String(f.src || "") : String(f.value ?? ""),
+        type: f.type === "file" ? "file" : "text",
+        disabled: f.disabled === true,
+        description: f.description?.content || f.description || "",
+      }));
+    return { body: null, bodyMode: body.mode, formFields: fields };
+  }
+
+  if (body.mode === "graphql") {
+    return {
+      body: null,
+      bodyMode: "graphql",
+      graphql: {
+        query: body.graphql?.query || "",
+        variables: body.graphql?.variables || "",
+      },
+      formFields: [],
+    };
+  }
+
+  if (body.mode === "file") {
+    return { body: null, bodyMode: "file", fileSrc: body.file?.src || "", formFields: [] };
+  }
+
+  return { body: null, bodyMode: body.mode, formFields: [] };
 };
 
 const postmanResponses = (item) => {
@@ -452,10 +676,16 @@ const postmanResponses = (item) => {
 };
 
 // ─── Postman collection parser ───────────────
-export const parsePostmanCollection = (data, setStats) => {
+
+export const parsePostmanCollection = (rawData, setStats) => {
+  const data = isPostmanV1(rawData) ? postmanV1ToV2(rawData) : rawData;
   const allNodes = [];
   let id = 0;
   const s = { total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 };
+
+  const collectionVariables = readVariableList(data.variable);
+  const collectionScripts = readScripts(data);
+  const collectionAuth = data.auth;
 
   const root = {
     id: "node-root",
@@ -464,12 +694,22 @@ export const parsePostmanCollection = (data, setStats) => {
     type: "root",
     parentId: null,
     itemCount: 0,
+    description: data.info?.description?.content || data.info?.description || "",
+    variables: collectionVariables,
+    scripts: collectionScripts,
   };
   allNodes.push(root);
 
-  const processItem = (item, parentId) => {
+  /**
+   * `ancestors` carries what a nested item inherits: the nearest declared
+   * auth and every variable declared above it.
+   */
+  const processItem = (item, parentId, ancestors) => {
     const nodeId = `node-${id++}`;
+
     if (item.item && Array.isArray(item.item)) {
+      const folderVariables = readVariableList(item.variable);
+      const folderScripts = readScripts(item);
       allNodes.push({
         id: nodeId,
         name: item.name,
@@ -477,75 +717,106 @@ export const parsePostmanCollection = (data, setStats) => {
         parentId,
         itemCount: item.item.length,
         description: item.description?.content || item.description || "",
+        variables: folderVariables,
+        scripts: folderScripts,
+        auth: postmanAuth(item.auth, false),
       });
-      item.item.forEach((child) => processItem(child, nodeId));
-    } else {
-      const req = item.request || item;
-      const url =
-        typeof req.url === "string" ? req.url : req.url?.raw || item.url || "";
-      const method = (req.method || item.method || "GET").toUpperCase();
-      s[method.toLowerCase()] = (s[method.toLowerCase()] || 0) + 1;
-      s.total++;
-      let body = null;
-      try {
-        body = req.body?.raw ? JSON.parse(req.body.raw) : req.body || null;
-      } catch {
-        body = req.body || null;
-      }
+      item.item.forEach((child) =>
+        processItem(child, nodeId, {
+          auth: item.auth || ancestors.auth,
+          authOwned: item.auth ? false : ancestors.authOwned,
+          variables: [...ancestors.variables, ...folderVariables],
+          scripts: [
+            ...ancestors.scripts,
+            { source: item.name, ...folderScripts },
+          ],
+        }),
+      );
+      return;
+    }
 
-      const declared = [];
-      if (req.url && typeof req.url === "object") {
-        (req.url.variable || []).forEach((v) => {
-          if (v?.key)
-            declared.push({
-              name: v.key,
-              in: "path",
-              required: true,
-              type: "",
-              description: v.description?.content || v.description || "",
-              example: v.value,
-            });
-        });
-        (req.url.query || []).forEach((q) => {
-          if (q?.key)
-            declared.push({
-              name: q.key,
-              in: "query",
-              required: false,
-              type: "",
-              description: q.description?.content || q.description || "",
-              example: q.value,
-            });
-        });
-      }
+    const req = item.request || item;
+    const url =
+      typeof req.url === "string" ? req.url : req.url?.raw || item.url || "";
+    const method = (req.method || item.method || "GET").toUpperCase();
+    s[method.toLowerCase()] = (s[method.toLowerCase()] || 0) + 1;
+    s.total++;
 
-      const headers = (Array.isArray(req.header) ? req.header : [])
-        .filter((h) => h && h.key && !h.disabled)
-        .map((h) => ({ key: h.key, value: String(h.value ?? "") }));
+    const bodyInfo = readBody(req);
 
-      allNodes.push({
-        id: nodeId,
-        name: item.name,
-        type: "request",
-        parentId,
-        method,
-        path: url,
-        description:
-          item.description?.content ||
-          req.description?.content ||
-          item.description ||
-          "",
-        body,
-        params: dedupeParams([...declared, ...extractUrlParams(url)]),
-        headers,
-        auth: postmanAuth(req.auth || item.auth || data.auth),
-        responses: postmanResponses(item),
+    const declared = [];
+    if (req.url && typeof req.url === "object") {
+      (req.url.variable || []).forEach((v) => {
+        if (v?.key)
+          declared.push({
+            name: v.key,
+            in: "path",
+            required: true,
+            type: "",
+            description: v.description?.content || v.description || "",
+            example: v.value,
+          });
+      });
+      (req.url.query || []).forEach((q) => {
+        if (q?.key)
+          declared.push({
+            name: q.key,
+            in: "query",
+            required: false,
+            type: "",
+            description: q.description?.content || q.description || "",
+            example: q.value,
+            disabled: q.disabled === true,
+          });
       });
     }
+
+    const rawHeaders = Array.isArray(req.header) ? req.header : [];
+    const headers = rawHeaders
+      .filter((h) => h && h.key && !h.disabled)
+      .map((h) => ({ key: h.key, value: String(h.value ?? "") }));
+    const disabledHeaders = rawHeaders
+      .filter((h) => h && h.key && h.disabled)
+      .map((h) => ({ key: h.key, value: String(h.value ?? ""), disabled: true }));
+
+    // Own auth wins; otherwise whatever the nearest ancestor declared.
+    const ownAuth = req.auth || item.auth;
+    const effectiveAuth = ownAuth
+      ? postmanAuth(ownAuth, false)
+      : postmanAuth(ancestors.auth, true);
+
+    allNodes.push({
+      id: nodeId,
+      name: item.name,
+      type: "request",
+      parentId,
+      method,
+      path: url,
+      description:
+        item.description?.content ||
+        req.description?.content ||
+        item.description ||
+        "",
+      params: dedupeParams([...declared, ...extractUrlParams(url)]),
+      headers,
+      disabledHeaders,
+      auth: effectiveAuth,
+      responses: postmanResponses(item),
+      scripts: readScripts(item),
+      inheritedVariables: ancestors.variables,
+      ...bodyInfo,
+    });
+  };
+
+  const rootAncestors = {
+    auth: collectionAuth,
+    authOwned: false,
+    variables: collectionVariables,
+    scripts: [{ source: root.name, ...collectionScripts }],
   };
 
   if (data.item && Array.isArray(data.item)) {
-    data.item.forEach((item) => processItem(item, "node-root"));
+    data.item.forEach((item) => processItem(item, "node-root", rootAncestors));
   }
   root.itemCount = allNodes.length - 1;
   setStats(s);
