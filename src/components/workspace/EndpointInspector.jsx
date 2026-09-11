@@ -19,8 +19,9 @@ import {
 } from "../../utils/analysis";
 import { methodColor } from "../../utils/constants";
 import { buildSnippets } from "../../utils/snippets";
+import { resolveNode, findVariables } from "../../utils/variables";
 
-const TABS = ["Endpoint", "Schema", "Code", "Examples", "Related"];
+const BASE_TABS = ["Endpoint", "Schema", "Code", "Examples", "Related"];
 
 const statusTone = (status) => {
   const code = parseInt(status, 10);
@@ -198,6 +199,8 @@ const EndpointInspector = ({
   onTest,
   onSelectNode,
   onClose,
+  variables = null,
+  variableFlow = null,
 }) => {
   // Remounted by the parent whenever the selection changes, so the tab
   // always starts on Endpoint for a newly picked node.
@@ -215,6 +218,58 @@ const EndpointInspector = ({
   );
 
   const snippets = useMemo(() => buildSnippets(node), [node]);
+
+  // What the request actually points at once the environment is applied.
+  const resolved = useMemo(
+    () => (node && variables ? resolveNode(node, variables) : null),
+    [node, variables],
+  );
+
+  const hasScripts = Boolean(
+    node?.scripts && (node.scripts.prerequest || node.scripts.test),
+  );
+
+  // Which variables this request reads, and which request writes each one.
+  const varsUsed = useMemo(() => {
+    if (!node || !variableFlow) return [];
+    const names = new Set();
+    findVariables(node.path || "").forEach((n) => names.add(n));
+    (node.headers || []).forEach((h) => findVariables(String(h.value ?? "")).forEach((n) => names.add(n)));
+    (node.auth || []).forEach((a) => (a.values || []).forEach((v) => findVariables(v.value).forEach((n) => names.add(n))));
+    if (typeof node.rawBody === "string") findVariables(node.rawBody).forEach((n) => names.add(n));
+    return [...names]
+      .filter((name) => !name.startsWith("$"))
+      .map((name) => ({
+        name,
+        value: variables?.get(name)?.value ?? null,
+        source: variables?.get(name)?.source ?? null,
+        producers: (variableFlow.producers.get(name) || [])
+          .map((id) => nodes.find((n) => n.id === id))
+          .filter(Boolean),
+      }));
+  }, [node, variables, variableFlow, nodes]);
+
+  const setsVariables = useMemo(() => {
+    if (!node || !variableFlow) return [];
+    const out = [];
+    variableFlow.producers.forEach((ids, name) => {
+      if (ids.includes(node.id)) {
+        out.push({
+          name,
+          consumers: (variableFlow.consumers.get(name) || [])
+            .filter((id) => id !== node.id)
+            .map((id) => nodes.find((n) => n.id === id))
+            .filter(Boolean),
+        });
+      }
+    });
+    return out;
+  }, [node, variableFlow, nodes]);
+
+  const TABS = useMemo(
+    () => (hasScripts ? [...BASE_TABS.slice(0, 3), "Scripts", ...BASE_TABS.slice(3)] : BASE_TABS),
+    [hasScripts],
+  );
 
   const requestSchema = useMemo(
     () => (node?.requestBodySchema ? resolveSchema(spec, node.requestBodySchema) : null),
@@ -307,8 +362,25 @@ const EndpointInspector = ({
           >
             {displayPath(node)}
           </span>
-          <CopyButton value={node.path} label="Copy URL" />
+          <CopyButton value={resolved?.path || node.path} label="Copy URL" />
         </div>
+
+        {/* Once an environment is applied the raw template is no longer what
+            the request points at, so the real target is shown beneath it. */}
+        {resolved && resolved.path !== node.path && (
+          <p className="vz-mono break-all rounded-md bg-vz-green/[0.07] px-2 py-1.5 text-[11px] leading-relaxed text-vz-green">
+            {resolved.path}
+          </p>
+        )}
+
+        {resolved?.unresolved?.length > 0 && (
+          <p className="flex items-start gap-1.5 text-[11.5px] leading-relaxed text-vz-warn">
+            <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+            {resolved.unresolved.map((n) => `{{${n}}}`).join(", ")}{" "}
+            {resolved.unresolved.length === 1 ? "has" : "have"} no value in the
+            active environment.
+          </p>
+        )}
 
         {node.deprecated ? (
           <p className="flex items-center gap-1.5 text-[12px] text-vz-warn">
@@ -324,6 +396,54 @@ const EndpointInspector = ({
               </p>
             ) : (
               <Empty>No description in the spec.</Empty>
+            )}
+
+            {(varsUsed.length > 0 || setsVariables.length > 0) && (
+              <Card title="Variables">
+                {setsVariables.map((entry) => (
+                  <p key={`sets-${entry.name}`} className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+                    <ArrowUpRight size={12} className="flex-shrink-0 text-vz-green" />
+                    <span className="vz-mono text-vz-green">{entry.name}</span>
+                    <span className="text-vz-dim">
+                      set here
+                      {entry.consumers.length
+                        ? ` · read by ${entry.consumers.length} request${entry.consumers.length === 1 ? "" : "s"}`
+                        : " · nothing reads it"}
+                    </span>
+                  </p>
+                ))}
+
+                {varsUsed.map((entry) => (
+                  <div key={`uses-${entry.name}`} className="mb-1.5 last:mb-0">
+                    <p className="flex flex-wrap items-baseline gap-1.5 text-[12px]">
+                      <span className="vz-mono text-vz-text">{`{{${entry.name}}}`}</span>
+                      {entry.value !== null ? (
+                        <span className="vz-mono min-w-0 truncate text-vz-soft" title={entry.value}>
+                          = {entry.value || "(empty)"}
+                        </span>
+                      ) : entry.producers.length ? (
+                        <span className="text-vz-dim">set at run time</span>
+                      ) : (
+                        <span className="text-vz-warn">no value anywhere</span>
+                      )}
+                    </p>
+                    {entry.source && (
+                      <p className="text-[10.5px] text-vz-dim">from the {entry.source}</p>
+                    )}
+                    {entry.producers.map((producer) => (
+                      <button
+                        key={producer.id}
+                        type="button"
+                        onClick={() => onSelectNode?.(producer)}
+                        className="vz-t mt-0.5 flex items-center gap-1 text-[10.5px] text-vz-accent-2 hover:underline"
+                      >
+                        <ArrowUpRight size={10} />
+                        set by {producer.name}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </Card>
             )}
 
             <Card title="Authentication">
@@ -553,6 +673,35 @@ const EndpointInspector = ({
                 <Empty>The spec declares no responses for this operation.</Empty>
               )}
             </Card>
+          </>
+        )}
+
+        {tab === "Scripts" && (
+          <>
+            <p className="text-[11.5px] leading-relaxed text-vz-dim">
+              Scripts are shown as written in the collection. Vizroute does not
+              run them — this is what Postman will execute around the request.
+            </p>
+
+            {node.scripts?.prerequest ? (
+              <Card title="Pre-request">
+                <pre className="vz-mono vz-scroll max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] leading-relaxed text-vz-soft">
+                  {node.scripts.prerequest}
+                </pre>
+              </Card>
+            ) : (
+              <Empty>No pre-request script.</Empty>
+            )}
+
+            {node.scripts?.test ? (
+              <Card title="Tests">
+                <pre className="vz-mono vz-scroll max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] leading-relaxed text-vz-soft">
+                  {node.scripts.test}
+                </pre>
+              </Card>
+            ) : (
+              <Empty>No test script.</Empty>
+            )}
           </>
         )}
 

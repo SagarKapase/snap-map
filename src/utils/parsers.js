@@ -27,8 +27,13 @@ export const extractUrlParams = (url) => {
 
   const [pathPart, queryPart] = url.split("?");
 
+  // A Postman template is not a path parameter. Without stripping them first,
+  // "{{baseUrl}}/orders" reported a required path parameter called "{baseUrl",
+  // because the placeholder pattern matches the inner braces.
+  const withoutTemplates = pathPart.replace(/\{\{[^}]*\}\}/g, "");
+
   const pathMatches =
-    pathPart.match(/\{[^}/]+\}|:[a-zA-Z_][a-zA-Z0-9_-]*/g) || [];
+    withoutTemplates.match(/\{[^}/]+\}|:[a-zA-Z_][a-zA-Z0-9_-]*/g) || [];
   pathMatches.forEach((raw) => {
     const name = raw.startsWith("{") ? raw.slice(1, -1) : raw.slice(1);
     if (name)

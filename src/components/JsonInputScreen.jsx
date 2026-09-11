@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import yaml from "js-yaml";
+import { curlToCollection, harToCollection, looksLikeCurl, looksLikeHar } from "../utils/importers";
 import {
   Upload,
   Globe,
@@ -69,17 +70,32 @@ const JsonInputScreen = ({
   const lineNumRef = useRef(null);
 
   const tryParse = (text) => {
+    // A pasted cURL command is not a document at all, but it is one of the two
+    // things developers reach for the clipboard to move, so it is read first.
+    if (looksLikeCurl(text)) {
+      try {
+        return curlToCollection(text);
+      } catch {
+        return null;
+      }
+    }
+    let value = null;
     try {
-      return JSON.parse(text);
+      value = JSON.parse(text);
     } catch {
       /* not JSON — fall through to YAML */
     }
-    try {
-      return yaml.load(text);
-    } catch {
-      /* not YAML either */
+    if (value === null) {
+      try {
+        value = yaml.load(text);
+      } catch {
+        /* not YAML either */
+      }
     }
-    return null;
+    // A browser network recording is valid JSON that means something entirely
+    // different from a specification.
+    if (looksLikeHar(value)) return harToCollection(value).collection;
+    return value;
   };
 
   // Parsed once per change of the text, rather than once per derived value.
@@ -98,6 +114,7 @@ const JsonInputScreen = ({
     if (p.openapi) return `OpenAPI ${p.openapi}`;
     if (p.swagger) return `Swagger ${p.swagger}`;
     if (p.info && p.item && Array.isArray(p.item)) return "Postman";
+    if (!p.item && Array.isArray(p.requests)) return "Postman v1";
     if (Array.isArray(p)) return "Custom Array";
     return "Custom JSON";
   }, [parsedInput]);
@@ -497,7 +514,7 @@ const JsonInputScreen = ({
                         Paste a specification, or drop a file anywhere here
                       </p>
                       <p className="mt-1 text-[12px] text-vz-dim">
-                        JSON or YAML · OpenAPI, Swagger, Postman, custom
+                        OpenAPI · Swagger · Postman · HAR · cURL · JSON or YAML
                       </p>
                       <div className="pointer-events-auto mt-5 flex flex-wrap items-center justify-center gap-2">
                         <button
@@ -578,7 +595,7 @@ const JsonInputScreen = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".json,.yaml,.yml"
+                  accept=".json,.yaml,.yml,.har"
                   className="hidden"
                   onChange={(e) => handleFileRead(e.target.files?.[0])}
                 />

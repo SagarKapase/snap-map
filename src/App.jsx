@@ -6,6 +6,8 @@ import LandingPage from "./pages/LandingPage";
 // The landing page is the entry route, so it ships in the main chunk.
 // The workspace is loaded on demand.
 const PostmanGraphViewer = lazy(() => import("./PostmanGraphViewer"));
+// The embed renders a static vector, so it never pulls in the workspace.
+const EmbedMap = lazy(() => import("./pages/EmbedMap"));
 
 const Loader = () => (
   <div className="flex h-screen w-full items-center justify-center bg-vz-bg">
@@ -25,6 +27,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
+          <Route path="/embed" element={<EmbedMap />} />
           {/* Kept so older links and bookmarks keep working */}
           <Route path="/app" element={<PostmanGraphViewer />} />
           <Route path="*" element={<Navigate to="/" replace />} />

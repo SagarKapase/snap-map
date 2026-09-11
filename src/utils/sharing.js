@@ -69,6 +69,24 @@ export const generateShareUrl = (data) => {
 };
 
 /**
+ * The same link, pointed at the read-only embed view.
+ *
+ * An embed carries the spec exactly as a share link does, so anyone who can
+ * open the page can read it — which is the point, but worth being deliberate
+ * about before pasting one into a public README.
+ */
+export const generateEmbedSnippet = (data) => {
+  const share = generateShareUrl(data);
+  if (!share.ok) return share;
+  const url = `${window.location.origin}/embed?spec=${share.url.split("?spec=")[1]}`;
+  return {
+    ok: true,
+    url,
+    snippet: `<iframe src="${url}" width="100%" height="520" style="border:1px solid #222a38;border-radius:12px" loading="lazy" title="API map"></iframe>`,
+  };
+};
+
+/**
  * Check if the current URL has a shared spec and extract it.
  */
 export const extractSharedSpec = () => {

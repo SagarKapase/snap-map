@@ -6,12 +6,12 @@ import {
   Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
   Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
   Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
-  AlertCircle,
+  AlertCircle, Target, Upload, Code2,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
 import {
-  generateShareUrl, extractSharedSpec, downloadSpecFile,
+  generateShareUrl, generateEmbedSnippet, extractSharedSpec, downloadSpecFile,
 } from "./utils/sharing";
 import {
   LAYOUT_LABELS, ancestorsOf, buildGroupTree, countSchemas,
@@ -35,6 +35,7 @@ import AutoImportPanel from "./components/AutoImport";
 import HealthMonitor from "./components/HealthMonitor";
 import FlowBuilder from "./components/FlowBuilder";
 import EnvironmentManager from "./components/EnvironmentManager";
+import { getEnvironmentForResolution, importEnvironment } from "./utils/environments";
 import BreakingChangeDetector from "./components/BreakingChangeDetector";
 import DocGenerator from "./components/DocGenerator";
 import MultiServiceGraph from "./components/MultiServiceGraph";
@@ -50,12 +51,22 @@ import CommandPalette from "./components/workspace/CommandPalette";
 import TableView from "./components/workspace/TableView";
 import RawSpecView from "./components/workspace/RawSpecView";
 import AuditView from "./components/workspace/AuditView";
+import CoverageView from "./components/workspace/CoverageView";
+import { PostmanIcon } from "./components/icons/BrandIcons";
+import VariableFlowLines from "./components/workspace/VariableFlowLines";
+import PostmanConnect from "./components/workspace/PostmanConnect";
+import { collectVariables, analyseVariableFlow } from "./utils/variables";
+import { curlToCollection, harToCollection, looksLikeCurl, looksLikeHar } from "./utils/importers";
+import { isPostmanVariableFile, readPostmanVariableFile } from "./utils/parsers";
+import { convertSpec } from "./utils/convert";
+import { applyFixes } from "./utils/fixes";
 
 const CENTER_TABS = [
   { id: "map", label: "API Map", icon: Waypoints },
   { id: "table", label: "Table View", icon: Table2 },
   { id: "raw", label: "Raw Spec", icon: Braces },
   { id: "audit", label: "Audit", icon: ShieldCheck },
+  { id: "coverage", label: "Coverage", icon: Target },
 ];
 
 // Past these thresholds the canvas stops doing per-card work that only pays
@@ -129,6 +140,12 @@ const PostmanGraphViewer = () => {
   // to what is actually on screen.
   const [viewport, setViewport] = useState({ left: 0, top: 0, w: 0, h: 0 });
   const [shareState, setShareState] = useState(null);
+  // Postman companion state
+  const [showPostman, setShowPostman] = useState(false);
+  const [pushPayload, setPushPayload] = useState(null);
+  const [pushLabel, setPushLabel] = useState("");
+  const [pulledEnvironment, setPulledEnvironment] = useState(null);
+  const [compare, setCompare] = useState(null);
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -182,9 +199,26 @@ const PostmanGraphViewer = () => {
   }, [hoveredNodeId, nodes, filteredNodes.length]);
 
   const groups = useMemo(() => buildGroupTree(nodes), [nodes]);
+  // An environment pulled from Postman wins over a locally defined one: it is
+  // the live value, and it is what the user just chose.
+  const activeEnvironment = useMemo(
+    () => pulledEnvironment || (activeEnvId ? getEnvironmentForResolution(activeEnvId) : null),
+    [pulledEnvironment, activeEnvId],
+  );
+
+  const variables = useMemo(
+    () => collectVariables({ nodes, environment: activeEnvironment }),
+    [nodes, activeEnvironment],
+  );
+
+  const variableFlow = useMemo(
+    () => analyseVariableFlow(nodes, variables),
+    [nodes, variables],
+  );
+
   const audit = useMemo(
-    () => auditSpec({ spec: collection, nodes, format: detectedFormat }),
-    [collection, nodes, detectedFormat],
+    () => auditSpec({ spec: collection, nodes, format: detectedFormat, flow: variableFlow }),
+    [collection, nodes, detectedFormat, variableFlow],
   );
   const schemaCount = useMemo(() => countSchemas(collection), [collection]);
 
@@ -269,6 +303,38 @@ const PostmanGraphViewer = () => {
   const animateCards = renderNodes.length <= ANIMATE_UPTO;
 
 
+  /**
+   * Route an import to the right reader before it reaches the parser.
+   *
+   * A HAR and a Postman environment export are both valid JSON that mean
+   * something entirely different from a collection, and pasted cURL is not
+   * JSON at all.
+   */
+  const handleImportText = useCallback((text) => {
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return null;
+    if (looksLikeCurl(trimmed)) return { kind: "collection", data: curlToCollection(trimmed) };
+    let data;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      try {
+        data = yaml.load(trimmed);
+      } catch {
+        return null;
+      }
+    }
+    if (!data || typeof data !== "object") return null;
+    if (looksLikeHar(data)) {
+      const { collection: har, stats } = harToCollection(data);
+      return { kind: "collection", data: har, note: `${stats.imported} of ${stats.entries} recorded requests kept; ${stats.skipped} assets and ${stats.duplicates} repeats skipped.` };
+    }
+    if (isPostmanVariableFile(data)) {
+      return { kind: "environment", data: readPostmanVariableFile(data) };
+    }
+    return { kind: "collection", data };
+  }, []);
+
   const handleVisualize = useCallback((data) => {
     const parsed = parseCollection(data, setStats);
     const format = Array.isArray(data) ? "Custom JSON" : formatLabel(data);
@@ -295,6 +361,74 @@ const PostmanGraphViewer = () => {
     if (data) handleVisualize(data);
   }, [handleVisualize]);
 
+  // ── Postman companion ──────────────────────
+  // A collection pulled straight from a workspace behaves exactly like one
+  // dragged in from a file; the only difference is where it came from.
+  const handlePullFromPostman = useCallback((document, name) => {
+    handleVisualize(document);
+    setPushLabel(name ? `pulled from ${name}` : "");
+  }, [handleVisualize]);
+
+  const handlePulledEnvironment = useCallback((environment) => {
+    setPulledEnvironment(environment);
+    // Keep it for next time too, so a pulled environment behaves like any other.
+    const stored = importEnvironment(environment);
+    setActiveEnvId(stored.id);
+  }, []);
+
+  /** Hand the current collection to the push flow, converted if it is a spec. */
+  const openPostmanPush = useCallback(() => {
+    if (!nodes.length) return;
+    try {
+      const text = convertSpec("postman", { spec: collection, nodes }).text;
+      setPushPayload(JSON.parse(text));
+      setPushLabel(/postman/i.test(detectedFormat) ? "" : `converted from ${detectedFormat}`);
+      setShowPostman(true);
+    } catch {
+      setPushPayload(null);
+    }
+  }, [collection, nodes, detectedFormat]);
+
+  /** Apply the chosen repairs and reload the workspace from the result. */
+  const handleApplyFixes = useCallback((ids) => {
+    if (!collection || !ids.length) return;
+    const { collection: fixed, changes } = applyFixes(collection, ids);
+    handleVisualize(fixed);
+    setPushPayload(fixed);
+    setPushLabel(`${changes.length} repair${changes.length === 1 ? "" : "s"} applied`);
+    setCenterTab("audit");
+  }, [collection, handleVisualize]);
+
+  // ── Coverage ───────────────────────────────
+  const handleCompareFile = useCallback((file) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = handleImportText(ev.target.result);
+      if (!result || result.kind !== "collection") return;
+      const parsed = parseCollection(result.data, () => {});
+      setCompare({
+        nodes: parsed,
+        name: result.data?.info?.name || result.data?.info?.title || file.name,
+        format: Array.isArray(result.data) ? "Custom JSON" : formatLabel(result.data),
+      });
+    };
+    reader.readAsText(file);
+  }, [handleImportText]);
+
+  /** Turn the uncovered endpoints into a collection ready to push. */
+  const handleGenerateMissing = useCallback((items, count) => {
+    if (!items.length) return;
+    setPushPayload({
+      info: {
+        name: `${collection?.info?.name || collection?.info?.title || "API"} — missing endpoints`,
+        schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+      },
+      item: items,
+    });
+    setPushLabel(`${count} endpoint${count === 1 ? "" : "s"} with no request`);
+    setShowPostman(true);
+  }, [collection]);
+
   // ── Share link handler ─────────────────────
   // A link carries the whole spec in its query string. Past a few tens of
   // kilobytes that link is rejected by every proxy in the path, so the spec
@@ -313,6 +447,19 @@ const PostmanGraphViewer = () => {
       bytes: result.bytes,
       urlLength: result.urlLength || 0,
     });
+  }, [collection]);
+
+  /** An <iframe> snippet for a README, a wiki or a pull request. */
+  const handleCopyEmbed = useCallback(() => {
+    if (!collection) return;
+    const result = generateEmbedSnippet(collection);
+    if (result.ok) {
+      navigator.clipboard?.writeText(result.snippet);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+      return;
+    }
+    setShareState({ bytes: result.bytes, urlLength: result.urlLength || 0 });
   }, [collection]);
 
   const handleShareDownload = useCallback(() => {
@@ -625,8 +772,12 @@ const PostmanGraphViewer = () => {
     { id: "view-table", group: "Views", icon: Table2, label: "Open Table View", keywords: "list rows", run: () => setCenterTab("table") },
     { id: "view-raw", group: "Views", icon: Braces, label: "Open Raw Spec", keywords: "json source", run: () => setCenterTab("raw") },
     { id: "view-audit", group: "Views", icon: ShieldCheck, label: "Open audit", hint: "Lint, security and quality checks", keywords: "lint score security quality issues", run: () => setCenterTab("audit") },
+    { id: "view-coverage", group: "Views", icon: Target, label: "Open coverage", hint: "Compare a spec against a collection", keywords: "coverage missing endpoints gap compare spec collection qa", run: () => setCenterTab("coverage") },
+    { id: "postman-open", group: "Tools", icon: Wifi, label: "Open a collection from Postman", hint: "Browse your workspaces", keywords: "postman workspace pull import account api key", run: () => { setPushPayload(null); setShowPostman(true); } },
+    { id: "postman-push", group: "Tools", icon: Upload, label: "Send this collection to Postman", hint: "Create or overwrite in a workspace", keywords: "postman push export workspace upload sync", run: openPostmanPush },
     { id: "export", group: "Views", icon: Download, label: "Export or convert", hint: "OpenAPI, Swagger, Postman, PNG, SVG, CSV", keywords: "png svg json yaml download openapi swagger postman convert http csv", run: () => { setCenterTab("map"); setExportOpen(true); } },
     { id: "share", group: "Views", icon: Link2, label: "Copy share link", keywords: "url share", run: handleShare },
+    { id: "embed", group: "Views", icon: Code2, label: "Copy embed code", hint: "An iframe for a README or wiki", keywords: "iframe embed readme confluence wiki publish", run: handleCopyEmbed },
     { id: "save", group: "Tools", icon: Save, label: "Save to collections", keywords: "store bookmark", run: () => openTool(setShowSaveModal) },
     { id: "collections", group: "Tools", icon: FolderOpen, label: "My collections", keywords: "saved open", run: () => openTool(setShowCollections) },
     { id: "docs", group: "Tools", icon: BookOpen, label: "Generate docs", keywords: "documentation markdown", run: () => openTool(setShowDocGenerator) },
@@ -640,7 +791,7 @@ const PostmanGraphViewer = () => {
     { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
     { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
     { id: "multi", group: "Tools", icon: Network, label: "Multi-service graph", keywords: "services dependencies", run: () => openFullView("multiservice") },
-  ], [openPlayground, handleFitView, handleShare, focusOnNode, selectedNode, openTool, openFullView]);
+  ], [openPlayground, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush]);
 
   const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
   const liveResponse = selectedNode ? liveResponses[selectedNode.id] : null;
@@ -652,6 +803,8 @@ const PostmanGraphViewer = () => {
       nodes={nodes}
       spec={collection}
       liveResponse={liveResponse}
+      variables={variables}
+      variableFlow={variableFlow}
       onTest={() => setShowPlayground(true)}
       onSelectNode={selectAndReveal}
       onClose={() => setInspectorOpen(false)}
@@ -701,6 +854,15 @@ const PostmanGraphViewer = () => {
       {showFlowBuilder && (
         <FlowBuilder nodes={nodes} onClose={() => setShowFlowBuilder(false)} />
       )}
+      {showPostman && (
+        <PostmanConnect
+          onClose={() => { setShowPostman(false); setPushPayload(null); }}
+          onLoadCollection={handlePullFromPostman}
+          onLoadEnvironment={handlePulledEnvironment}
+          pushPayload={pushPayload}
+          pushLabel={pushLabel}
+        />
+      )}
       {showEnvManager && (
         <EnvironmentManager
           activeEnvId={activeEnvId}
@@ -723,8 +885,8 @@ const PostmanGraphViewer = () => {
         <WorkspaceManager onClose={() => setShowWorkspace(false)} />
       )}
 
-      <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
-        onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { try { const text = ev.target.result; let data; try { data = JSON.parse(text); } catch { data = yaml.load(text); } if (data && typeof data === "object") handleVisualize(data); } catch { /* ignore unreadable file */ } }; reader.readAsText(file); e.target.value = ""; }} />
+      <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml,.har" className="hidden"
+        onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { const result = handleImportText(ev.target.result); if (!result) return; if (result.kind === "environment") { handlePulledEnvironment(result.data); return; } handleVisualize(result.data); }; reader.readAsText(file); e.target.value = ""; }} />
     </>
   );
 
@@ -794,32 +956,48 @@ const PostmanGraphViewer = () => {
           {/* Centre workspace */}
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel">
             <div className="flex h-[56px] flex-shrink-0 items-center justify-between gap-3 border-b border-vz-line-soft px-3">
-              <div className="flex items-center gap-1 rounded-[9px] border border-vz-line-soft bg-vz-bg p-1">
+              <div className="vz-scroll flex min-w-0 items-center gap-1 overflow-x-auto rounded-[9px] border border-vz-line-soft bg-vz-bg p-1">
                 {CENTER_TABS.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
                     onClick={() => setCenterTab(tab.id)}
-                    className={`vz-t flex items-center gap-1.5 rounded-[7px] px-2.5 py-[7px] text-[12px] ${
+                    title={tab.label}
+                    aria-label={tab.label}
+                    className={`vz-t flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] px-2.5 py-[7px] text-[12px] ${
                       centerTab === tab.id
                         ? "bg-vz-accent/18 text-vz-text"
                         : "text-vz-soft hover:text-vz-text"
                     }`}
                   >
-                    <tab.icon size={13} />
-                    <span className="hidden sm:inline">{tab.label}</span>
+                    <tab.icon size={13} className="flex-shrink-0" />
+                    <span
+                      className={centerTab === tab.id ? "hidden sm:inline" : "hidden 2xl:inline"}
+                    >
+                      {tab.label}
+                    </span>
                   </button>
                 ))}
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-shrink-0 items-center gap-1.5">
                 <button
                   type="button"
                   onClick={openPlayground}
                   className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
                 >
-                  <Play size={14} />
-                  <span className="hidden sm:inline">Playground</span>
+                  <Play size={14} className="flex-shrink-0" />
+                  <span className="hidden 2xl:inline">Playground</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openPostmanPush}
+                  title="Open a collection from Postman, or send this one back"
+                  className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
+                >
+                  <PostmanIcon size={14} className="flex-shrink-0 text-[#ff6c37]" />
+                  <span className="hidden 2xl:inline">Postman</span>
                 </button>
 
                 <ExportMenu
@@ -936,6 +1114,12 @@ const PostmanGraphViewer = () => {
                           showParticles={showParticles}
                           activeId={hoveredNodeId || selectedNode?.id || null}
                         />
+                        <VariableFlowLines
+                          nodes={renderNodes}
+                          nodePositions={nodePositions}
+                          flow={variableFlow}
+                          selectedId={selectedNode?.type === "request" ? selectedNode.id : null}
+                        />
                       </div>
 
                       <div className="pointer-events-none absolute inset-0" style={{
@@ -1002,11 +1186,28 @@ const PostmanGraphViewer = () => {
                     onShowInMap={(n) => { setCenterTab("map"); selectAndReveal(n); }}
                   />
                 </div>
+              ) : centerTab === "coverage" ? (
+                <div className="absolute inset-0">
+                  <CoverageView
+                    nodes={nodes}
+                    detectedFormat={detectedFormat}
+                    variables={variables}
+                    compareNodes={compare?.nodes || null}
+                    compareName={compare?.name || ""}
+                    compareFormat={compare?.format || ""}
+                    onPickFile={handleCompareFile}
+                    onClearCompare={() => setCompare(null)}
+                    onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+                    onGenerate={handleGenerateMissing}
+                  />
+                </div>
               ) : centerTab === "audit" ? (
                 <div className="absolute inset-0">
                   <AuditView
                     audit={audit}
                     nodes={nodes}
+                    collection={collection}
+                    onApplyFixes={handleApplyFixes}
                     onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
                   />
                 </div>
@@ -1036,7 +1237,7 @@ const PostmanGraphViewer = () => {
           onOpenAudit={() => setCenterTab("audit")}
           detectedFormat={detectedFormat}
           importedAt={importedAt}
-          activeEnvName={activeEnvId ? "Environment active" : null}
+          activeEnvName={activeEnvironment?.name || null}
           onSelectWarning={(w) => {
             const node = nodes.find((n) => n.id === w.nodeId);
             if (node) { setCenterTab("map"); selectAndReveal(node); }

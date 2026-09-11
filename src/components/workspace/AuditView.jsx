@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { ShieldCheck, AlertTriangle, AlertCircle, Info, ChevronRight } from "lucide-react";
+import { ShieldCheck, AlertTriangle, AlertCircle, Info, ChevronRight, Wrench, Check } from "lucide-react";
+import { proposeFixes } from "../../utils/fixes";
 
 const SEVERITIES = [
   { id: "all", label: "All" },
@@ -28,8 +29,17 @@ const scoreTone = (score) =>
 const scoreBar = (score) =>
   score >= 90 ? "bg-vz-green" : score >= 70 ? "bg-vz-warn" : "bg-vz-red";
 
-const AuditView = ({ audit, onSelectNode, nodes = [] }) => {
+const AuditView = ({ audit, onSelectNode, nodes = [], collection = null, onApplyFixes = null }) => {
   const [severity, setSeverity] = useState("all");
+  const [chosen, setChosen] = useState([]);
+
+  // Repairs are only offered for collections: an OpenAPI document is usually
+  // generated from code, so rewriting it here would be the wrong place.
+  const fixes = useMemo(
+    () => (onApplyFixes && collection?.item ? proposeFixes(collection) : []),
+    [collection, onApplyFixes],
+  );
+  const actionable = fixes.filter((f) => f.apply);
   const [expanded, setExpanded] = useState({});
 
   // Reset the per-category limits whenever the filter changes.
@@ -105,6 +115,69 @@ const AuditView = ({ audit, onSelectNode, nodes = [] }) => {
               " Some rules apply to OpenAPI and Swagger documents and were skipped for this format."}
           </p>
         </div>
+
+        {/* Repairs */}
+        {fixes.length > 0 && (
+          <div className="mt-5 overflow-hidden rounded-[14px] border border-vz-line">
+            <div className="flex items-center gap-2 border-b border-vz-line-soft bg-vz-panel-2 px-3.5 py-2.5">
+              <Wrench size={13} className="text-vz-accent" />
+              <span className="text-[12.5px] font-semibold text-vz-text">
+                Repairs Vizroute can make
+              </span>
+              <span className="ml-auto text-[11px] text-vz-dim">
+                applied to a copy — your source is never modified
+              </span>
+            </div>
+
+            {fixes.map((fix, i) => (
+              <label
+                key={fix.id}
+                className={`flex cursor-pointer items-start gap-2.5 bg-vz-panel px-3.5 py-2.5 ${
+                  i > 0 ? "border-t border-vz-line-soft" : ""
+                } ${fix.apply ? "" : "cursor-default opacity-70"}`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={!fix.apply}
+                  checked={chosen.includes(fix.id)}
+                  onChange={(e) =>
+                    setChosen((prev) =>
+                      e.target.checked ? [...prev, fix.id] : prev.filter((id) => id !== fix.id),
+                    )
+                  }
+                  className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[#a855f7]"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12.5px] text-vz-text">{fix.title}</span>
+                  <span className="mt-0.5 block text-[11.5px] leading-relaxed text-vz-dim">
+                    {fix.detail}
+                  </span>
+                </span>
+              </label>
+            ))}
+
+            {actionable.length > 0 && (
+              <div className="flex items-center gap-2 border-t border-vz-line-soft bg-vz-panel-2 px-3.5 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => setChosen(actionable.map((f) => f.id))}
+                  className="vz-t text-[12px] text-vz-soft hover:text-vz-text"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  disabled={!chosen.length}
+                  onClick={() => { onApplyFixes(chosen); setChosen([]); }}
+                  className="vz-t ml-auto flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c45cff] px-3.5 py-1.5 text-[12.5px] font-semibold text-[#160a1d] disabled:opacity-40"
+                >
+                  <Check size={13} />
+                  Apply {chosen.length || ""} {chosen.length === 1 ? "fix" : "fixes"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Filters */}
         <div className="mt-5 flex flex-wrap items-center gap-1.5">

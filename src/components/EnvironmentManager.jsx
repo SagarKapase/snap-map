@@ -3,52 +3,18 @@ import {
   X, Plus, Trash2, Check, Globe, Server, Code, Edit3,
   ChevronDown, Copy, AlertCircle,
 } from "lucide-react";
-
-const STORAGE_KEY = "vizroute_environments";
-
-const DEFAULT_ENVS = [
-  {
-    id: "env_dev",
-    name: "Development",
-    icon: "code",
-    color: "#81ecff",
-    variables: { baseUrl: "http://localhost:3000", apiKey: "dev-key-123" },
-  },
-  {
-    id: "env_staging",
-    name: "Staging",
-    icon: "server",
-    color: "#fbbf24",
-    variables: { baseUrl: "https://staging.api.example.com", apiKey: "staging-key-456" },
-  },
-  {
-    id: "env_prod",
-    name: "Production",
-    icon: "globe",
-    color: "#ff6e84",
-    variables: { baseUrl: "https://api.example.com", apiKey: "prod-key-789" },
-  },
-];
+import { loadEnvironments, saveEnvironments } from "../utils/environments";
 
 const ICONS = { code: Code, server: Server, globe: Globe };
 
-const loadEnvs = () => {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return stored?.length ? stored : DEFAULT_ENVS;
-  } catch { return DEFAULT_ENVS; }
-};
-
-const saveEnvs = (envs) => localStorage.setItem(STORAGE_KEY, JSON.stringify(envs));
-
 const EnvironmentManager = ({ activeEnvId, onSelectEnv, onClose }) => {
-  const [envs, setEnvs] = useState(loadEnvs());
+  const [envs, setEnvs] = useState(loadEnvironments());
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", variables: {} });
   const [newVarKey, setNewVarKey] = useState("");
   const [newVarVal, setNewVarVal] = useState("");
 
-  useEffect(() => { saveEnvs(envs); }, [envs]);
+  useEffect(() => { saveEnvironments(envs); }, [envs]);
 
   const startEdit = (env) => {
     setEditingId(env.id);

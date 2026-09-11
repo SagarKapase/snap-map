@@ -239,8 +239,8 @@ const ExportMenu = ({
         onClick={() => setOpen(!open)}
         className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
       >
-        <Download size={14} />
-        Export
+        <Download size={14} className="flex-shrink-0" />
+        <span className="hidden xl:inline">Export</span>
         <ChevronDown
           size={12}
           className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`}
