@@ -135,14 +135,36 @@ export const parseOpenApi = (data, setStats) => {
   let id = 0;
   const s = { total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 };
 
-  let baseUrl = "";
-  if (data.servers && data.servers.length > 0) {
-    baseUrl = data.servers[0].url || "";
+  // A server URL may be templated: "https://{env}.api.test/{ver}". The
+  // document declares the defaults, so they are filled in rather than left
+  // for the playground to send as literal braces.
+  const resolveServerUrl = (server) => {
+    let url = String(server?.url || "");
+    Object.entries(server?.variables || {}).forEach(([name, variable]) => {
+      if (variable?.default !== undefined) {
+        url = url.split(`{${name}}`).join(String(variable.default));
+      }
+    });
+    return url.replace(/\/+$/, "");
+  };
+
+  const servers = [];
+  if (Array.isArray(data.servers) && data.servers.length) {
+    data.servers.forEach((server) => {
+      const url = resolveServerUrl(server);
+      if (url && !servers.includes(url)) servers.push(url);
+    });
   } else if (data.host) {
-    const scheme = (data.schemes && data.schemes[0]) || "https";
-    baseUrl = `${scheme}://${data.host}${data.basePath || ""}`;
+    const schemes = Array.isArray(data.schemes) && data.schemes.length ? data.schemes : ["https"];
+    schemes.forEach((scheme) => {
+      const url = `${scheme}://${data.host}${data.basePath || ""}`.replace(/\/+$/, "");
+      if (!servers.includes(url)) servers.push(url);
+    });
+  } else if (data.basePath) {
+    servers.push(String(data.basePath).replace(/\/+$/, ""));
   }
-  baseUrl = baseUrl.replace(/\/+$/, "");
+
+  const baseUrl = servers[0] || "";
 
   const root = {
     id: "node-root",
@@ -151,6 +173,7 @@ export const parseOpenApi = (data, setStats) => {
     type: "root",
     parentId: null,
     itemCount: 0,
+    servers,
   };
   allNodes.push(root);
 

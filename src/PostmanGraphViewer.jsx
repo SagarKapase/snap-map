@@ -146,6 +146,9 @@ const PostmanGraphViewer = () => {
   const [pushLabel, setPushLabel] = useState("");
   const [pulledEnvironment, setPulledEnvironment] = useState(null);
   const [compare, setCompare] = useState(null);
+  // Where a relative path is sent from the playground. Asked for once per
+  // import rather than per request.
+  const [playgroundOrigin, setPlaygroundOrigin] = useState("");
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -214,6 +217,11 @@ const PostmanGraphViewer = () => {
   const variableFlow = useMemo(
     () => analyseVariableFlow(nodes, variables),
     [nodes, variables],
+  );
+
+  const declaredServers = useMemo(
+    () => nodes.find((n) => n.type === "root")?.servers || [],
+    [nodes],
   );
 
   const audit = useMemo(
@@ -343,6 +351,7 @@ const PostmanGraphViewer = () => {
     setCollapsedFolders(new Set(parsed.filter((n) => n.type === "folder").map((n) => n.id)));
     setSearchQuery(""); setFilterMethod("all"); setCenterTab("map");
     setLiveResponses({});
+    setPlaygroundOrigin("");
     setImportedAt(new Date().toISOString());
     setRecents(addRecent({
       name: data?.info?.name || data?.info?.title || data?.name || "API Collection",
@@ -822,6 +831,10 @@ const PostmanGraphViewer = () => {
             setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
           }}
           onResponse={(nodeId, result) => setLiveResponses((prev) => ({ ...prev, [nodeId]: result }))}
+          variables={variables}
+          servers={declaredServers}
+          origin={playgroundOrigin}
+          onOriginChange={setPlaygroundOrigin}
         />
       )}
 

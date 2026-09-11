@@ -17,6 +17,7 @@ import {
   Ban,
 } from "lucide-react";
 import { methodColor } from "../utils/constants";
+import { resolveText, findVariables } from "../utils/variables";
 import JsonView from "./workspace/JsonView";
 import { toJsonText } from "../utils/format";
 
@@ -83,15 +84,54 @@ const Field = (props) => (
   />
 );
 
-const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
+/** A URL the browser can actually send: scheme and host present. */
+const isAbsolute = (url) => /^[a-zA-Z][\w+.-]*:\/\//.test(String(url || "").trim());
+
+const joinBase = (origin, path) => {
+  const base = String(origin || "").replace(/\/+$/, "");
+  const rest = String(path || "");
+  if (!base) return rest;
+  return rest.startsWith("/") ? `${base}${rest}` : `${base}/${rest}`;
+};
+
+const ApiPlaygroundModal = ({
+  node,
+  onClose,
+  onUpdate,
+  onResponse,
+  variables = null,
+  servers = [],
+  origin: originProp = "",
+  onOriginChange,
+}) => {
   const [method, setMethod] = useState(node?.method || "GET");
+
+  /**
+   * What the spec says the URL is, with everything it already knows filled in.
+   *
+   * A Postman collection writes "{{baseUrl}}/v1/customers" and an OpenAPI
+   * document with no `servers` writes "/v1/customers" — neither can be sent
+   * as written, and both used to arrive in the URL box exactly like that.
+   */
+  const resolvedPath = useMemo(() => {
+    const raw = String(node?.path || "");
+    return variables ? resolveText(raw, variables).text : raw;
+  }, [node, variables]);
 
   // The URL box holds the path only; query parameters are edited as rows so
   // they can be toggled without rewriting the string.
-  const [baseUrl, setBaseUrl] = useState(() => String(node?.path || "").split("?")[0]);
-  const [queryRows, setQueryRows] = useState(() =>
-    parseQuery(String(node?.path || "").split("?")[1]),
+  const [baseUrl, setBaseUrl] = useState(() => resolvedPath.split("?")[0]);
+  const [queryRows, setQueryRows] = useState(() => parseQuery(resolvedPath.split("?")[1]));
+
+  // Where a relative path is sent. Seeded from the servers the document
+  // declares, and lifted to the workspace so it is not retyped per request.
+  const [origin, setOrigin] = useState(
+    () => originProp || servers.find((url) => isAbsolute(url)) || "",
   );
+  const updateOrigin = (value) => {
+    setOrigin(value);
+    onOriginChange?.(value);
+  };
 
   // Path placeholders are kept in the URL and substituted at send time, so
   // "Update endpoint" still stores the templated path.
@@ -138,9 +178,10 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
     [baseUrl, queryRows],
   );
 
-  /** What actually gets requested: placeholders resolved. */
+  /** What actually gets requested: base applied, placeholders resolved. */
   const effectiveUrl = useMemo(() => {
-    const resolved = baseUrl.replace(PATH_VAR, (whole, braced, colon) => {
+    const withBase = isAbsolute(baseUrl) ? baseUrl : joinBase(origin, baseUrl);
+    const resolved = withBase.replace(PATH_VAR, (whole, braced, colon) => {
       const name = braced || colon;
       const value = pathValues[name];
       return value != null && String(value).trim()
@@ -148,15 +189,23 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
         : whole;
     });
     return joinQuery(resolved, serializeQuery(queryRows));
-  }, [baseUrl, pathValues, queryRows]);
+  }, [baseUrl, origin, pathValues, queryRows]);
+
+  // A relative URL would be sent to wherever Vizroute is hosted, which
+  // returns this page rather than the API. Say so instead.
+  const needsBase = !isAbsolute(baseUrl) && !isAbsolute(effectiveUrl);
+  const unresolvedVars = useMemo(() => {
+    const found = findVariables(effectiveUrl).filter((name) => !name.startsWith("$"));
+    return [...new Set(found)];
+  }, [effectiveUrl]);
 
   const hasChanges = useMemo(() => {
     if (!node) return false;
     if (method !== (node.method || "GET")) return true;
-    if (composedUrl !== (node.path || "")) return true;
+    if (composedUrl !== resolvedPath) return true;
     const originalBody = node.body ? JSON.stringify(node.body, null, 2) : "";
     return body !== originalBody;
-  }, [method, composedUrl, body, node]);
+  }, [method, composedUrl, body, node, resolvedPath]);
 
   const authHint = useMemo(() => {
     const auth = (node?.auth || [])[0];
@@ -212,6 +261,12 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
       headers.forEach((h) => {
         if (h.key.trim()) headerObject[h.key.trim()] = h.value;
       });
+      if (!isAbsolute(effectiveUrl)) {
+        throw new Error(
+          "This URL has no host. Set a base URL above so the request has somewhere to go.",
+        );
+      }
+
       const options = { method, headers: headerObject, signal: controller.signal };
       if (BODY_METHODS.includes(method) && body.trim()) options.body = body;
 
@@ -248,7 +303,7 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
         setReqError(
           err.message.includes("Failed to fetch")
             ? "Network error — the host may not allow cross-origin requests from the browser."
-            : `Request failed: ${err.message}`,
+            : err.message,
         );
     } finally {
       abortRef.current = null;
@@ -407,6 +462,51 @@ const ApiPlaygroundModal = ({ node, onClose, onUpdate, onResponse }) => {
               </button>
             )}
           </div>
+
+          {/* The document did not say where this path lives, so it has to be
+              asked for rather than guessed at — and once given it is reused
+              for every request in this workspace. */}
+          {needsBase && (
+            <div className="mt-2.5 rounded-lg border border-vz-warn/25 bg-vz-warn/[0.06] px-3 py-2.5">
+              <label
+                htmlFor="pg-base-url"
+                className="flex items-center gap-1.5 text-[11.5px] font-semibold text-vz-warn"
+              >
+                <AlertCircle size={12} />
+                This path has no host
+              </label>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-vz-soft">
+                {servers.length
+                  ? "The specification declares a relative server, so the host has to come from you."
+                  : "The specification declares no server, so the host has to come from you."}
+              </p>
+              <input
+                id="pg-base-url"
+                value={origin}
+                onChange={(e) => updateOrigin(e.target.value)}
+                placeholder="https://api.example.com"
+                list="pg-known-servers"
+                spellCheck={false}
+                className="vz-mono vz-t mt-2 h-9 w-full rounded-lg border border-vz-line bg-vz-bg px-2.5 text-[12.5px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50"
+              />
+              {servers.length > 0 && (
+                <datalist id="pg-known-servers">
+                  {servers.map((url) => (
+                    <option key={url} value={url} />
+                  ))}
+                </datalist>
+              )}
+            </div>
+          )}
+
+          {unresolvedVars.length > 0 && (
+            <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-vz-warn">
+              <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+              {unresolvedVars.map((name) => `{{${name}}}`).join(", ")} still{" "}
+              {unresolvedVars.length === 1 ? "has" : "have"} no value. Pick an
+              environment, or type the value into the URL.
+            </p>
+          )}
 
           {effectiveUrl !== baseUrl && (
             <p className="vz-mono mt-2 truncate text-[11px] text-vz-dim" title={effectiveUrl}>
