@@ -30,9 +30,9 @@ const loadWorkspace = () => {
 const saveWorkspace = (ws) => localStorage.setItem(STORAGE_KEY, JSON.stringify(ws));
 
 const ROLE_CONFIG = {
-  admin:  { icon: Crown, color: "#e08efe", label: "Admin", desc: "Full access — manage members, settings, billing" },
+  admin:  { icon: Crown, color: "#a855f7", label: "Admin", desc: "Full access — manage members, settings, billing" },
   editor: { icon: Edit3, color: "#3aa2ff", label: "Editor", desc: "Can edit collections, run tests, export" },
-  viewer: { icon: Eye, color: "#73757a", label: "Viewer", desc: "Read-only access to graphs and docs" },
+  viewer: { icon: Eye, color: "#6f7788", label: "Viewer", desc: "Read-only access to graphs and docs" },
 };
 
 const timeAgo = (d) => {
@@ -98,27 +98,27 @@ const WorkspaceManager = ({ onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ animation: "fadeIn 0.2s ease-out both" }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl rounded-2xl border border-[#46484c]/30 overflow-hidden flex flex-col"
+      <div className="relative w-full max-w-2xl rounded-2xl border border-[#222a39]/30 overflow-hidden flex flex-col"
         style={{ maxHeight: "90vh", background: "rgba(12,14,18,0.95)", backdropFilter: "blur(20px)", animation: "scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both" }}>
 
         {/* Header */}
-        <div className="px-6 py-5 border-b border-[#46484c]/20 flex-shrink-0">
+        <div className="px-6 py-5 border-b border-[#222a39]/20 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Users size={18} className="text-[#e08efe]" />
+              <Users size={18} className="text-[#a855f7]" />
               <h2 className="font-bold text-white text-lg">{workspace.name}</h2>
-              <span className="text-[10px] font-bold text-[#e08efe] bg-[#e08efe]/10 px-2 py-0.5 rounded-full uppercase">{workspace.plan}</span>
+              <span className="text-[10px] font-bold text-[#a855f7] bg-[#a855f7]/10 px-2 py-0.5 rounded-full uppercase">{workspace.plan}</span>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-[#22262b] rounded-lg transition-colors"><X size={16} className="text-[#a9abb0]" /></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-[#121824] rounded-lg transition-colors"><X size={16} className="text-[#a4acbc]" /></button>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-[#46484c]/20 px-6 flex-shrink-0">
+        <div className="flex border-b border-[#222a39]/20 px-6 flex-shrink-0">
           {[{ id: "members", icon: Users, label: "Members" }, { id: "audit", icon: Clock, label: "Audit Log" }, { id: "settings", icon: Shield, label: "Roles & Access" }].map(({ id, icon: Icon, label }) => (
             <button key={id} onClick={() => setActiveTab(id)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${
-                activeTab === id ? "text-[#e08efe] border-[#e08efe]" : "text-[#73757a] border-transparent hover:text-[#a9abb0]"
+                activeTab === id ? "text-[#a855f7] border-[#a855f7]" : "text-[#6f7788] border-transparent hover:text-[#a4acbc]"
               }`}>
               <Icon size={13} /> {label}
             </button>
@@ -134,33 +134,33 @@ const WorkspaceManager = ({ onClose }) => {
                 <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && inviteMember()}
                   placeholder="email@company.com"
-                  className="flex-1 bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#46484c] focus:border-[#e08efe]/50 transition-all" />
+                  className="flex-1 bg-[#121824]/60 border border-[#222a39]/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#222a39] focus:border-[#a855f7]/50 transition-all" />
                 <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}
-                  className="bg-[#22262b] border border-[#46484c]/30 rounded-lg px-3 py-2 text-xs text-[#a9abb0] focus:outline-none">
+                  className="bg-[#121824] border border-[#222a39]/30 rounded-lg px-3 py-2 text-xs text-[#a4acbc] focus:outline-none">
                   <option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option>
                 </select>
                 <button onClick={inviteMember} disabled={!inviteEmail.trim()}
-                  className="px-4 py-2 rounded-lg text-xs font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all disabled:opacity-40 flex items-center gap-1.5">
+                  className="px-4 py-2 rounded-lg text-xs font-bold text-[#080b12] bg-[#a855f7] hover:bg-[#c45cff] transition-all disabled:opacity-40 flex items-center gap-1.5">
                   <Plus size={13} /> Invite
                 </button>
               </div>
 
               {/* Invite code */}
-              <div className="flex items-center justify-between p-3 rounded-xl border border-[#46484c]/15 bg-[#171a1e]/30">
+              <div className="flex items-center justify-between p-3 rounded-xl border border-[#222a39]/15 bg-[#0f141d]/30">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#73757a]">Invite Code</p>
-                  <p className="text-sm font-mono font-bold text-[#e08efe] mt-0.5">{workspace.inviteCode}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#6f7788]">Invite Code</p>
+                  <p className="text-sm font-mono font-bold text-[#a855f7] mt-0.5">{workspace.inviteCode}</p>
                 </div>
-                <button onClick={copyInviteCode} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-[#a9abb0] hover:text-white hover:bg-[#22262b] border border-[#46484c]/20 transition-all flex items-center gap-1.5">
-                  {inviteCopied ? <><Check size={12} className="text-[#81ecff]" /> Copied</> : <><Copy size={12} /> Copy</>}
+                <button onClick={copyInviteCode} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-[#a4acbc] hover:text-white hover:bg-[#121824] border border-[#222a39]/20 transition-all flex items-center gap-1.5">
+                  {inviteCopied ? <><Check size={12} className="text-[#60a5fa]" /> Copied</> : <><Copy size={12} /> Copy</>}
                 </button>
               </div>
 
               {/* Search */}
               <div className="relative">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#46484c]" />
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#222a39]" />
                 <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search members..."
-                  className="w-full bg-[#22262b]/40 border border-[#46484c]/20 rounded-lg py-2 pl-9 pr-4 text-xs text-white placeholder:text-[#46484c] focus:border-[#e08efe]/40 transition-all" />
+                  className="w-full bg-[#121824]/40 border border-[#222a39]/20 rounded-lg py-2 pl-9 pr-4 text-xs text-white placeholder:text-[#222a39] focus:border-[#a855f7]/40 transition-all" />
               </div>
 
               {/* Member list */}
@@ -169,14 +169,14 @@ const WorkspaceManager = ({ onClose }) => {
                   const role = ROLE_CONFIG[member.role];
                   const RoleIcon = role.icon;
                   return (
-                    <div key={member.id} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#46484c]/15 bg-[#171a1e]/30 hover:bg-[#171a1e]/50 transition-all group"
+                    <div key={member.id} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#222a39]/15 bg-[#0f141d]/30 hover:bg-[#0f141d]/50 transition-all group"
                       style={{ animation: `slideInUp 0.15s ease-out ${i * 20}ms both` }}>
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-[#0c0e12] flex-shrink-0" style={{ background: role.color }}>
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-[#080b12] flex-shrink-0" style={{ background: role.color }}>
                         {member.avatar}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-white truncate">{member.name}</p>
-                        <p className="text-[10px] text-[#46484c]">{member.email}</p>
+                        <p className="text-[10px] text-[#222a39]">{member.email}</p>
                       </div>
                       <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: `${role.color}15` }}>
                         <RoleIcon size={11} style={{ color: role.color }} />
@@ -185,9 +185,9 @@ const WorkspaceManager = ({ onClose }) => {
                           <option value="admin">Admin</option><option value="editor">Editor</option><option value="viewer">Viewer</option>
                         </select>
                       </div>
-                      <span className="text-[10px] text-[#46484c] flex-shrink-0 hidden sm:block">{timeAgo(member.lastActive)}</span>
+                      <span className="text-[10px] text-[#222a39] flex-shrink-0 hidden sm:block">{timeAgo(member.lastActive)}</span>
                       <button onClick={() => removeMember(member.id)}
-                        className="p-1.5 text-[#46484c] hover:text-[#ff6e84] opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
+                        className="p-1.5 text-[#222a39] hover:text-[#f43f5e] opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
                         <UserMinus size={13} />
                       </button>
                     </div>
@@ -201,12 +201,12 @@ const WorkspaceManager = ({ onClose }) => {
           {activeTab === "audit" && (
             <div className="p-5 space-y-1.5">
               {workspace.auditLog.map((entry, i) => (
-                <div key={entry.id} className="flex items-start gap-3 px-4 py-3 rounded-xl border border-[#46484c]/10 bg-[#171a1e]/20 hover:bg-[#171a1e]/40 transition-colors"
+                <div key={entry.id} className="flex items-start gap-3 px-4 py-3 rounded-xl border border-[#222a39]/10 bg-[#0f141d]/20 hover:bg-[#0f141d]/40 transition-colors"
                   style={{ animation: `slideInUp 0.15s ease-out ${i * 15}ms both` }}>
-                  <Clock size={14} className="text-[#46484c] mt-0.5 flex-shrink-0" />
+                  <Clock size={14} className="text-[#222a39] mt-0.5 flex-shrink-0" />
                   <div className="flex-1">
-                    <p className="text-sm text-[#f8f9fe]"><strong className="text-[#e08efe]">{entry.user}</strong> {entry.action}</p>
-                    <p className="text-[10px] text-[#46484c] mt-0.5">{new Date(entry.timestamp).toLocaleString()}</p>
+                    <p className="text-sm text-[#f8f9fe]"><strong className="text-[#a855f7]">{entry.user}</strong> {entry.action}</p>
+                    <p className="text-[10px] text-[#222a39] mt-0.5">{new Date(entry.timestamp).toLocaleString()}</p>
                   </div>
                 </div>
               ))}
@@ -216,22 +216,22 @@ const WorkspaceManager = ({ onClose }) => {
           {/* Roles & Access tab */}
           {activeTab === "settings" && (
             <div className="p-5 space-y-4">
-              <p className="text-xs text-[#73757a]">Role permissions for your workspace.</p>
+              <p className="text-xs text-[#6f7788]">Role permissions for your workspace.</p>
               {Object.entries(ROLE_CONFIG).map(([key, config]) => {
                 const Icon = config.icon;
                 return (
-                  <div key={key} className="p-4 rounded-xl border border-[#46484c]/15 bg-[#171a1e]/30">
+                  <div key={key} className="p-4 rounded-xl border border-[#222a39]/15 bg-[#0f141d]/30">
                     <div className="flex items-center gap-2 mb-2">
                       <Icon size={16} style={{ color: config.color }} />
                       <span className="text-sm font-bold" style={{ color: config.color }}>{config.label}</span>
-                      <span className="text-[10px] text-[#46484c] bg-[#22262b] px-2 py-0.5 rounded">
+                      <span className="text-[10px] text-[#222a39] bg-[#121824] px-2 py-0.5 rounded">
                         {workspace.members.filter((m) => m.role === key).length} member{workspace.members.filter((m) => m.role === key).length !== 1 ? "s" : ""}
                       </span>
                     </div>
-                    <p className="text-xs text-[#73757a]">{config.desc}</p>
+                    <p className="text-xs text-[#6f7788]">{config.desc}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {(key === "admin" ? ["View", "Edit", "Export", "Delete", "Manage Members", "Billing"] : key === "editor" ? ["View", "Edit", "Export", "Run Tests"] : ["View"]).map((perm) => (
-                        <span key={perm} className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-[#46484c]/15 text-[#a9abb0] bg-[#22262b]/40">{perm}</span>
+                        <span key={perm} className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-[#222a39]/15 text-[#a4acbc] bg-[#121824]/40">{perm}</span>
                       ))}
                     </div>
                   </div>

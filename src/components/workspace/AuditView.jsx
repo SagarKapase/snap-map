@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ShieldCheck, AlertTriangle, AlertCircle, Info, ChevronRight, Wrench, Check } from "lucide-react";
 import { proposeFixes } from "../../utils/fixes";
+import EnrichmentSection from "../ai/EnrichmentSection";
 
 const SEVERITIES = [
   { id: "all", label: "All" },
@@ -29,7 +30,15 @@ const scoreTone = (score) =>
 const scoreBar = (score) =>
   score >= 90 ? "bg-vz-green" : score >= 70 ? "bg-vz-warn" : "bg-vz-red";
 
-const AuditView = ({ audit, onSelectNode, nodes = [], collection = null, onApplyFixes = null }) => {
+const AuditView = ({
+  audit,
+  onSelectNode,
+  nodes = [],
+  collection = null,
+  detectedFormat = "",
+  onApplyFixes = null,
+  onApplyEnrichment = null,
+}) => {
   const [severity, setSeverity] = useState("all");
   const [chosen, setChosen] = useState([]);
 
@@ -177,6 +186,16 @@ const AuditView = ({ audit, onSelectNode, nodes = [], collection = null, onApply
               </div>
             )}
           </div>
+        )}
+
+        {/* Drafted documentation */}
+        {onApplyEnrichment && collection && (
+          <EnrichmentSection
+            nodes={nodes}
+            spec={collection}
+            format={detectedFormat}
+            onApply={onApplyEnrichment}
+          />
         )}
 
         {/* Filters */}

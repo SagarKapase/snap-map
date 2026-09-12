@@ -6,7 +6,7 @@ import {
   Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
   Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
   Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
-  AlertCircle, Target, Upload, Code2,
+  AlertCircle, Target, Upload, Code2, WandSparkles,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
@@ -60,6 +60,7 @@ import { curlToCollection, harToCollection, looksLikeCurl, looksLikeHar } from "
 import { isPostmanVariableFile, readPostmanVariableFile } from "./utils/parsers";
 import { convertSpec } from "./utils/convert";
 import { applyFixes } from "./utils/fixes";
+import AiPanel from "./components/ai/AiPanel";
 
 const CENTER_TABS = [
   { id: "map", label: "API Map", icon: Waypoints },
@@ -98,7 +99,13 @@ const PostmanGraphViewer = () => {
   const [panY, setPanY] = useState(0);
   const [draggedNodeId, setDraggedNodeId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQueryState] = useState("");
+  const [focusedMatchIdx, setFocusedMatchIdx] = useState(0);
+  /** New search text always starts back at the first match. */
+  const setSearchQuery = useCallback((value) => {
+    setSearchQueryState(value);
+    setFocusedMatchIdx(0);
+  }, []);
   const [filterMethod, setFilterMethod] = useState("all");
   const [graphStyle, setGraphStyle] = useState("graph");
   const [showPlayground, setShowPlayground] = useState(false);
@@ -107,7 +114,6 @@ const PostmanGraphViewer = () => {
   const [collapsedFolders, setCollapsedFolders] = useState(new Set());
   const [showParticles, setShowParticles] = useState(false);
   const [showRipple, setShowRipple] = useState(false);
-  const [focusedMatchIdx, setFocusedMatchIdx] = useState(0);
   // Phase 1 features
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showCollections, setShowCollections] = useState(false);
@@ -146,6 +152,14 @@ const PostmanGraphViewer = () => {
   const [pushLabel, setPushLabel] = useState("");
   const [pulledEnvironment, setPulledEnvironment] = useState(null);
   const [compare, setCompare] = useState(null);
+
+  // ── Assistant ──────────────────────────────
+  // The thread outlives the drawer so closing it does not lose the
+  // conversation; a new import starts a fresh one.
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [assistantThread, setAssistantThread] = useState([]);
+  // Endpoints the assistant pointed at, lit on the map like search matches.
+  const [aiHighlight, setAiHighlight] = useState(() => new Set());
   // Where a relative path is sent from the playground. Asked for once per
   // import rather than per request.
   const [playgroundOrigin, setPlaygroundOrigin] = useState("");
@@ -187,9 +201,13 @@ const PostmanGraphViewer = () => {
   }, [isLarge, nodes, collapsedFolders]);
 
   const highlightedIds = useMemo(() => {
-    if (!searchQuery) return new Set();
-    return new Set(nodes.filter((n) => n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase())).map((n) => n.id));
-  }, [nodes, searchQuery]);
+    const out = new Set(aiHighlight);
+    if (!searchQuery) return out;
+    nodes.forEach((n) => {
+      if (n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase())) out.add(n.id);
+    });
+    return out;
+  }, [nodes, searchQuery, aiHighlight]);
 
   // Nodes that stay lit while another node is hovered (itself, parent, children)
   const focusSet = useMemo(() => {
@@ -352,6 +370,8 @@ const PostmanGraphViewer = () => {
     setSearchQuery(""); setFilterMethod("all"); setCenterTab("map");
     setLiveResponses({});
     setPlaygroundOrigin("");
+    setAssistantThread([]);
+    setAiHighlight(new Set());
     setImportedAt(new Date().toISOString());
     setRecents(addRecent({
       name: data?.info?.name || data?.info?.title || data?.name || "API Collection",
@@ -360,7 +380,7 @@ const PostmanGraphViewer = () => {
       data,
     }));
     setView("graph");
-  }, []);
+  }, [setSearchQuery]);
 
   const handleLoadSample = useCallback((format = "postman") => { handleVisualize(SAMPLE_DATA[format] || SAMPLE_DATA.postman); }, [handleVisualize]);
 
@@ -407,6 +427,15 @@ const PostmanGraphViewer = () => {
     setPushLabel(`${changes.length} repair${changes.length === 1 ? "" : "s"} applied`);
     setCenterTab("audit");
   }, [collection, handleVisualize]);
+
+  /** Take the drafted documentation the user picked and reload from the copy. */
+  const handleApplyEnrichment = useCallback(({ spec, changes }) => {
+    if (!spec || !changes.length) return;
+    handleVisualize(spec);
+    if (spec.item) setPushPayload(spec);
+    setPushLabel(`${changes.length} field${changes.length === 1 ? "" : "s"} drafted by AI`);
+    setCenterTab("audit");
+  }, [handleVisualize]);
 
   // ── Coverage ───────────────────────────────
   const handleCompareFile = useCallback((file) => {
@@ -481,11 +510,14 @@ const PostmanGraphViewer = () => {
   }, [collection]);
 
   // ── Auto-load a shared spec, or the sample the landing page asked for ──
+  // Reading the URL is the one thing that cannot happen during render: it
+  // also rewrites the address bar and then loads a whole specification.
   useEffect(() => {
     const shared = extractSharedSpec();
     if (shared) {
       // Clean URL without reloading
       window.history.replaceState({}, "", window.location.pathname);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleVisualize(shared);
       return;
     }
@@ -562,8 +594,14 @@ const PostmanGraphViewer = () => {
         searchInputRef.current?.focus();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "i" || e.key === "I")) {
+        e.preventDefault();
+        setShowAssistant((v) => !v);
+        return;
+      }
       if (e.key === "Escape") {
         if (showPalette) { setShowPalette(false); return; }
+        if (showAssistant && !typing) { setShowAssistant(false); return; }
         setSelectedNode(null); setShowPlayground(false);
         return;
       }
@@ -579,7 +617,7 @@ const PostmanGraphViewer = () => {
       }
     };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, [showPalette]);
+  }, [showPalette, showAssistant, setSearchQuery]);
 
   useEffect(() => {
     if (view !== "graph" || centerTab !== "map") return undefined;
@@ -694,6 +732,33 @@ const PostmanGraphViewer = () => {
     setTimeout(() => focusOnNode(node.id), 60);
   }, [nodes, focusOnNode]);
 
+  // What the assistant is allowed to do to the workspace.
+  const assistantActions = useMemo(() => ({
+    showNodes: (ids) => {
+      const targets = ids.map((id) => nodes.find((n) => n.id === id)).filter(Boolean);
+      if (!targets.length) return;
+      setAiHighlight(new Set(targets.map((n) => n.id)));
+      setCenterTab("map");
+      // Open every group involved so the highlighted cards are on the canvas.
+      setCollapsedFolders((prev) => {
+        if (!prev.size) return prev;
+        const next = new Set(prev);
+        targets.forEach((n) => ancestorsOf(nodes, n.id).forEach((id) => next.delete(id)));
+        return next.size === prev.size ? prev : next;
+      });
+      setSelectedNode(targets[0]);
+      setTimeout(() => focusOnNode(targets[0].id), 80);
+    },
+    filterMap: ({ query, method } = {}) => {
+      setCenterTab("map");
+      if (typeof query === "string") setSearchQuery(query);
+      if (method) {
+        const m = String(method).toUpperCase();
+        setFilterMethod(m === "ALL" ? "all" : m);
+      }
+    },
+  }), [nodes, focusOnNode, setSearchQuery]);
+
   const openPlayground = useCallback(() => {
     const target = selectedNode?.type === "request"
       ? selectedNode
@@ -727,15 +792,16 @@ const PostmanGraphViewer = () => {
     );
   }, [nodes, searchQuery]);
 
-  // ── Reset index when search text changes ──
-  useEffect(() => { setFocusedMatchIdx(0); }, [searchQuery]);
-
   // ── Focus on the currently indexed match ──
+  // The index changes on an event, but the list it indexes into is derived
+  // from the nodes and the query, so the selection can only be worked out
+  // once that list has been recomputed — which is here, not in the handler.
   useEffect(() => {
     if (view !== "graph" || centerTab !== "map" || matchList.length === 0) return;
     const idx = Math.min(focusedMatchIdx, matchList.length - 1);
     const target = matchList[idx];
     if (target) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedNode(target);
       const timer = setTimeout(() => focusOnNode(target.id), 120);
       return () => clearTimeout(timer);
@@ -768,6 +834,8 @@ const PostmanGraphViewer = () => {
     { id: "import", group: "Actions", icon: Plus, label: "Import API", hint: "Back to the import screen", keywords: "upload paste url new spec", run: () => setView("input") },
     { id: "search", group: "Actions", icon: Search, label: "Search endpoints", hint: "Ctrl /", keywords: "find filter", run: () => { setSidebarOpen(true); setTimeout(() => searchInputRef.current?.focus(), 30); } },
     { id: "playground", group: "Actions", icon: Play, label: "Open playground", hint: "Send a real request", keywords: "try request http send", run: openPlayground },
+    { id: "assistant", group: "Actions", icon: WandSparkles, label: "Ask the map", hint: "Ctrl I · AI assistant over this spec", keywords: "ai assistant chat ask question llm explain", run: () => setShowAssistant(true) },
+    { id: "enrich", group: "Actions", icon: WandSparkles, label: "Draft missing documentation with AI", hint: "Summaries, descriptions, operation ids, tags", keywords: "ai docs describe summary operationid tags enrich generate", run: () => setCenterTab("audit") },
     { id: "fit", group: "Canvas", icon: Scan, label: "Fit graph", keywords: "zoom fit all", run: () => { setCenterTab("map"); handleFitView(); } },
     { id: "reset", group: "Canvas", icon: RotateCcw, label: "Reset view", keywords: "zoom 100 pan", run: () => { setCenterTab("map"); handleReset(); } },
     { id: "focus", group: "Canvas", icon: Crosshair, label: "Center selected node", keywords: "focus", run: () => { if (selectedNode) { setCenterTab("map"); focusOnNode(selectedNode.id); } } },
@@ -835,6 +903,8 @@ const PostmanGraphViewer = () => {
           servers={declaredServers}
           origin={playgroundOrigin}
           onOriginChange={setPlaygroundOrigin}
+          spec={collection}
+          onNeedAiKey={() => setShowAssistant(true)}
         />
       )}
 
@@ -862,10 +932,10 @@ const PostmanGraphViewer = () => {
         />
       )}
       {showHealthMonitor && (
-        <HealthMonitor nodes={nodes} onClose={() => setShowHealthMonitor(false)} />
+        <HealthMonitor nodes={nodes} variables={variables} onClose={() => setShowHealthMonitor(false)} />
       )}
       {showFlowBuilder && (
-        <FlowBuilder nodes={nodes} onClose={() => setShowFlowBuilder(false)} />
+        <FlowBuilder nodes={nodes} workspaceVariables={variables} onClose={() => setShowFlowBuilder(false)} />
       )}
       {showPostman && (
         <PostmanConnect
@@ -892,7 +962,7 @@ const PostmanGraphViewer = () => {
         <MockServer collection={collection} onClose={() => setShowMockServer(false)} />
       )}
       {showLoadTester && (
-        <LoadTester nodes={nodes} onClose={() => setShowLoadTester(false)} />
+        <LoadTester nodes={nodes} variables={variables} onClose={() => setShowLoadTester(false)} />
       )}
       {showWorkspace && (
         <WorkspaceManager onClose={() => setShowWorkspace(false)} />
@@ -1001,6 +1071,20 @@ const PostmanGraphViewer = () => {
                 >
                   <Play size={14} className="flex-shrink-0" />
                   <span className="hidden 2xl:inline">Playground</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAssistant((v) => !v)}
+                  title="Ask the map — AI assistant over this spec (Ctrl I)"
+                  className={`vz-t flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium ${
+                    showAssistant
+                      ? "border-vz-accent/40 bg-vz-accent/12 text-vz-text"
+                      : "border-vz-line bg-vz-panel-2 text-vz-soft hover:text-vz-text"
+                  }`}
+                >
+                  <WandSparkles size={14} className="flex-shrink-0 text-vz-accent-2" />
+                  <span className="hidden 2xl:inline">Ask AI</span>
                 </button>
 
                 <button
@@ -1220,7 +1304,9 @@ const PostmanGraphViewer = () => {
                     audit={audit}
                     nodes={nodes}
                     collection={collection}
+                    detectedFormat={detectedFormat}
                     onApplyFixes={handleApplyFixes}
+                    onApplyEnrichment={handleApplyEnrichment}
                     onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
                   />
                 </div>
@@ -1263,6 +1349,20 @@ const PostmanGraphViewer = () => {
             commands={commands}
             endpoints={nodes}
             onSelectEndpoint={selectAndReveal}
+          />
+        )}
+
+        {showAssistant && (
+          <AiPanel
+            nodes={nodes}
+            spec={collection}
+            format={detectedFormat}
+            audit={audit}
+            thread={assistantThread}
+            onThreadChange={setAssistantThread}
+            actions={assistantActions}
+            onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+            onClose={() => setShowAssistant(false)}
           />
         )}
 

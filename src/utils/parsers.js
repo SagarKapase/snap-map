@@ -824,6 +824,7 @@ export const parsePostmanCollection = (rawData, setStats) => {
         item.description?.content ||
         req.description?.content ||
         item.description ||
+        (typeof req.description === "string" ? req.description : "") ||
         "",
       params: dedupeParams([...declared, ...extractUrlParams(url)]),
       headers,

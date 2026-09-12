@@ -24,7 +24,7 @@ const MAX_HITS_PER_RULE = 5;
 const isOpenApiFormat = (format) => /openapi|swagger/i.test(String(format || ""));
 
 /** Credentials that look real rather than placeholder. */
-const SECRET_PATTERNS = [
+export const SECRET_PATTERNS = [
   /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{12,}/,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./, // JWT
   /\bgh[pousr]_[A-Za-z0-9]{20,}/, // GitHub token

@@ -3,13 +3,14 @@ import {
   Activity, Play, Pause, RefreshCw, X, Wifi, AlertCircle, Clock,
   CheckCircle, XCircle, Loader2, ArrowDown, ArrowUp,
 } from "lucide-react";
+import { resolveText } from "../utils/variables";
 
 const STATUS_CONFIG = {
-  healthy:  { color: "#81ecff", bg: "bg-[#81ecff]/10", border: "border-[#81ecff]/30", label: "Healthy", icon: CheckCircle },
+  healthy:  { color: "#60a5fa", bg: "bg-[#60a5fa]/10", border: "border-[#60a5fa]/30", label: "Healthy", icon: CheckCircle },
   warning:  { color: "#fbbf24", bg: "bg-amber-500/10", border: "border-amber-500/30", label: "Slow", icon: Clock },
-  error:    { color: "#ff6e84", bg: "bg-[#ff6e84]/10", border: "border-[#ff6e84]/30", label: "Error", icon: XCircle },
-  unknown:  { color: "#73757a", bg: "bg-[#46484c]/10", border: "border-[#46484c]/30", label: "Unknown", icon: AlertCircle },
-  checking: { color: "#e08efe", bg: "bg-[#e08efe]/10", border: "border-[#e08efe]/30", label: "Checking", icon: Loader2 },
+  error:    { color: "#f43f5e", bg: "bg-[#f43f5e]/10", border: "border-[#f43f5e]/30", label: "Error", icon: XCircle },
+  unknown:  { color: "#6f7788", bg: "bg-[#222a39]/10", border: "border-[#222a39]/30", label: "Unknown", icon: AlertCircle },
+  checking: { color: "#a855f7", bg: "bg-[#a855f7]/10", border: "border-[#a855f7]/30", label: "Checking", icon: Loader2 },
 };
 
 const getStatus = (result) => {
@@ -29,7 +30,18 @@ const DEFAULT_BATCH = 25;
 const CONFIRM_ABOVE = 50;
 const LIST_LIMIT = 200;
 
-const HealthMonitor = ({ nodes, onClose }) => {
+/** A URL the browser can actually send: scheme and host present. */
+const isAbsolute = (url) => /^[a-zA-Z][\w+.-]*:\/\//.test(String(url || "").trim());
+
+const HealthMonitor = ({ nodes, onClose, variables = null }) => {
+  const resolveUrl = useCallback(
+    (node) => {
+      const raw = String(node?.path || "");
+      return variables ? resolveText(raw, variables).text : raw;
+    },
+    [variables],
+  );
+
   const [results, setResults] = useState({}); // nodeId → { status, latency, error, timestamp }
   const [running, setRunning] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -49,35 +61,57 @@ const HealthMonitor = ({ nodes, onClose }) => {
     [requestNodes, scope],
   );
 
-  const pingEndpoint = useCallback(async (node) => {
-    setResults((prev) => ({ ...prev, [node.id]: { ...prev[node.id], checking: true } }));
-    try {
-      const t0 = Date.now();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(node.path, {
-        method: "HEAD",
-        mode: "no-cors",
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      const latency = Date.now() - t0;
-      setResults((prev) => ({
-        ...prev,
-        [node.id]: { status: res.status || 0, latency, error: null, timestamp: Date.now(), checking: false },
-      }));
-    } catch (e) {
-      const latency = Date.now() - Date.now();
+  const pingEndpoint = useCallback(async (node, resolveUrl) => {
+    const target = resolveUrl(node);
+    if (!isAbsolute(target)) {
       setResults((prev) => ({
         ...prev,
         [node.id]: {
           status: 0,
           latency: 0,
-          error: e.name === "AbortError" ? "Timeout (8s)" : "Network/CORS error",
+          error: "No host in this URL — nothing to reach",
           timestamp: Date.now(),
           checking: false,
-          // no-cors returns opaque response — treat as reachable if no exception
-          ...(e.message?.includes("Failed") ? {} : { status: 200, error: null }),
+        },
+      }));
+      return;
+    }
+    setResults((prev) => ({ ...prev, [node.id]: { ...prev[node.id], checking: true } }));
+    const t0 = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      // A normal request, so a status that comes back is the real one. Under
+      // `no-cors` every reply is opaque with a status of 0, which this used
+      // to paper over by reporting 200.
+      const res = await fetch(target, { method: "GET", signal: controller.signal });
+      clearTimeout(timeout);
+      setResults((prev) => ({
+        ...prev,
+        [node.id]: {
+          status: res.status || 0,
+          latency: Date.now() - t0,
+          error: res.status ? null : "No readable status",
+          timestamp: Date.now(),
+          checking: false,
+        },
+      }));
+    } catch (e) {
+      setResults((prev) => ({
+        ...prev,
+        [node.id]: {
+          status: 0,
+          latency: Date.now() - t0,
+          // The request may well have reached the host; what failed is this
+          // page's ability to read the reply. Saying which is the useful part.
+          error:
+            e.name === "AbortError"
+              ? "Timed out after 8s"
+              : e.message?.includes("Failed to fetch")
+                ? "Blocked — the host does not allow cross-origin requests from a browser"
+                : e.message || "Request failed",
+          timestamp: Date.now(),
+          checking: false,
         },
       }));
     }
@@ -88,10 +122,10 @@ const HealthMonitor = ({ nodes, onClose }) => {
     // Ping in batches of 5 to avoid overwhelming
     for (let i = 0; i < targets.length; i += 5) {
       const batch = targets.slice(i, i + 5);
-      await Promise.allSettled(batch.map((n) => pingEndpoint(n)));
+      await Promise.allSettled(batch.map((n) => pingEndpoint(n, resolveUrl)));
     }
     setRunning(false);
-  }, [targets, pingEndpoint]);
+  }, [targets, pingEndpoint, resolveUrl]);
 
   const requestPing = useCallback(() => {
     if (targets.length > CONFIRM_ABOVE) {
@@ -137,31 +171,31 @@ const HealthMonitor = ({ nodes, onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ animation: "fadeIn 0.2s ease-out both" }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-2xl rounded-2xl border border-[#46484c]/30 overflow-hidden flex flex-col"
+        className="relative w-full max-w-2xl rounded-2xl border border-[#222a39]/30 overflow-hidden flex flex-col"
         style={{ maxHeight: "85vh", background: "rgba(12,14,18,0.95)", backdropFilter: "blur(20px)", animation: "scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both" }}
       >
         {/* Header */}
-        <div className="px-6 py-5 border-b border-[#46484c]/20 flex-shrink-0">
+        <div className="px-6 py-5 border-b border-[#222a39]/20 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Activity size={18} className="text-[#e08efe]" />
+              <Activity size={18} className="text-[#a855f7]" />
               <h2 className="font-bold text-white text-lg">Health Monitor</h2>
-              <span className="text-xs text-[#73757a] bg-[#22262b] px-2 py-0.5 rounded-full">
+              <span className="text-xs text-[#6f7788] bg-[#121824] px-2 py-0.5 rounded-full">
                 {targets.length.toLocaleString()} of {requestNodes.length.toLocaleString()} endpoints
               </span>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-[#22262b] rounded-lg transition-colors">
-              <X size={16} className="text-[#a9abb0]" />
+            <button onClick={onClose} className="p-1.5 hover:bg-[#121824] rounded-lg transition-colors">
+              <X size={16} className="text-[#a4acbc]" />
             </button>
           </div>
         </div>
 
         {/* Controls */}
-        <div className="px-6 py-3 border-b border-[#46484c]/15 flex items-center gap-3 flex-shrink-0">
+        <div className="px-6 py-3 border-b border-[#222a39]/15 flex items-center gap-3 flex-shrink-0">
           <button
             onClick={requestPing}
             disabled={running}
-            className="px-4 py-2 rounded-lg text-xs font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 rounded-lg text-xs font-bold text-[#080b12] bg-[#a855f7] hover:bg-[#c45cff] transition-all active:scale-[0.97] disabled:opacity-50 flex items-center gap-2"
           >
             {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
             {running ? `Checking ${targets.length}...` : `Ping ${targets.length}`}
@@ -170,7 +204,7 @@ const HealthMonitor = ({ nodes, onClose }) => {
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value === "all" ? "all" : Number(e.target.value))}
-            className="bg-[#22262b] border border-[#46484c]/30 rounded px-2 py-1.5 text-[10px] text-[#a9abb0] focus:outline-none"
+            className="bg-[#121824] border border-[#222a39]/30 rounded px-2 py-1.5 text-[10px] text-[#a4acbc] focus:outline-none"
           >
             {[10, 25, 50, 100, 250].filter((n) => n < requestNodes.length).map((n) => (
               <option key={n} value={n}>First {n}</option>
@@ -179,25 +213,25 @@ const HealthMonitor = ({ nodes, onClose }) => {
           </select>
 
           <div className="flex items-center gap-2 ml-auto">
-            <span className="text-[10px] text-[#73757a] uppercase tracking-widest">Auto</span>
+            <span className="text-[10px] text-[#6f7788] uppercase tracking-widest">Auto</span>
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`w-9 h-5 rounded-full transition-all duration-200 flex items-center px-0.5 ${autoRefresh ? "bg-[#e08efe]" : "bg-[#46484c]/40"}`}
+              className={`w-9 h-5 rounded-full transition-all duration-200 flex items-center px-0.5 ${autoRefresh ? "bg-[#a855f7]" : "bg-[#222a39]/40"}`}
             >
               <div className={`w-4 h-4 rounded-full bg-white transition-transform duration-200 ${autoRefresh ? "translate-x-4" : ""}`} />
             </button>
             {autoRefresh && (
               <select value={interval} onChange={(e) => setIntervalSec(Number(e.target.value))}
-                className="bg-[#22262b] border border-[#46484c]/30 rounded px-2 py-1 text-[10px] text-[#a9abb0] focus:outline-none">
+                className="bg-[#121824] border border-[#222a39]/30 rounded px-2 py-1 text-[10px] text-[#a4acbc] focus:outline-none">
                 <option value={15}>15s</option><option value={30}>30s</option><option value={60}>1m</option>
               </select>
             )}
           </div>
 
-          <div className="flex items-center gap-1 bg-[#22262b]/40 border border-[#46484c]/20 rounded-lg p-0.5">
+          <div className="flex items-center gap-1 bg-[#121824]/40 border border-[#222a39]/20 rounded-lg p-0.5">
             {["name", "latency", "status"].map((s) => (
               <button key={s} onClick={() => setSortBy(s)}
-                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${sortBy === s ? "bg-[#e08efe]/15 text-[#e08efe]" : "text-[#73757a] hover:text-[#a9abb0]"}`}>
+                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${sortBy === s ? "bg-[#a855f7]/15 text-[#a855f7]" : "text-[#6f7788] hover:text-[#a4acbc]"}`}>
                 {s}
               </button>
             ))}
@@ -205,14 +239,14 @@ const HealthMonitor = ({ nodes, onClose }) => {
         </div>
 
         {/* Summary */}
-        <div className="px-6 py-3 flex items-center gap-4 border-b border-[#46484c]/10 flex-shrink-0">
+        <div className="px-6 py-3 flex items-center gap-4 border-b border-[#222a39]/10 flex-shrink-0">
           {Object.entries(summary).map(([key, count]) => {
             const cfg = STATUS_CONFIG[key];
             return (
               <div key={key} className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full" style={{ background: cfg.color }} />
-                <span className="text-xs text-[#a9abb0]">{count}</span>
-                <span className="text-[10px] text-[#46484c] uppercase">{cfg.label}</span>
+                <span className="text-xs text-[#a4acbc]">{count}</span>
+                <span className="text-[10px] text-[#222a39] uppercase">{cfg.label}</span>
               </div>
             );
           })}
@@ -236,12 +270,12 @@ const HealthMonitor = ({ nodes, onClose }) => {
                 }
               >
                 <Icon size={16} style={{ color: cfg.color }} className={status === "checking" ? "animate-spin" : ""} />
-                <span className={`text-[10px] font-bold uppercase flex-shrink-0 ${METHOD_BADGE[node.method] || "text-[#a9abb0]"}`}>
+                <span className={`text-[10px] font-bold uppercase flex-shrink-0 ${METHOD_BADGE[node.method] || "text-[#a4acbc]"}`}>
                   {node.method}
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-white truncate">{node.name}</p>
-                  <p className="text-[10px] text-[#46484c] font-mono truncate">{node.path}</p>
+                  <p className="text-[10px] text-[#222a39] font-mono truncate">{node.path}</p>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0 text-right">
                   {r && !r.checking && (
@@ -251,7 +285,7 @@ const HealthMonitor = ({ nodes, onClose }) => {
                           {r.latency}ms
                         </span>
                       )}
-                      {r.error && <span className="text-[10px] text-[#ff6e84] max-w-[120px] truncate">{r.error}</span>}
+                      {r.error && <span className="text-[10px] text-[#f43f5e] max-w-[120px] truncate">{r.error}</span>}
                     </>
                   )}
                 </div>
@@ -262,7 +296,7 @@ const HealthMonitor = ({ nodes, onClose }) => {
           {sortedNodes.length > listLimit && (
             <button
               onClick={() => setListLimit((n) => n + LIST_LIMIT)}
-              className="w-full rounded-xl border border-[#46484c]/25 py-2.5 text-xs text-[#a9abb0] hover:text-white hover:bg-[#22262b] transition-colors"
+              className="w-full rounded-xl border border-[#222a39]/25 py-2.5 text-xs text-[#a4acbc] hover:text-white hover:bg-[#121824] transition-colors"
             >
               Show more ({(sortedNodes.length - listLimit).toLocaleString()} hidden)
             </button>
@@ -271,12 +305,12 @@ const HealthMonitor = ({ nodes, onClose }) => {
 
         {confirming && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 p-6">
-            <div className="w-full max-w-sm rounded-xl border border-[#46484c]/30 bg-[#12151b] p-5">
+            <div className="w-full max-w-sm rounded-xl border border-[#222a39]/30 bg-[#12151b] p-5">
               <div className="flex items-center gap-2">
                 <AlertCircle size={16} className="text-amber-400" />
                 <h3 className="text-sm font-bold text-white">Send {targets.length.toLocaleString()} live requests?</h3>
               </div>
-              <p className="mt-2 text-xs leading-relaxed text-[#a9abb0]">
+              <p className="mt-2 text-xs leading-relaxed text-[#a4acbc]">
                 Each endpoint is checked with a real HTTP request. If the
                 specification uses a relative server URL these are aimed at this
                 site, not at the API.
@@ -284,13 +318,13 @@ const HealthMonitor = ({ nodes, onClose }) => {
               <div className="mt-4 flex gap-2">
                 <button
                   onClick={() => { setConfirming(false); pingAll(); }}
-                  className="flex-1 rounded-lg bg-[#e08efe] py-2 text-xs font-bold text-[#0c0e12] hover:bg-[#ce7eec] transition-colors"
+                  className="flex-1 rounded-lg bg-[#a855f7] py-2 text-xs font-bold text-[#080b12] hover:bg-[#c45cff] transition-colors"
                 >
                   Run the checks
                 </button>
                 <button
                   onClick={() => setConfirming(false)}
-                  className="rounded-lg border border-[#46484c]/30 px-4 py-2 text-xs text-[#a9abb0] hover:text-white transition-colors"
+                  className="rounded-lg border border-[#222a39]/30 px-4 py-2 text-xs text-[#a4acbc] hover:text-white transition-colors"
                 >
                   Cancel
                 </button>

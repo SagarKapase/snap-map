@@ -23,7 +23,15 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Nothing here teaches ESLint that `<Icon />` is a use of `Icon`, so a
+      // component pulled out of a destructured parameter always looks unused.
+      // Following the convention already set for module-scope bindings,
+      // capitalised names are exempt rather than deleted — twice now, real
+      // working markup has been "cleaned up" on the strength of this warning.
+      'no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^[A-Z_]', ignoreRestSiblings: true },
+      ],
     },
   },
 ])

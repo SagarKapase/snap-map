@@ -478,7 +478,7 @@ body {
 .typewriter-cursor::after {
   content: "|";
   animation: typewriterCursor 0.8s step-end infinite;
-  color: #e08efe;
+  color: var(--color-vz-accent);
   font-weight: 300;
   margin-left: 2px;
 }

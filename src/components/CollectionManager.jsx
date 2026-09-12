@@ -105,50 +105,50 @@ export const SaveCollectionModal = ({ data, format, onClose, onSaved }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ animation: "fadeIn 0.2s ease-out both" }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-md rounded-2xl border border-[#46484c]/30 overflow-hidden"
+        className="relative w-full max-w-md rounded-2xl border border-[#222a39]/30 overflow-hidden"
         style={{ background: "rgba(12,14,18,0.95)", backdropFilter: "blur(20px)", animation: "scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both" }}
       >
-        <div className="px-6 py-5 border-b border-[#46484c]/20">
+        <div className="px-6 py-5 border-b border-[#222a39]/20">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Save size={18} className="text-[#e08efe]" />
+              <Save size={18} className="text-[#a855f7]" />
               <h2 className="font-bold text-white text-lg">Save Collection</h2>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-[#22262b] rounded-lg transition-colors">
-              <X size={16} className="text-[#a9abb0]" />
+            <button onClick={onClose} className="p-1.5 hover:bg-[#121824] rounded-lg transition-colors">
+              <X size={16} className="text-[#a4acbc]" />
             </button>
           </div>
         </div>
         <div className="px-6 py-5 space-y-4">
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest text-[#a9abb0] block mb-2">Collection Name</label>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#a4acbc] block mb-2">Collection Name</label>
             <input
               ref={inputRef}
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="w-full bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#73757a] focus:border-[#e08efe]/50 focus:ring-1 focus:ring-[#e08efe]/20 transition-all"
+              className="w-full bg-[#121824]/60 border border-[#222a39]/30 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#6f7788] focus:border-[#a855f7]/50 focus:ring-1 focus:ring-[#a855f7]/20 transition-all"
               placeholder="My API Collection"
             />
           </div>
-          <div className="flex items-center gap-3 text-xs text-[#73757a]">
-            <span className="px-2 py-1 bg-[#22262b] rounded border border-[#46484c]/20 font-mono">{format || "Unknown"}</span>
+          <div className="flex items-center gap-3 text-xs text-[#6f7788]">
+            <span className="px-2 py-1 bg-[#121824] rounded border border-[#222a39]/20 font-mono">{format || "Unknown"}</span>
             <span>Saved to browser storage</span>
           </div>
           {error && (
-            <p className="rounded-lg border border-[#ff6e84]/25 bg-[#ff6e84]/[0.07] px-3 py-2 text-xs leading-relaxed text-[#fda4af]">
+            <p className="rounded-lg border border-[#f43f5e]/25 bg-[#f43f5e]/[0.07] px-3 py-2 text-xs leading-relaxed text-[#fda4af]">
               {error}
             </p>
           )}
         </div>
-        <div className="px-6 py-4 border-t border-[#46484c]/20 flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-[#46484c]/30 text-[#a9abb0] text-sm font-semibold hover:bg-[#22262b] transition-colors">
+        <div className="px-6 py-4 border-t border-[#222a39]/20 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-[#222a39]/30 text-[#a4acbc] text-sm font-semibold hover:bg-[#121824] transition-colors">
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={!name.trim() || saving}
-            className="flex-1 py-2.5 rounded-lg bg-[#e08efe] text-[#0c0e12] text-sm font-bold hover:bg-[#ce7eec] transition-all active:scale-[0.97] disabled:opacity-50 flex items-center justify-center gap-2"
+            className="flex-1 py-2.5 rounded-lg bg-[#a855f7] text-[#080b12] text-sm font-bold hover:bg-[#c45cff] transition-all active:scale-[0.97] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {saving ? "Saving..." : "Save"}
@@ -192,24 +192,24 @@ export const CollectionsModal = ({ onClose, onLoad }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ animation: "fadeIn 0.2s ease-out both" }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-lg rounded-2xl border border-[#46484c]/30 overflow-hidden flex flex-col"
+        className="relative w-full max-w-lg rounded-2xl border border-[#222a39]/30 overflow-hidden flex flex-col"
         style={{ maxHeight: "80vh", background: "rgba(12,14,18,0.95)", backdropFilter: "blur(20px)", animation: "scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both" }}
       >
-        <div className="px-6 py-5 border-b border-[#46484c]/20 flex-shrink-0">
+        <div className="px-6 py-5 border-b border-[#222a39]/20 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <FolderOpen size={18} className="text-[#e08efe]" />
+              <FolderOpen size={18} className="text-[#a855f7]" />
               <h2 className="font-bold text-white text-lg">Collections</h2>
-              <span className="text-xs text-[#73757a] bg-[#22262b] px-2 py-0.5 rounded-full">{collections.length}</span>
+              <span className="text-xs text-[#6f7788] bg-[#121824] px-2 py-0.5 rounded-full">{collections.length}</span>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-[#22262b] rounded-lg transition-colors">
-              <X size={16} className="text-[#a9abb0]" />
+            <button onClick={onClose} className="p-1.5 hover:bg-[#121824] rounded-lg transition-colors">
+              <X size={16} className="text-[#a4acbc]" />
             </button>
           </div>
         </div>
 
         {loadError && (
-          <p className="flex-shrink-0 border-b border-[#46484c]/20 bg-[#ff6e84]/[0.07] px-6 py-2.5 text-xs text-[#fda4af]">
+          <p className="flex-shrink-0 border-b border-[#222a39]/20 bg-[#f43f5e]/[0.07] px-6 py-2.5 text-xs text-[#fda4af]">
             {loadError}
           </p>
         )}
@@ -217,9 +217,9 @@ export const CollectionsModal = ({ onClose, onLoad }) => {
         <div className="flex-1 overflow-auto">
           {collections.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <FolderOpen size={40} className="text-[#46484c] mb-3" />
-              <p className="text-[#73757a] text-sm">No saved collections</p>
-              <p className="text-[#46484c] text-xs mt-1">Save a spec from the graph view to see it here</p>
+              <FolderOpen size={40} className="text-[#222a39] mb-3" />
+              <p className="text-[#6f7788] text-sm">No saved collections</p>
+              <p className="text-[#222a39] text-xs mt-1">Save a spec from the graph view to see it here</p>
             </div>
           ) : (
             <div className="p-3 space-y-1">
@@ -234,27 +234,27 @@ export const CollectionsModal = ({ onClose, onLoad }) => {
                     style={{ animation: `slideInUp 0.2s ease-out ${i * 30}ms both` }}
                     onClick={() => handleLoad(entry)}
                   >
-                    <div className="w-9 h-9 rounded-lg bg-[#e08efe]/8 border border-[#e08efe]/15 flex items-center justify-center flex-shrink-0">
-                      <Icon size={16} className="text-[#e08efe]" />
+                    <div className="w-9 h-9 rounded-lg bg-[#a855f7]/8 border border-[#a855f7]/15 flex items-center justify-center flex-shrink-0">
+                      <Icon size={16} className="text-[#a855f7]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate group-hover:text-[#e08efe] transition-colors">
+                      <p className="text-sm font-semibold text-white truncate group-hover:text-[#a855f7] transition-colors">
                         {entry.name}
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-[#73757a] font-mono">{entry.format}</span>
+                        <span className="text-[10px] text-[#6f7788] font-mono">{entry.format}</span>
                         {entry.nodeCount > 0 && (
-                          <span className="text-[10px] text-[#46484c]">{entry.nodeCount} nodes</span>
+                          <span className="text-[10px] text-[#222a39]">{entry.nodeCount} nodes</span>
                         )}
-                        <span className="text-[10px] text-[#46484c] flex items-center gap-1">
+                        <span className="text-[10px] text-[#222a39] flex items-center gap-1">
                           <Clock size={8} /> {timeAgo(entry.savedAt)}
                         </span>
                       </div>
                     </div>
-                    <ChevronRight size={14} className="text-[#46484c] group-hover:text-[#a9abb0] transition-colors flex-shrink-0" />
+                    <ChevronRight size={14} className="text-[#222a39] group-hover:text-[#a4acbc] transition-colors flex-shrink-0" />
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDelete(entry.id); }}
-                      className="p-1.5 rounded-lg text-[#46484c] hover:text-[#ff6e84] hover:bg-[#ff6e84]/10 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
+                      className="p-1.5 rounded-lg text-[#222a39] hover:text-[#f43f5e] hover:bg-[#f43f5e]/10 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
                     >
                       <Trash2 size={13} />
                     </button>

@@ -15,11 +15,14 @@ import {
   Lock,
   Braces,
   Ban,
+  WandSparkles,
 } from "lucide-react";
 import { methodColor } from "../utils/constants";
 import { resolveText, findVariables } from "../utils/variables";
 import JsonView from "./workspace/JsonView";
 import { toJsonText } from "../utils/format";
+import ExplainResponse from "./ai/ExplainResponse";
+import { hasApiKey } from "../utils/ai/client";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const BODY_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
@@ -103,6 +106,8 @@ const ApiPlaygroundModal = ({
   servers = [],
   origin: originProp = "",
   onOriginChange,
+  spec = null,
+  onNeedAiKey,
 }) => {
   const [method, setMethod] = useState(node?.method || "GET");
 
@@ -161,6 +166,9 @@ const ApiPlaygroundModal = ({
   const [updateSaved, setUpdateSaved] = useState(false);
   const [requestTab, setRequestTab] = useState("params");
   const [responseTab, setResponseTab] = useState("body");
+  // The AI explanation is keyed on the response it explains, so a re-send
+  // starts a fresh one rather than showing a stale verdict.
+  const [explainKey, setExplainKey] = useState(null);
   const abortRef = useRef(null);
 
   const mc = methodColor(method);
@@ -255,6 +263,7 @@ const ApiPlaygroundModal = ({
     setReqError("");
     setResponse(null);
     setResponseTab("body");
+    setExplainKey(null);
 
     try {
       const headerObject = {};
@@ -797,6 +806,20 @@ const ApiPlaygroundModal = ({
                       </>
                     )}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!hasApiKey()) {
+                        onNeedAiKey?.();
+                        return;
+                      }
+                      setExplainKey((k) => (k ? null : `${response.status}-${response.elapsed}-${Date.now()}`));
+                    }}
+                    title="Explain this response with AI"
+                    className={`vz-t flex items-center gap-1 text-[11px] hover:text-vz-text ${explainKey ? "text-vz-text" : "text-vz-accent-2"}`}
+                  >
+                    <WandSparkles size={11} /> Explain
+                  </button>
                 </>
               ) : (
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-vz-dim">
@@ -828,6 +851,22 @@ const ApiPlaygroundModal = ({
                     </div>
                   </div>
                 </div>
+              )}
+
+              {!loading && !reqError && response && explainKey && (
+                <ExplainResponse
+                  key={explainKey}
+                  node={node}
+                  spec={spec}
+                  request={{
+                    method,
+                    url: effectiveUrl,
+                    headers: headers.filter((h) => h.key.trim()),
+                    body: BODY_METHODS.includes(method) && body.trim() ? body : "",
+                  }}
+                  response={response}
+                  onClose={() => setExplainKey(null)}
+                />
               )}
 
               {!loading && !reqError && response && responseTab === "body" && (

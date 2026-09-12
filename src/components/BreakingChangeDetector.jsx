@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import yaml from "js-yaml";
+import { parseSpecText } from "../utils/readSpec";
 import {
   ArrowLeft, AlertTriangle, ShieldAlert, ShieldCheck, Info,
   Upload, X, GitCompareArrows, Download, Copy, Check,
@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { HTTP_METHODS } from "../utils/constants";
 
-const tryParse = (t) => { try { return JSON.parse(t); } catch {} try { return yaml.load(t); } catch {} return null; };
+const tryParse = parseSpecText;
 
 const extractEndpoints = (data) => {
   const eps = [];
@@ -46,9 +46,9 @@ const extractEndpoints = (data) => {
 };
 
 const SEVERITY = {
-  breaking: { icon: ShieldAlert, color: "#ff6e84", bg: "bg-[#ff6e84]/10", border: "border-[#ff6e84]/30", label: "Breaking" },
+  breaking: { icon: ShieldAlert, color: "#f43f5e", bg: "bg-[#f43f5e]/10", border: "border-[#f43f5e]/30", label: "Breaking" },
   warning:  { icon: AlertTriangle, color: "#fbbf24", bg: "bg-amber-500/10", border: "border-amber-500/30", label: "Warning" },
-  info:     { icon: Info, color: "#81ecff", bg: "bg-[#81ecff]/10", border: "border-[#81ecff]/30", label: "Info" },
+  info:     { icon: Info, color: "#60a5fa", bg: "bg-[#60a5fa]/10", border: "border-[#60a5fa]/30", label: "Info" },
   safe:     { icon: ShieldCheck, color: "#34d399", bg: "bg-emerald-500/10", border: "border-emerald-500/30", label: "Safe" },
 };
 
@@ -236,28 +236,28 @@ const BreakingChangeDetector = ({ onBack }) => {
       <div className="fixed inset-0 pointer-events-none mesh-gradient-bg" style={{ zIndex: 0 }} />
       <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center gap-4 mb-8">
-          <button onClick={onBack} className="p-2 hover:bg-[#22262b] rounded-lg text-[#a9abb0] hover:text-white transition-all group">
+          <button onClick={onBack} className="p-2 hover:bg-[#121824] rounded-lg text-[#a4acbc] hover:text-white transition-all group">
             <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
           </button>
           <div>
             <h1 className="text-2xl font-extrabold text-white flex items-center gap-3">
-              <ShieldAlert size={24} className="text-[#ff6e84]" /> Breaking Change Detector
+              <ShieldAlert size={24} className="text-[#f43f5e]" /> Breaking Change Detector
             </h1>
-            <p className="text-sm text-[#73757a] mt-1">Analyze two API spec versions for breaking changes with severity classification.</p>
+            <p className="text-sm text-[#6f7788] mt-1">Analyze two API spec versions for breaking changes with severity classification.</p>
           </div>
         </div>
 
         {/* Editors */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           {[{ label: "Base Spec (Current)", val: specAText, set: setSpecAText, ref: fileRefA }, { label: "New Spec (PR/Updated)", val: specBText, set: setSpecBText, ref: fileRefB }].map(({ label, val, set, ref }) => (
-            <div key={label} className="flex flex-col rounded-xl overflow-hidden border border-[#46484c]/20" style={{ background: "rgba(12,14,18,0.7)" }}>
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#46484c]/15" style={{ background: "rgba(255,255,255,0.02)" }}>
-                <span className="text-xs font-bold text-[#a9abb0] uppercase tracking-widest">{label}</span>
-                <button onClick={() => ref.current?.click()} className="text-[10px] font-bold text-[#73757a] hover:text-[#a9abb0] uppercase tracking-wider flex items-center gap-1"><Upload size={10} /> File</button>
+            <div key={label} className="flex flex-col rounded-xl overflow-hidden border border-[#222a39]/20" style={{ background: "rgba(12,14,18,0.7)" }}>
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#222a39]/15" style={{ background: "rgba(255,255,255,0.02)" }}>
+                <span className="text-xs font-bold text-[#a4acbc] uppercase tracking-widest">{label}</span>
+                <button onClick={() => ref.current?.click()} className="text-[10px] font-bold text-[#6f7788] hover:text-[#a4acbc] uppercase tracking-wider flex items-center gap-1"><Upload size={10} /> File</button>
                 <input ref={ref} type="file" accept=".json,.yaml,.yml" className="hidden" onChange={(e) => loadFile(set)(e.target.files?.[0])} />
               </div>
               <textarea value={val} onChange={(e) => set(e.target.value)} placeholder="Paste API spec (JSON/YAML)..." spellCheck={false}
-                className="flex-1 bg-transparent resize-none font-mono text-xs text-[#f8f9fe] p-4 focus:outline-none placeholder:text-[#46484c]" style={{ lineHeight: "1.75", caretColor: "#e08efe", minHeight: 180 }} />
+                className="flex-1 bg-transparent resize-none font-mono text-xs text-[#f8f9fe] p-4 focus:outline-none placeholder:text-[#222a39]" style={{ lineHeight: "1.75", caretColor: "#a855f7", minHeight: 180 }} />
             </div>
           ))}
         </div>
@@ -265,10 +265,10 @@ const BreakingChangeDetector = ({ onBack }) => {
         <div className="flex items-center gap-4 mb-8">
           <button onClick={handleAnalyze} disabled={!specAText.trim() || !specBText.trim()}
             className="px-8 py-3 rounded-xl text-sm font-bold uppercase tracking-widest transition-all active:scale-[0.97] disabled:opacity-40 btn-shimmer flex items-center gap-2"
-            style={specAText.trim() && specBText.trim() ? { background: "#ff6e84", color: "#0c0e12", boxShadow: "0 12px 24px -6px rgba(255,110,132,0.3)" } : { background: "rgba(255,255,255,0.03)", color: "#73757a", border: "1px solid rgba(70,72,76,0.2)" }}>
+            style={specAText.trim() && specBText.trim() ? { background: "#f43f5e", color: "#080b12", boxShadow: "0 12px 24px -6px rgba(255,110,132,0.3)" } : { background: "rgba(255,255,255,0.03)", color: "#6f7788", border: "1px solid rgba(70,72,76,0.2)" }}>
             <ShieldAlert size={16} /> Detect Breaking Changes
           </button>
-          {error && <div className="flex items-center gap-2 text-[#ff6e84] text-sm"><AlertTriangle size={14} /> {error}</div>}
+          {error && <div className="flex items-center gap-2 text-[#f43f5e] text-sm"><AlertTriangle size={14} /> {error}</div>}
         </div>
 
         {changes && (
@@ -279,9 +279,9 @@ const BreakingChangeDetector = ({ onBack }) => {
                 const s = SEVERITY[key]; const Icon = s.icon;
                 return (
                   <button key={key} onClick={() => setFilterSev(filterSev === key ? "all" : key)}
-                    className={`p-4 rounded-xl border transition-all text-left ${filterSev === key ? `${s.border} ${s.bg} shadow-lg` : "border-[#46484c]/20 bg-[#171a1e]/40 hover:bg-[#171a1e]/60"}`}
+                    className={`p-4 rounded-xl border transition-all text-left ${filterSev === key ? `${s.border} ${s.bg} shadow-lg` : "border-[#222a39]/20 bg-[#0f141d]/40 hover:bg-[#0f141d]/60"}`}
                     style={{ animation: `slideInUp 0.3s ease-out ${i * 60}ms both` }}>
-                    <div className="flex items-center gap-2 mb-2"><Icon size={14} style={{ color: s.color }} /><span className="text-[10px] font-bold uppercase tracking-widest text-[#a9abb0]">{s.label}</span></div>
+                    <div className="flex items-center gap-2 mb-2"><Icon size={14} style={{ color: s.color }} /><span className="text-[10px] font-bold uppercase tracking-widest text-[#a4acbc]">{s.label}</span></div>
                     <span className="text-2xl font-extrabold" style={{ color: s.color }}>{summary[key] || 0}</span>
                   </button>
                 );
@@ -290,13 +290,13 @@ const BreakingChangeDetector = ({ onBack }) => {
 
             {/* Actions */}
             <div className="flex items-center gap-3 mb-6">
-              <button onClick={handleExportMd} className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-[#a9abb0] hover:text-white hover:bg-[#22262b] border border-[#46484c]/20 transition-all">
+              <button onClick={handleExportMd} className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-[#a4acbc] hover:text-white hover:bg-[#121824] border border-[#222a39]/20 transition-all">
                 <Download size={13} /> Export Report (.md)
               </button>
-              <button onClick={handleCopyPRComment} className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-[#a9abb0] hover:text-white hover:bg-[#22262b] border border-[#46484c]/20 transition-all">
-                {copied ? <><Check size={13} className="text-[#81ecff]" /> Copied!</> : <><Copy size={13} /> Copy PR Comment</>}
+              <button onClick={handleCopyPRComment} className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-[#a4acbc] hover:text-white hover:bg-[#121824] border border-[#222a39]/20 transition-all">
+                {copied ? <><Check size={13} className="text-[#60a5fa]" /> Copied!</> : <><Copy size={13} /> Copy PR Comment</>}
               </button>
-              {filterSev !== "all" && <button onClick={() => setFilterSev("all")} className="text-xs text-[#e08efe] flex items-center gap-1"><X size={10} /> Clear filter</button>}
+              {filterSev !== "all" && <button onClick={() => setFilterSev("all")} className="text-xs text-[#a855f7] flex items-center gap-1"><X size={10} /> Clear filter</button>}
             </div>
 
             {/* Changes list */}
@@ -313,7 +313,7 @@ const BreakingChangeDetector = ({ onBack }) => {
                         <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ color: s.color, background: `${s.color}15` }}>{s.label}</span>
                       </div>
                       <p className="text-sm font-semibold text-[#f8f9fe]">{c.title}</p>
-                      <p className="text-xs text-[#73757a] mt-0.5">{c.detail}</p>
+                      <p className="text-xs text-[#6f7788] mt-0.5">{c.detail}</p>
                     </div>
                   </div>
                 );
@@ -321,11 +321,11 @@ const BreakingChangeDetector = ({ onBack }) => {
             </div>
 
             {/* Verdict */}
-            <div className={`mt-8 p-6 rounded-2xl border text-center ${summary.breaking > 0 ? "border-[#ff6e84]/30 bg-[#ff6e84]/5" : "border-emerald-500/30 bg-emerald-500/5"}`}>
+            <div className={`mt-8 p-6 rounded-2xl border text-center ${summary.breaking > 0 ? "border-[#f43f5e]/30 bg-[#f43f5e]/5" : "border-emerald-500/30 bg-emerald-500/5"}`}>
               {summary.breaking > 0 ? (
-                <><ShieldAlert size={32} className="mx-auto mb-2 text-[#ff6e84]" /><p className="text-lg font-bold text-[#ff6e84]">⛔ {summary.breaking} Breaking Change{summary.breaking > 1 ? "s" : ""} Detected</p><p className="text-sm text-[#73757a] mt-1">Review required before merging this PR.</p></>
+                <><ShieldAlert size={32} className="mx-auto mb-2 text-[#f43f5e]" /><p className="text-lg font-bold text-[#f43f5e]">⛔ {summary.breaking} Breaking Change{summary.breaking > 1 ? "s" : ""} Detected</p><p className="text-sm text-[#6f7788] mt-1">Review required before merging this PR.</p></>
               ) : (
-                <><ShieldCheck size={32} className="mx-auto mb-2 text-emerald-400" /><p className="text-lg font-bold text-emerald-400">✅ No Breaking Changes</p><p className="text-sm text-[#73757a] mt-1">This update is safe to merge.</p></>
+                <><ShieldCheck size={32} className="mx-auto mb-2 text-emerald-400" /><p className="text-lg font-bold text-emerald-400">✅ No Breaking Changes</p><p className="text-sm text-[#6f7788] mt-1">This update is safe to merge.</p></>
               )}
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronRight, Plus, Search, X, Folder } from "lucide-react";
 import MethodBadge from "./MethodBadge";
 import { ancestorsOf, timeAgo } from "../../utils/analysis";
@@ -95,7 +95,7 @@ const ApiExplorer = ({
   collection,
   detectedFormat,
   nodes,
-  groups,
+  groups = [],
   endpointCount,
   searchQuery,
   onSearchChange,
@@ -132,32 +132,36 @@ const ApiExplorer = ({
     [groups, searchQuery],
   );
 
-  // While searching, every branch that survived the filter reads as open.
+  /**
+   * What actually reads as open.
+   *
+   * Two things force a branch open besides the user clicking it: a search,
+   * where everything that survived the filter should be visible, and a
+   * selection made elsewhere — on the graph, in the table, from the palette.
+   *
+   * Both used to be written into state, the selection through an effect that
+   * set state on every selection change. Deriving them instead means the
+   * explorer never re-renders itself a second time to catch up, and a branch
+   * the user collapsed by hand is still remembered underneath.
+   */
   const effectiveExpanded = useMemo(() => {
-    if (!searchQuery) return expanded;
-    const ids = [];
-    const walk = (entries) =>
-      entries.forEach((e) => {
-        if (e.node.type === "folder") {
-          ids.push(e.node.id);
-          walk(e.children);
-        }
-      });
-    walk(tree);
-    return new Set([...expanded, ...ids]);
-  }, [expanded, searchQuery, tree]);
+    const forced = [];
 
-  // Reveal whatever is selected elsewhere (graph, table, palette).
-  useEffect(() => {
-    if (!selectedNodeId) return;
-    const chain = ancestorsOf(nodes, selectedNodeId);
-    if (!chain.length) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      chain.forEach((id) => next.add(id));
-      return next;
-    });
-  }, [selectedNodeId, nodes]);
+    if (searchQuery) {
+      const walk = (entries) =>
+        entries.forEach((entry) => {
+          if (entry.node.type === "folder") {
+            forced.push(entry.node.id);
+            walk(entry.children);
+          }
+        });
+      walk(tree);
+    }
+
+    if (selectedNodeId) forced.push(...ancestorsOf(nodes, selectedNodeId));
+
+    return forced.length ? new Set([...expanded, ...forced]) : expanded;
+  }, [expanded, searchQuery, tree, selectedNodeId, nodes]);
 
   const toggleGroup = (id) =>
     setExpanded((prev) => {
