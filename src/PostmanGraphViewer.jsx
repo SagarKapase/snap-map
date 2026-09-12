@@ -694,7 +694,13 @@ const PostmanGraphViewer = () => {
     const pos = positionsRef.current[nodeId];
     if (!pos || !canvasRef.current) return;
     const el = canvasRef.current;
-    const cW = el.offsetWidth;
+    // The assistant drawer floats over the canvas's right edge; centre the
+    // node in the part of the canvas that is actually visible beside it.
+    const drawer = document.querySelector('aside[aria-label="Assistant"]');
+    const covered = drawer
+      ? Math.max(0, el.getBoundingClientRect().right - drawer.getBoundingClientRect().left)
+      : 0;
+    const cW = el.offsetWidth - Math.min(covered, el.offsetWidth * 0.6);
     const cH = el.offsetHeight;
     // Zoom to a comfortable level to see the node clearly
     const targetZoom = 1.15;

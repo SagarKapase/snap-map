@@ -157,9 +157,16 @@ const AiPanel = ({
     onThreadChange(() => []);
   };
 
+  // The drawer sits over the workspace's right edge. From 2xl up there is
+  // room to move it left of the inspector column, so an endpoint chip opens
+  // details beside the chat rather than behind it; narrower than that the
+  // map would lose too much, and the drawer covers the inspector instead.
+  // Width and layering are inline so they hold even when a long-running dev
+  // server has not rescanned this file for classes.
   return (
     <aside
-      className="fixed bottom-[50px] right-2.5 top-[70px] z-[46] flex w-[min(460px,calc(100vw-20px))] flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel shadow-2xl shadow-black/60"
+      className="fixed bottom-[50px] right-2.5 top-[70px] flex flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel shadow-2xl shadow-black/60 2xl:right-[352px]"
+      style={{ zIndex: 46, width: "min(430px, calc(100vw - 20px))" }}
       aria-label="Assistant"
     >
       {/* Header */}
