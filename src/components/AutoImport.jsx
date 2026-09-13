@@ -69,7 +69,7 @@ const AutoImportPanel = ({ onImport, onClose }) => {
       });
       setLastFetched(new Date().toISOString());
 
-      onImport(data);
+      onImport(data, { sourceUrl: finalUrl });
       if (!silent) setError("");
     } catch (e) {
       const msg = e.message || "";

@@ -62,6 +62,9 @@ const JsonInputScreen = ({
   const [activeTab, setActiveTab] = useState("editor");
   const [urlInput, setUrlInput] = useState("");
   const [urlError, setUrlError] = useState("");
+  // Where the current text was fetched from, when it came from a URL. A
+  // relative server in the spec is resolved against it.
+  const [sourceUrl, setSourceUrl] = useState("");
   const [isFetching, setIsFetching] = useState(false);
   const [loadedFileName, setLoadedFileName] = useState("");
   const [isCopied, setIsCopied] = useState(false);
@@ -179,7 +182,7 @@ const JsonInputScreen = ({
     }
     if (parsedInput) {
       setError("");
-      onVisualize(parsedInput);
+      onVisualize(parsedInput, { sourceUrl });
     } else {
       setError("Invalid JSON/YAML — cannot parse");
     }
@@ -188,6 +191,7 @@ const JsonInputScreen = ({
   const clearInput = () => {
     setBigSpec(null);
     setJsonText("");
+    setSourceUrl("");
     setLoadedFileName("");
     setError("");
   };
@@ -210,9 +214,10 @@ const JsonInputScreen = ({
    * editor as before; large ones are held as parsed data with a summary card,
    * which is what keeps a multi-megabyte import from locking the tab.
    */
-  const acceptText = (text, parsed, name) => {
+  const acceptText = (text, parsed, name, from = "") => {
     setError("");
     setActiveTab("editor");
+    setSourceUrl(from);
     setLoadedFileName(name || "");
     if (text.length > EDITOR_LIMIT) {
       setJsonText("");
@@ -270,6 +275,7 @@ const JsonInputScreen = ({
         typeof text === "string" ? text : JSON.stringify(parsed, null, 2),
         parsed,
         urlInput.split("/").pop() || "remote-spec",
+        urlInput.trim(),
       );
       setUrlError("");
     } catch (e) {
@@ -293,6 +299,7 @@ const JsonInputScreen = ({
         else {
           setBigSpec(null);
           setJsonText(text);
+          setSourceUrl("");
           setError("");
           setLoadedFileName("");
         }

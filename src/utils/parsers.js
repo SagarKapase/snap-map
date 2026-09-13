@@ -1,4 +1,5 @@
 import { HTTP_METHODS } from "./constants";
+import { resolveSchema } from "./analysis";
 
 // ─── Format detection ────────────────────────
 export const detectFormat = (data) => {
@@ -101,6 +102,135 @@ const openApiAuth = (spec, operation) => {
   return out;
 };
 
+/** The example a media object carries, wherever OpenAPI lets it be written. */
+const mediaExample = (media, schema) => {
+  if (media?.example !== undefined) return media.example;
+  if (media?.examples && typeof media.examples === "object") {
+    const first = Object.values(media.examples)[0];
+    if (first?.value !== undefined) return first.value;
+  }
+  return schema?.example;
+};
+
+const RAW_LANGUAGE_FOR = [
+  [/json/i, "json"],
+  [/xml/i, "xml"],
+  [/html/i, "html"],
+  [/javascript/i, "javascript"],
+];
+
+/** One form field per schema property; `format: binary` is a file. */
+const formFieldsFromSchema = (schema) => {
+  const props = schema?.properties;
+  if (!props || typeof props !== "object") return [];
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  return Object.entries(props).map(([key, prop]) => {
+    const example = prop?.example ?? prop?.default;
+    return {
+      key,
+      value: example != null && typeof example !== "object" ? String(example) : "",
+      type: prop?.format === "binary" || prop?.type === "file" ? "file" : "text",
+      disabled: false,
+      required: required.includes(key),
+      description: prop?.description || "",
+    };
+  });
+};
+
+/**
+ * What the operation accepts as a body, in the same terms the Postman
+ * parser uses. Only `application/json` was read before, so a multipart
+ * upload or a form post looked like it took no body at all.
+ */
+const readOpenApiBody = (spec, operation) => {
+  const none = { body: null, bodyMode: "none", formFields: [], requestBodySchema: null };
+
+  const content = operation.requestBody?.content;
+  if (content && typeof content === "object") {
+    const types = Object.keys(content);
+    const picked =
+      types.find((t) => /json/i.test(t)) ||
+      types.find((t) => /^multipart\//i.test(t)) ||
+      types.find((t) => t === "application/x-www-form-urlencoded") ||
+      types[0];
+    if (!picked) return none;
+    const media = content[picked] || {};
+    const schema = media.schema || null;
+    const example = mediaExample(media, schema);
+
+    if (/json/i.test(picked)) {
+      return {
+        body: example !== undefined ? example : null,
+        bodyMode: "raw",
+        language: "json",
+        contentType: picked,
+        formFields: [],
+        requestBodySchema: schema,
+      };
+    }
+    if (/^multipart\//i.test(picked) || picked === "application/x-www-form-urlencoded") {
+      return {
+        body: null,
+        bodyMode: picked === "application/x-www-form-urlencoded" ? "urlencoded" : "formdata",
+        contentType: picked,
+        formFields: formFieldsFromSchema(resolveSchema(spec, schema)),
+        requestBodySchema: null,
+      };
+    }
+    if (picked === "application/octet-stream" || schema?.format === "binary") {
+      return { body: null, bodyMode: "file", contentType: picked, formFields: [], requestBodySchema: null };
+    }
+    const language = RAW_LANGUAGE_FOR.find(([pattern]) => pattern.test(picked))?.[1] || "text";
+    const raw = typeof example === "string" ? example : "";
+    return {
+      body: raw || null,
+      bodyMode: "raw",
+      rawBody: raw,
+      language,
+      contentType: picked,
+      formFields: [],
+      requestBodySchema: null,
+    };
+  }
+
+  // Swagger 2.0: the body is a parameter, and form fields are parameters too.
+  const params = Array.isArray(operation.parameters) ? operation.parameters : [];
+  const formParams = params.filter((p) => p && p.in === "formData");
+  if (formParams.length) {
+    const consumes = Array.isArray(operation.consumes) ? operation.consumes : spec.consumes || [];
+    const urlencoded =
+      consumes.includes("application/x-www-form-urlencoded") &&
+      !consumes.includes("multipart/form-data") &&
+      !formParams.some((p) => p.type === "file");
+    return {
+      body: null,
+      bodyMode: urlencoded ? "urlencoded" : "formdata",
+      contentType: urlencoded ? "application/x-www-form-urlencoded" : "multipart/form-data",
+      formFields: formParams.map((p) => ({
+        key: p.name,
+        value: p.default != null ? String(p.default) : p["x-example"] != null ? String(p["x-example"]) : "",
+        type: p.type === "file" ? "file" : "text",
+        disabled: false,
+        required: !!p.required,
+        description: p.description || "",
+      })),
+      requestBodySchema: null,
+    };
+  }
+  const bodyParam = params.find((p) => p && p.in === "body");
+  if (bodyParam) {
+    return {
+      body: bodyParam.schema?.example !== undefined ? bodyParam.schema.example : null,
+      bodyMode: "raw",
+      language: "json",
+      contentType: "application/json",
+      formFields: [],
+      requestBodySchema: bodyParam.schema || null,
+    };
+  }
+  return none;
+};
+
 const openApiResponses = (operation) => {
   const responses = operation.responses || {};
   return Object.entries(responses).map(([status, res]) => {
@@ -192,25 +322,14 @@ export const parseOpenApi = (data, setStats) => {
           : ["Default"];
       const upperMethod = method.toUpperCase();
 
-      let body = null;
-      if (operation.requestBody) {
-        const content = operation.requestBody.content;
-        if (content) {
-          const jsonContent = content["application/json"];
-          if (jsonContent?.example) body = jsonContent.example;
-          else if (jsonContent?.schema?.example)
-            body = jsonContent.schema.example;
-        }
-      } else if (operation.parameters) {
-        const bodyParam = operation.parameters.find((p) => p.in === "body");
-        if (bodyParam?.schema?.example) body = bodyParam.schema.example;
-      }
+      const bodyInfo = readOpenApiBody(data, operation);
 
       const declared = [
         ...(Array.isArray(pathObj.parameters) ? pathObj.parameters : []),
         ...(Array.isArray(operation.parameters) ? operation.parameters : []),
       ]
-        .filter((p) => p && p.in !== "body")
+        // Form fields are read as the body, not listed as parameters.
+        .filter((p) => p && p.in !== "body" && p.in !== "formData")
         .map((p) => ({
           name: p.name,
           in: p.in || "query",
@@ -240,13 +359,11 @@ export const parseOpenApi = (data, setStats) => {
           path: `${baseUrl}${pathStr}`,
           template: pathStr,
           description: operation.description || operation.summary || "",
-          body,
+          ...bodyInfo,
           params,
           headers,
           auth: openApiAuth(data, operation),
           responses: openApiResponses(operation),
-          requestBodySchema:
-            operation.requestBody?.content?.["application/json"]?.schema || null,
           deprecated: !!operation.deprecated,
         });
       });

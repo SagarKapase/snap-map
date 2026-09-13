@@ -77,6 +77,17 @@ const ANIMATE_UPTO = 150;   // entrance animation
 const HOVER_FOCUS_UPTO = 250; // dim-siblings-on-hover
 const VIEWPORT_MARGIN = 600; // graph px kept rendered outside the viewport
 
+/** The origin a relative `servers` entry resolves against, when it is known. */
+const relativeServerOrigin = (parsedNodes, sourceUrl) => {
+  const first = parsedNodes.find((n) => n.type === "root")?.servers?.[0];
+  if (!first || !sourceUrl || /^[a-zA-Z][\w+.-]*:\/\//.test(first)) return "";
+  try {
+    return new URL(sourceUrl).origin;
+  } catch {
+    return "";
+  }
+};
+
 const PostmanGraphViewer = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -163,6 +174,12 @@ const PostmanGraphViewer = () => {
   // Where a relative path is sent from the playground. Asked for once per
   // import rather than per request.
   const [playgroundOrigin, setPlaygroundOrigin] = useState("");
+  // A blank request, for testing an API the document does not describe.
+  const [playgroundScratch, setPlaygroundScratch] = useState(false);
+  // Values typed over the collection's variables from the playground. They
+  // sit above every declared scope, the way Postman's local scope does, and
+  // last until the next import.
+  const [variableOverrides, setVariableOverrides] = useState({});
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
@@ -227,10 +244,24 @@ const PostmanGraphViewer = () => {
     [pulledEnvironment, activeEnvId],
   );
 
-  const variables = useMemo(
-    () => collectVariables({ nodes, environment: activeEnvironment }),
-    [nodes, activeEnvironment],
-  );
+  const variables = useMemo(() => {
+    const map = collectVariables({ nodes, environment: activeEnvironment });
+    Object.entries(variableOverrides).forEach(([key, value]) => {
+      map.set(key, { key, value, source: "edited here", declared: map.get(key) || null });
+    });
+    return map;
+  }, [nodes, activeEnvironment, variableOverrides]);
+
+  const setVariableOverride = useCallback((key, value) => {
+    setVariableOverrides((prev) => ({ ...prev, [key]: value }));
+  }, []);
+  const clearVariableOverride = useCallback((key) => {
+    setVariableOverrides((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const variableFlow = useMemo(
     () => analyseVariableFlow(nodes, variables),
@@ -361,7 +392,7 @@ const PostmanGraphViewer = () => {
     return { kind: "collection", data };
   }, []);
 
-  const handleVisualize = useCallback((data) => {
+  const handleVisualize = useCallback((data, { sourceUrl = "" } = {}) => {
     const parsed = parseCollection(data, setStats);
     const format = Array.isArray(data) ? "Custom JSON" : formatLabel(data);
     setDetectedFormat(format);
@@ -369,7 +400,11 @@ const PostmanGraphViewer = () => {
     setCollapsedFolders(new Set(parsed.filter((n) => n.type === "folder").map((n) => n.id)));
     setSearchQuery(""); setFilterMethod("all"); setCenterTab("map");
     setLiveResponses({});
-    setPlaygroundOrigin("");
+    // OpenAPI defines a relative server URL as relative to where the
+    // document itself was served from, so a spec fetched from a URL already
+    // says where its "/api/v3" lives.
+    setPlaygroundOrigin(relativeServerOrigin(parsed, sourceUrl));
+    setVariableOverrides({});
     setAssistantThread([]);
     setAiHighlight(new Set());
     setImportedAt(new Date().toISOString());
@@ -602,7 +637,7 @@ const PostmanGraphViewer = () => {
       if (e.key === "Escape") {
         if (showPalette) { setShowPalette(false); return; }
         if (showAssistant && !typing) { setShowAssistant(false); return; }
-        setSelectedNode(null); setShowPlayground(false);
+        setSelectedNode(null); setShowPlayground(false); setPlaygroundScratch(false);
         return;
       }
       if (showPalette) return;
@@ -769,10 +804,16 @@ const PostmanGraphViewer = () => {
     const target = selectedNode?.type === "request"
       ? selectedNode
       : nodes.find((n) => n.type === "request");
-    if (!target) return;
-    if (target !== selectedNode) setSelectedNode(target);
+    if (target && target !== selectedNode) setSelectedNode(target);
+    // Nothing to pick from: open blank rather than not at all.
+    setPlaygroundScratch(!target);
     setShowPlayground(true);
   }, [selectedNode, nodes]);
+
+  const openBlankRequest = useCallback(() => {
+    setPlaygroundScratch(true);
+    setShowPlayground(true);
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen?.();
@@ -840,6 +881,7 @@ const PostmanGraphViewer = () => {
     { id: "import", group: "Actions", icon: Plus, label: "Import API", hint: "Back to the import screen", keywords: "upload paste url new spec", run: () => setView("input") },
     { id: "search", group: "Actions", icon: Search, label: "Search endpoints", hint: "Ctrl /", keywords: "find filter", run: () => { setSidebarOpen(true); setTimeout(() => searchInputRef.current?.focus(), 30); } },
     { id: "playground", group: "Actions", icon: Play, label: "Open playground", hint: "Send a real request", keywords: "try request http send", run: openPlayground },
+    { id: "playground-new", group: "Actions", icon: Play, label: "New request", hint: "Test any URL from scratch", keywords: "blank playground try request http send", run: openBlankRequest },
     { id: "assistant", group: "Actions", icon: WandSparkles, label: "Ask the map", hint: "Ctrl I · AI assistant over this spec", keywords: "ai assistant chat ask question llm explain", run: () => setShowAssistant(true) },
     { id: "enrich", group: "Actions", icon: WandSparkles, label: "Draft missing documentation with AI", hint: "Summaries, descriptions, operation ids, tags", keywords: "ai docs describe summary operationid tags enrich generate", run: () => setCenterTab("audit") },
     { id: "fit", group: "Canvas", icon: Scan, label: "Fit graph", keywords: "zoom fit all", run: () => { setCenterTab("map"); handleFitView(); } },
@@ -874,7 +916,7 @@ const PostmanGraphViewer = () => {
     { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
     { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
     { id: "multi", group: "Tools", icon: Network, label: "Multi-service graph", keywords: "services dependencies", run: () => openFullView("multiservice") },
-  ], [openPlayground, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush]);
+  ], [openPlayground, openBlankRequest, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush]);
 
   const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
   const liveResponse = selectedNode ? liveResponses[selectedNode.id] : null;
@@ -888,7 +930,7 @@ const PostmanGraphViewer = () => {
       liveResponse={liveResponse}
       variables={variables}
       variableFlow={variableFlow}
-      onTest={() => setShowPlayground(true)}
+      onTest={() => { setPlaygroundScratch(false); setShowPlayground(true); }}
       onSelectNode={selectAndReveal}
       onClose={() => setInspectorOpen(false)}
     />
@@ -896,16 +938,23 @@ const PostmanGraphViewer = () => {
 
   const modals = (
     <>
-      {showPlayground && selectedNode?.type === "request" && (
+      {showPlayground && (playgroundScratch || selectedNode?.type === "request") && (
         <ApiPlaygroundModal
-          node={selectedNode}
-          onClose={() => setShowPlayground(false)}
+          key={playgroundScratch ? "scratch" : selectedNode.id}
+          node={playgroundScratch ? null : selectedNode}
+          onClose={() => { setShowPlayground(false); setPlaygroundScratch(false); }}
+          onNewRequest={() => setPlaygroundScratch(true)}
           onUpdate={(nodeId, updates) => {
             setNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, ...updates } : n));
             setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
           }}
           onResponse={(nodeId, result) => setLiveResponses((prev) => ({ ...prev, [nodeId]: result }))}
           variables={variables}
+          overrides={variableOverrides}
+          onVariableChange={setVariableOverride}
+          onVariableReset={clearVariableOverride}
+          environmentName={activeEnvironment?.name || null}
+          onOpenEnvironments={() => { setShowPlayground(false); openTool(setShowEnvManager); }}
           servers={declaredServers}
           origin={playgroundOrigin}
           onOriginChange={setPlaygroundOrigin}
@@ -933,7 +982,7 @@ const PostmanGraphViewer = () => {
       {/* Phase 2 modals */}
       {showAutoImport && (
         <AutoImportPanel
-          onImport={(data) => handleVisualize(data)}
+          onImport={(data, meta) => handleVisualize(data, meta)}
           onClose={() => setShowAutoImport(false)}
         />
       )}
