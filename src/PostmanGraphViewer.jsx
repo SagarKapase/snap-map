@@ -444,14 +444,19 @@ const PostmanGraphViewer = () => {
   const openPostmanPush = useCallback(() => {
     if (!nodes.length) return;
     try {
-      const text = convertSpec("postman", { spec: collection, nodes }).text;
+      const text = convertSpec("postman", {
+        spec: collection,
+        nodes,
+        origin: playgroundOrigin,
+        variables,
+      }).text;
       setPushPayload(JSON.parse(text));
       setPushLabel(/postman/i.test(detectedFormat) ? "" : `converted from ${detectedFormat}`);
       setShowPostman(true);
     } catch {
       setPushPayload(null);
     }
-  }, [collection, nodes, detectedFormat]);
+  }, [collection, nodes, detectedFormat, playgroundOrigin, variables]);
 
   /** Apply the chosen repairs and reload the workspace from the result. */
   const handleApplyFixes = useCallback((ids) => {
@@ -1160,6 +1165,8 @@ const PostmanGraphViewer = () => {
                   graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"}
                   spec={collection}
                   sourceFormat={detectedFormat}
+                  origin={playgroundOrigin}
+                  variables={variables}
                   open={exportOpen}
                   onOpenChange={setExportOpen}
                 />

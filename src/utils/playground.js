@@ -422,9 +422,19 @@ export const buildRequest = (draft, variables = null) => {
     if (idx === -1) headers.push({ key, value });
     else headers[idx] = { key, value };
   };
+  // A line break inside a header makes fetch() throw before anything is
+  // sent; a pasted value with a trailing newline is common enough to fix
+  // rather than refuse.
+  let brokeLines = false;
+  const oneLine = (text) => {
+    const clean = String(text).replace(/[\r\n]+/g, " ").trim();
+    if (clean !== String(text).trim()) brokeLines = true;
+    return clean;
+  };
   (draft.headers || [])
     .filter((h) => h.enabled !== false && String(h.key || "").trim())
-    .forEach((h) => headers.push({ key: fill(h.key).trim(), value: fill(h.value) }));
+    .forEach((h) => headers.push({ key: oneLine(fill(h.key)), value: oneLine(fill(h.value)) }));
+  if (brokeLines) warnings.push("A header contained a line break, which was replaced with a space.");
 
   // ── Auth ──
   const auth = draft.auth || blankAuth();

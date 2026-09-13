@@ -307,7 +307,9 @@ export const parseOpenApi = (data, setStats) => {
   };
   allNodes.push(root);
 
-  const tagGroups = {};
+  // Keyed off a null prototype: a tag called "__proto__" is a legal string
+  // in a spec and must not reach Object.prototype.
+  const tagGroups = Object.create(null);
   const paths = data.paths || {};
 
   Object.entries(paths).forEach(([pathStr, pathObj]) => {
@@ -317,8 +319,8 @@ export const parseOpenApi = (data, setStats) => {
       if (!operation) return;
 
       const tags =
-        operation.tags && operation.tags.length > 0
-          ? operation.tags
+        Array.isArray(operation.tags) && operation.tags.length > 0
+          ? operation.tags.map((t) => String(t ?? "Default"))
           : ["Default"];
       const upperMethod = method.toUpperCase();
 
@@ -481,6 +483,7 @@ export const parseCustomApi = (data, setStats) => {
 
   const addEndpoints = (endpoints, parentId) => {
     endpoints.forEach((ep) => {
+      if (!ep || typeof ep !== "object") return;
       const norm = normalizeEndpoint(ep);
       const m = norm.method.toLowerCase();
       s[m] = (s[m] || 0) + 1;
@@ -850,6 +853,9 @@ export const parsePostmanCollection = (rawData, setStats) => {
    * auth and every variable declared above it.
    */
   const processItem = (item, parentId, ancestors) => {
+    // A null or scalar entry in `item` is not a request; skipping it beats
+    // failing the whole import over one bad line.
+    if (!item || typeof item !== "object") return;
     const nodeId = `node-${id++}`;
 
     if (item.item && Array.isArray(item.item)) {

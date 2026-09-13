@@ -90,6 +90,91 @@ export const splitOrigin = (raw) => {
   return { origin: "", rest: url };
 };
 
+const isAbsoluteUrl = (url) => /^[a-zA-Z][\w+.-]*:\/\//.test(String(url || ""));
+
+const joinUrl = (base, rest) => {
+  const left = String(base || "").replace(/\/+$/, "");
+  const right = String(rest || "");
+  if (!left) return right;
+  if (!right) return left;
+  return right.startsWith("/") ? `${left}${right}` : `${left}/${right}`;
+};
+
+/**
+ * Where a request's path starts.
+ *
+ * An OpenAPI request is `server + template`, and the server is the whole
+ * thing — "https://petstore.swagger.io/v2", not just the host. Splitting off
+ * the origin alone lost the "/v2" on the way out, so every exported URL
+ * pointed one directory too high. Requests from other sources have no
+ * declared server, so the origin (or leading {{variable}}) is the base.
+ */
+const splitBase = (node, servers = []) => {
+  const path = String(node?.path || "");
+  if (typeof node?.template === "string") {
+    const server = servers.find((url) => url && path.startsWith(url) && path.slice(url.length).startsWith("/"));
+    if (server) return { base: server, rest: path.slice(server.length) || "/" };
+    if (path === node.template || !path) return { base: "", rest: node.template || "/" };
+  }
+  const { origin, rest } = splitOrigin(path);
+  return { base: origin, rest };
+};
+
+/** The base most requests share, and how many different ones there are. */
+const primaryBaseOf = (requests, servers) => {
+  const count = new Map();
+  requests.forEach((node) => {
+    const { base } = splitBase(node, servers);
+    count.set(base, (count.get(base) || 0) + 1);
+  });
+  const sorted = [...count.entries()].sort((a, b) => b[1] - a[1]);
+  return { primary: sorted[0]?.[0] ?? "", distinct: count.size };
+};
+
+const declaredServersOf = (nodes) =>
+  (nodes.find((n) => n.type === "root")?.servers || []).filter((s) => typeof s === "string");
+
+/**
+ * The base as something a client can actually call, using what the
+ * workspace knows: a relative server gets the host the user gave the
+ * playground, a {{variable}} gets its current value. Returns the value and
+ * whether it is complete.
+ */
+const effectiveBase = (base, { origin = "", variables = null, spec = null } = {}) => {
+  const declared = postmanVariables(spec);
+  const filled = String(base || "").replace(/\{\{([^}]+)\}\}/g, (whole, rawName) => {
+    const name = rawName.trim();
+    const live = variables?.get?.(name)?.value;
+    if (live !== undefined && live !== "") return live;
+    if (declared[name] !== undefined && declared[name] !== "") return declared[name];
+    return whole;
+  });
+  if (isAbsoluteUrl(filled)) return { value: filled, complete: true };
+  if (filled.includes("{{")) return { value: filled, complete: false };
+  if (origin) return { value: joinUrl(origin, filled), complete: isAbsoluteUrl(origin) };
+  return { value: filled, complete: false };
+};
+
+/** Every {{variable}} the exported requests mention. */
+const variablesReferencedBy = (requests) => {
+  const names = new Set();
+  const eat = (text) => {
+    for (const m of String(text ?? "").matchAll(/\{\{\s*([^{}$\s][^{}]*?)\s*\}\}/g)) names.add(m[1]);
+  };
+  requests.forEach((node) => {
+    eat(node.path);
+    (node.headers || []).forEach((h) => { eat(h?.key); eat(h?.value); });
+    (node.params || []).forEach((p) => eat(p?.example));
+    (node.formFields || []).forEach((f) => { eat(f?.key); eat(f?.value); });
+    (node.auth || []).forEach((a) => (a?.values || []).forEach((v) => eat(v?.value)));
+    eat(node.rawBody);
+    eat(typeof node.body === "string" ? node.body : node.body != null ? JSON.stringify(node.body) : "");
+    eat(node.graphql?.query);
+    eat(node.graphql?.variables);
+  });
+  return [...names];
+};
+
 /** `/users/:id` and `/users/{id}` both mean the same thing; OpenAPI spells it `{id}`. */
 const toPathTemplate = (rest) => {
   const path = String(rest || "/").split("?")[0].split("#")[0];
@@ -528,35 +613,38 @@ const postmanVariables = (spec) => {
   return out;
 };
 
-const openApiFromNodes = ({ spec, nodes }, notes) => {
+const openApiFromNodes = ({ spec, nodes, origin = "", variables: live = null }, notes) => {
   const meta = collectionMeta(spec, nodes);
   const requests = nodes.filter((n) => n.type === "request");
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const variables = postmanVariables(spec);
+  const servers = declaredServersOf(nodes);
 
-  // The origin most endpoints share becomes the server; the rest get their own
+  // The base most endpoints share becomes the server; the rest get their own
   // at the path level, which is exactly what OpenAPI's per-path servers are for.
-  const originCount = new Map();
-  requests.forEach((node) => {
-    const { origin } = splitOrigin(node.path);
-    if (origin) originCount.set(origin, (originCount.get(origin) || 0) + 1);
-  });
-  const primaryOrigin =
-    [...originCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  const { primary: primaryBase } = primaryBaseOf(requests, servers);
 
-  const serverFor = (origin) => {
-    const server = { url: origin.replace(/\{\{([^}]+)\}\}/g, (_, name) => `{${name}}`) };
-    const used = [...origin.matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1]);
+  const serverFor = (base) => {
+    const url = base.replace(/\{\{([^}]+)\}\}/g, (_, name) => `{${name.trim()}}`);
+    const server = { url: url || "/" };
+    const used = [...base.matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1].trim());
     if (used.length) {
       server.variables = {};
       used.forEach((name) => {
-        server.variables[name] = { default: variables[name] ?? "" };
-        if (variables[name] === undefined) {
+        const value = live?.get?.(name)?.value ?? variables[name];
+        server.variables[name] = { default: value ?? "" };
+        if (value === undefined) {
           notes.add(
             `The collection uses the variable "${name}" in its URLs but never declares a value for it.`,
           );
         }
       });
+    } else if (!isAbsoluteUrl(url)) {
+      // A relative server is legal, but only means something next to the
+      // document; the host the workspace was given makes it usable anywhere.
+      const filled = effectiveBase(base, { origin });
+      if (filled.complete) server.url = filled.value;
+      else notes.add(`The server URL "${server.url}" is relative; set the host before using this document elsewhere.`);
     }
     return server;
   };
@@ -569,7 +657,7 @@ const openApiFromNodes = ({ spec, nodes }, notes) => {
     notes.add("The source declared no API version; 1.0.0 was written.");
   }
   if (meta.description) out.info.description = meta.description;
-  if (primaryOrigin) out.servers = [serverFor(primaryOrigin)];
+  if (primaryBase || origin) out.servers = [serverFor(primaryBase)];
 
   const tags = [];
   const seenTags = new Set();
@@ -578,8 +666,8 @@ const openApiFromNodes = ({ spec, nodes }, notes) => {
 
   const paths = {};
   requests.forEach((node) => {
-    const { origin, rest } = splitOrigin(node.path);
-    const template = node.template || toPathTemplate(rest);
+    const { base, rest } = splitBase(node, servers);
+    const template = toPathTemplate(rest);
     const method = String(node.method || "GET").toLowerCase();
     if (!HTTP_METHODS.includes(method)) {
       notes.add(`"${node.method}" is not an HTTP method OpenAPI describes; ${node.name} was skipped.`);
@@ -692,8 +780,8 @@ const openApiFromNodes = ({ spec, nodes }, notes) => {
 
     // A request pointing somewhere other than the main server keeps its own.
     const pathItem = paths[template];
-    if (origin && origin !== primaryOrigin) {
-      pathItem.servers = [serverFor(origin)];
+    if (base !== primaryBase) {
+      pathItem.servers = [serverFor(base)];
     }
     pathItem[method] = operation;
   });
@@ -1091,24 +1179,31 @@ const downgradeToSwagger2 = (source, notes) => {
 const POSTMAN_SCHEMA =
   "https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
 
-const postmanUrl = (node, primaryOrigin) => {
-  const { origin, rest } = splitOrigin(node.path);
-  const template = node.template || toPathTemplate(rest);
-  const host = origin && origin === primaryOrigin ? "{{baseUrl}}" : origin;
-  const pathText = toPostmanPath(template);
+/**
+ * Postman's importer writes every URL as {{baseUrl}} plus the path and puts
+ * the server in a collection variable; doing the same means a collection
+ * exported from here behaves like one Postman made itself.
+ */
+const postmanUrl = (node, servers, primaryBase, hostFor) => {
+  const { base, rest } = splitBase(node, servers);
+  const host = base === primaryBase ? "{{baseUrl}}" : hostFor(base);
+  const pathText = toPostmanPath(toPathTemplate(rest));
+  // An optional parameter with nothing to send is listed but switched off;
+  // "?verbose=" would send an empty value the spec never asked for.
   const query = (node.params || [])
-    .filter((p) => p.in === "query" && p.name)
-    .map((p) => ({
-      key: p.name,
-      value: p.example !== undefined ? String(p.example) : "",
-      ...(p.description ? { description: p.description } : {}),
-    }));
+    .filter((p) => p && p.in === "query" && p.name)
+    .map((p) => {
+      const hasValue = p.example !== undefined && p.example !== "";
+      const row = { key: p.name, value: hasValue ? String(p.example) : "" };
+      if (p.description) row.description = p.description;
+      if (!hasValue && !p.required) row.disabled = true;
+      return row;
+    });
+  const enabled = query.filter((q) => !q.disabled);
 
   const raw =
     `${host}${pathText}` +
-    (query.length
-      ? `?${query.map((q) => `${q.key}=${q.value}`).join("&")}`
-      : "");
+    (enabled.length ? `?${enabled.map((q) => `${q.key}=${q.value}`).join("&")}` : "");
 
   const url = { raw };
   if (host) url.host = [host];
@@ -1116,7 +1211,7 @@ const postmanUrl = (node, primaryOrigin) => {
   if (query.length) url.query = query;
 
   const variables = (node.params || [])
-    .filter((p) => p.in === "path" && p.name)
+    .filter((p) => p && p.in === "path" && p.name)
     .map((p) => ({
       key: p.name,
       value: p.example !== undefined ? String(p.example) : "",
@@ -1127,37 +1222,148 @@ const postmanUrl = (node, primaryOrigin) => {
   return url;
 };
 
-const postmanAuthFor = (auth) => {
+/**
+ * Credentials as Postman's own importer writes them: a variable per
+ * credential, declared on the collection, so the request runs as soon as
+ * the variable is filled in. A collection that already carried values keeps
+ * them.
+ */
+const postmanAuthFor = (auth, declare) => {
   if (!auth) return null;
   const type = String(auth.type || auth.scheme || "").toLowerCase();
-  if (type === "bearer" || auth.scheme === "bearer") return { type: "bearer" };
-  if (type === "basic" || auth.scheme === "basic") return { type: "basic" };
+  const scheme = String(auth.scheme || "").toLowerCase();
+  const own = (key) => (auth.values || []).find((v) => v?.key === key)?.value;
+  const credential = (key, fallbackName) => {
+    const value = own(key);
+    if (value !== undefined && value !== "") return String(value);
+    declare(fallbackName);
+    return `{{${fallbackName}}}`;
+  };
+
+  if (type === "bearer" || scheme === "bearer") {
+    return { type: "bearer", bearer: [{ key: "token", value: credential("token", "bearerToken"), type: "string" }] };
+  }
+  if (type === "basic" || scheme === "basic") {
+    return {
+      type: "basic",
+      basic: [
+        { key: "username", value: credential("username", "username"), type: "string" },
+        { key: "password", value: credential("password", "password"), type: "string" },
+      ],
+    };
+  }
   if (type === "apikey") {
+    const key = own("key") || auth.headerName || "";
+    const location = own("in") || auth.location || "header";
     const out = { type: "apikey", apikey: [] };
-    if (auth.headerName) out.apikey.push({ key: "key", value: auth.headerName });
-    if (auth.location) out.apikey.push({ key: "in", value: auth.location });
+    if (key) out.apikey.push({ key: "key", value: String(key), type: "string" });
+    out.apikey.push({ key: "value", value: credential("value", "apiKey"), type: "string" });
+    out.apikey.push({ key: "in", value: location === "query" ? "query" : "header", type: "string" });
     return out;
   }
-  if (type === "oauth2") return { type: "oauth2" };
+  if (type === "oauth2" || type === "openidconnect") {
+    return {
+      type: "oauth2",
+      oauth2: [
+        { key: "accessToken", value: credential("accessToken", "accessToken"), type: "string" },
+        { key: "addTokenTo", value: "header", type: "string" },
+      ],
+    };
+  }
   return null;
 };
 
-const postmanFromNodes = ({ spec, nodes }, notes) => {
+const RAW_LANGUAGE_TYPES = {
+  json: "application/json",
+  xml: "application/xml",
+  html: "text/html",
+  javascript: "application/javascript",
+  text: "text/plain",
+};
+
+/** The request body in whichever of Postman's modes the node describes. */
+const postmanBodyFor = (node) => {
+  const mode = node.bodyMode;
+  if (mode === "formdata" || mode === "urlencoded") {
+    const rows = (node.formFields || [])
+      .filter((f) => f && f.key)
+      .map((f) => {
+        const row = { key: f.key, type: f.type === "file" ? "file" : "text" };
+        if (f.type === "file") row.src = f.value || "";
+        else row.value = String(f.value ?? "");
+        if (f.disabled) row.disabled = true;
+        if (f.description) row.description = f.description;
+        return row;
+      });
+    return { body: { mode, [mode]: rows }, contentType: null };
+  }
+  if (mode === "graphql") {
+    return {
+      body: { mode: "graphql", graphql: { query: node.graphql?.query || "", variables: node.graphql?.variables || "" } },
+      contentType: "application/json",
+    };
+  }
+  if (mode === "file") return { body: { mode: "file", file: { src: node.fileSrc || "" } }, contentType: null };
+
+  const raw =
+    typeof node.rawBody === "string" && node.rawBody
+      ? node.rawBody
+      : node.body == null
+        ? ""
+        : typeof node.body === "string"
+          ? node.body
+          : JSON.stringify(node.body, null, 2);
+  if (!raw && mode !== "raw") return null;
+  const language = RAW_LANGUAGE_TYPES[node.language] ? node.language : "json";
+  return {
+    body: { mode: "raw", raw, options: { raw: { language } } },
+    contentType: node.contentType || RAW_LANGUAGE_TYPES[language],
+  };
+};
+
+const postmanFromNodes = ({ spec, nodes, origin = "", variables: live = null }, notes) => {
   const meta = collectionMeta(spec, nodes);
   const requests = nodes.filter((n) => n.type === "request");
+  const servers = declaredServersOf(nodes);
 
-  const originCount = new Map();
-  requests.forEach((node) => {
-    const { origin } = splitOrigin(node.path);
-    if (origin) originCount.set(origin, (originCount.get(origin) || 0) + 1);
-  });
-  const primaryOrigin =
-    [...originCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
-  if (originCount.size > 1) {
+  const { primary: primaryBase, distinct } = primaryBaseOf(requests, servers);
+  if (distinct > 1) {
     notes.add(
       "Requests point at more than one host; only the most common one became {{baseUrl}}.",
     );
   }
+
+  // Collection variables: the base URL, every credential placeholder, and
+  // every {{variable}} the requests mention that the workspace has a value
+  // for — so an import into Postman runs without retyping them.
+  const collectionVars = new Map();
+  const declare = (key, value = "") => {
+    if (!key) return;
+    const known = live?.get?.(key);
+    const current = collectionVars.get(key);
+    const next = value || (known && !known.secret ? known.value : "") || "";
+    if (current === undefined || (!current && next)) collectionVars.set(key, next);
+  };
+
+  const base = effectiveBase(primaryBase, { origin, variables: live, spec });
+  declare("baseUrl", base.value);
+  if (!base.complete) {
+    notes.add(
+      base.value
+        ? `The spec declares the relative server "${base.value}", so {{baseUrl}} has no host yet. Set it on the collection in Postman.`
+        : "The spec declares no server, so {{baseUrl}} is empty. Set it on the collection in Postman.",
+    );
+  }
+
+  // A second host keeps its own literal base unless it is a variable.
+  const hostFor = (other) => {
+    const filled = effectiveBase(other, { origin, variables: live, spec });
+    return filled.complete ? filled.value : other;
+  };
+
+  variablesReferencedBy(requests)
+    .filter((name) => name !== "baseUrl")
+    .forEach((name) => declare(name));
 
   const toItem = (node) => {
     const request = {
@@ -1165,31 +1371,25 @@ const postmanFromNodes = ({ spec, nodes }, notes) => {
       header: (node.headers || [])
         .filter((h) => h && h.key)
         .map((h) => ({ key: h.key, value: String(h.value ?? ""), type: "text" })),
-      url: postmanUrl(node, primaryOrigin),
+      url: postmanUrl(node, servers, primaryBase, hostFor),
     };
+    (node.disabledHeaders || [])
+      .filter((h) => h && h.key)
+      .forEach((h) => request.header.push({ key: h.key, value: String(h.value ?? ""), type: "text", disabled: true }));
     if (node.description) request.description = node.description;
 
-    if (node.body != null) {
-      const raw =
-        typeof node.body === "string" ? node.body : JSON.stringify(node.body, null, 2);
-      request.body = {
-        mode: "raw",
-        raw,
-        options: { raw: { language: "json" } },
-      };
+    const bodyInfo = postmanBodyFor(node);
+    if (bodyInfo) {
+      request.body = bodyInfo.body;
       const hasContentType = request.header.some(
-        (h) => h.key.toLowerCase() === "content-type",
+        (h) => h.key.toLowerCase() === "content-type" && !h.disabled,
       );
-      if (!hasContentType) {
-        request.header.push({
-          key: "Content-Type",
-          value: "application/json",
-          type: "text",
-        });
+      if (bodyInfo.contentType && !hasContentType) {
+        request.header.push({ key: "Content-Type", value: bodyInfo.contentType, type: "text" });
       }
     }
 
-    const auth = postmanAuthFor((node.auth || [])[0]);
+    const auth = postmanAuthFor((node.auth || [])[0], declare);
     if (auth) request.auth = auth;
 
     const item = { name: node.name || `${request.method} ${node.path}`, request };
@@ -1240,15 +1440,114 @@ const postmanFromNodes = ({ spec, nodes }, notes) => {
     item: build("node-root"),
   };
   if (meta.description) out.info.description = meta.description;
-  if (primaryOrigin) {
-    out.variable = [{ key: "baseUrl", value: primaryOrigin, type: "string" }];
-  }
-  if (requests.some((n) => (n.auth || []).length)) {
+  out.variable = [...collectionVars.entries()].map(([key, value]) => ({ key, value, type: "string" }));
+
+  const credentialVars = [...collectionVars.keys()].filter((k) =>
+    ["bearerToken", "apiKey", "username", "password", "accessToken"].includes(k) && !collectionVars.get(k),
+  );
+  if (credentialVars.length) {
     notes.add(
-      "Auth types were carried over, but Postman needs the credentials themselves filled in before a request will run.",
+      `Credentials are read from the collection variables ${credentialVars.map((k) => `{{${k}}}`).join(", ")}; fill them in on the collection before a request will run.`,
     );
   }
+  const filledFromWorkspace = [...collectionVars.keys()].filter(
+    (k) => k !== "baseUrl" && collectionVars.get(k) && live?.get?.(k)?.value === collectionVars.get(k),
+  );
+  if (filledFromWorkspace.length) {
+    notes.add(`Values for ${filledFromWorkspace.map((k) => `{{${k}}}`).join(", ")} were taken from this workspace.`);
+  }
   return out;
+};
+
+/**
+ * A Postman collection that already is one is passed through whole, but the
+ * values the workspace holds for its variables — an environment, or what was
+ * typed into the playground — are written onto it, which is what makes the
+ * import run straight away.
+ */
+const postmanPassthrough = (spec, { variables: live = null }, notes) => {
+  const out = clone(spec);
+  if (!out.info) out.info = { name: spec?.name || "API" };
+  if (out.info.schema !== POSTMAN_SCHEMA) {
+    notes.add(
+      out.info.schema
+        ? "The collection declared an older schema; it was restamped as v2.1."
+        : "The collection declared no schema; it was stamped as v2.1.",
+    );
+    out.info.schema = POSTMAN_SCHEMA;
+  }
+
+  if (live && live.size) {
+    const declaredVars = Array.isArray(out.variable) ? out.variable : [];
+    const byKey = new Map(declaredVars.filter((v) => v && v.key).map((v) => [v.key, v]));
+    const filled = [];
+    const skipped = [];
+    const consider = (key) => {
+      const known = live.get(key);
+      if (!known || known.value === undefined || known.value === "") return;
+      if (known.secret) {
+        skipped.push(key);
+        return;
+      }
+      const row = byKey.get(key);
+      if (row) {
+        if (String(row.value ?? "") === known.value) return;
+        row.value = known.value;
+      } else {
+        const fresh = { key, value: known.value, type: "string" };
+        declaredVars.push(fresh);
+        byKey.set(key, fresh);
+      }
+      filled.push(key);
+    };
+    byKey.forEach((_, key) => consider(key));
+    const text = JSON.stringify(spec);
+    for (const m of text.matchAll(/\{\{\s*([^{}$\s][^{}]*?)\s*\}\}/g)) {
+      if (!byKey.has(m[1])) consider(m[1]);
+    }
+    if (declaredVars.length) out.variable = declaredVars;
+    if (filled.length) {
+      notes.add(`Values for ${filled.map((k) => `{{${k}}}`).join(", ")} were taken from this workspace.`);
+    }
+    if (skipped.length) {
+      notes.add(`${skipped.map((k) => `{{${k}}}`).join(", ")} ${skipped.length === 1 ? "is" : "are"} marked secret and left out; export a Postman environment for those.`);
+    }
+  }
+  notes.add("The source is already a Postman collection, so everything else was kept as-is.");
+  return out;
+};
+
+/**
+ * Every variable the workspace knows, as a Postman environment file: the
+ * collection's own, folder ones, the active environment and anything typed
+ * over them in the playground, already resolved to one value each.
+ */
+const postmanEnvironmentFrom = ({ spec, nodes, variables: live = null, origin = "" }, notes) => {
+  const meta = collectionMeta(spec, nodes);
+  const values = [];
+  const seen = new Set();
+  (live ? [...live.values()] : []).forEach((v) => {
+    if (!v?.key || seen.has(v.key)) return;
+    seen.add(v.key);
+    values.push({ key: v.key, value: String(v.value ?? ""), enabled: true, type: v.secret ? "secret" : "default" });
+  });
+  if (!seen.has("baseUrl")) {
+    const servers = declaredServersOf(nodes);
+    const requests = nodes.filter((n) => n.type === "request");
+    const base = effectiveBase(primaryBaseOf(requests, servers).primary, { origin, variables: live, spec });
+    if (base.value) values.push({ key: "baseUrl", value: base.value, enabled: true, type: "default" });
+  }
+  if (!values.length) throw new Error("There are no variables to export yet.");
+  if (values.some((v) => v.type === "secret")) {
+    notes.add("Secret variables are included with their values; keep this file out of version control.");
+  }
+  return {
+    name: meta.title,
+    values,
+    _postman_variable_scope: "environment",
+    _postman_exported_at: new Date().toISOString(),
+    _postman_exported_using: "Vizroute",
+  };
 };
 
 /**
@@ -1268,22 +1567,21 @@ export const postmanItemsForNodes = (nodes = [], name = "Generated") => {
 
 // ─── Nodes → .http request file ──────────────
 
-const httpFromNodes = ({ spec, nodes }, notes) => {
+const httpFromNodes = ({ spec, nodes, origin = "", variables: live = null }, notes) => {
   const meta = collectionMeta(spec, nodes);
   const requests = nodes.filter((n) => n.type === "request");
   const byId = new Map(nodes.map((n) => [n.id, n]));
-
-  const originCount = new Map();
-  requests.forEach((node) => {
-    const { origin } = splitOrigin(node.path);
-    if (origin) originCount.set(origin, (originCount.get(origin) || 0) + 1);
-  });
-  const primaryOrigin =
-    [...originCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  const servers = declaredServersOf(nodes);
+  const { primary: primaryBase } = primaryBaseOf(requests, servers);
+  const base = effectiveBase(primaryBase, { origin, variables: live, spec });
 
   const lines = [`# ${meta.title}`];
   if (meta.version) lines.push(`# Version ${meta.version}`);
-  if (primaryOrigin) lines.push("", `@baseUrl = ${primaryOrigin}`);
+  lines.push("", `@baseUrl = ${base.value}`);
+  if (!base.complete) {
+    lines.push("# ^ the spec gives no host for this; fill it in before sending");
+    notes.add("The spec declares no complete server URL; set @baseUrl at the top of the file.");
+  }
   lines.push("");
 
   let lastFolder = null;
@@ -1291,12 +1589,13 @@ const httpFromNodes = ({ spec, nodes }, notes) => {
     const folder = node.parentId ? byId.get(node.parentId) : null;
     if (folder?.type === "folder" && folder.name !== lastFolder) {
       lastFolder = folder.name;
-      lines.push(`# ── ${folder.name} ${"─".repeat(Math.max(0, 40 - folder.name.length))}`, "");
+      const label = String(folder.name || "Untitled");
+      lines.push(`# ── ${label} ${"─".repeat(Math.max(0, 40 - label.length))}`, "");
     }
 
-    const { origin, rest } = splitOrigin(node.path);
-    const template = node.template || toPathTemplate(rest);
-    const host = origin && origin === primaryOrigin ? "{{baseUrl}}" : origin;
+    const { base: nodeBase, rest } = splitBase(node, servers);
+    const template = toPathTemplate(rest);
+    const host = nodeBase === primaryBase ? "{{baseUrl}}" : nodeBase;
     const query = (node.params || [])
       .filter((p) => p.in === "query" && p.name && p.example !== undefined && p.example !== "")
       .map((p) => `${p.name}=${p.example}`)
@@ -1374,6 +1673,13 @@ export const EXPORT_TARGETS = [
     mime: "application/json;charset=utf-8",
   },
   {
+    id: "postman-environment",
+    label: "Postman environment",
+    hint: "variables",
+    ext: "postman_environment.json",
+    mime: "application/json;charset=utf-8",
+  },
+  {
     id: "http",
     label: "HTTP request file",
     hint: ".http",
@@ -1406,19 +1712,30 @@ const toYaml = (document) =>
  *
  * `nodes` should be the complete node list, not the filtered view — an export
  * that silently dropped whatever was collapsed or filtered out would be worse
- * than no export at all.
+ * than no export at all. `origin` is the host the playground was given for a
+ * relative spec and `variables` the workspace's resolved variables; both go
+ * into the document so it works where it lands, not only here.
  */
-export const convertSpec = (targetId, { spec = null, nodes = [] } = {}) => {
+export const convertSpec = (
+  targetId,
+  { spec = null, nodes = [], origin = "", variables = null } = {},
+) => {
   const target = EXPORT_TARGETS.find((t) => t.id === targetId);
   if (!target) throw new Error(`Unknown export format "${targetId}".`);
+
+  const notes = noteBook();
+  const source = { spec, nodes, origin, variables };
+
+  if (targetId === "postman-environment") {
+    const text = JSON.stringify(postmanEnvironmentFrom(source, notes), null, 2);
+    return { text, notes: notes.list, ext: target.ext, mime: target.mime };
+  }
 
   const requests = nodes.filter((n) => n.type === "request");
   if (!requests.length && !isOpenApiSource(spec)) {
     throw new Error("There are no endpoints to export yet.");
   }
 
-  const notes = noteBook();
-  const source = { spec, nodes };
   let text;
 
   switch (targetId) {
@@ -1441,21 +1758,9 @@ export const convertSpec = (targetId, { spec = null, nodes = [] } = {}) => {
     case "postman": {
       // A collection that is already a collection is passed through whole:
       // rebuilding it would quietly drop the scripts, tests and variables the
-      // parser never reads. Only the schema declaration is brought up to date.
+      // parser never reads. Only the schema and the variable values change.
       if (isObject(spec) && spec.info && Array.isArray(spec.item)) {
-        const passthrough = clone(spec);
-        if (passthrough.info.schema !== POSTMAN_SCHEMA) {
-          notes.add(
-            passthrough.info.schema
-              ? "The collection declared an older schema; it was restamped as v2.1."
-              : "The collection declared no schema; it was stamped as v2.1.",
-          );
-          passthrough.info.schema = POSTMAN_SCHEMA;
-        }
-        notes.add(
-          "The source is already a Postman collection, so everything else was kept as-is.",
-        );
-        text = JSON.stringify(passthrough, null, 2);
+        text = JSON.stringify(postmanPassthrough(spec, source, notes), null, 2);
         break;
       }
       text = JSON.stringify(postmanFromNodes(source, notes), null, 2);

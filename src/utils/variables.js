@@ -42,13 +42,13 @@ export const collectVariables = ({ nodes = [], environment = null, globals = [] 
   };
 
   globals.forEach((v) => {
-    if (v.enabled === false || v.disabled) return;
+    if (!v || v.enabled === false || v.disabled) return;
     put(v.key, v.value, "globals", { secret: v.secret });
   });
 
   const root = nodes.find((n) => n.type === "root");
   (root?.variables || []).forEach((v) => {
-    if (v.disabled) return;
+    if (!v || v.disabled) return;
     put(v.key, v.value, "collection", { secret: v.secret });
   });
 
@@ -56,14 +56,14 @@ export const collectVariables = ({ nodes = [], environment = null, globals = [] 
     .filter((n) => n.type === "folder" && Array.isArray(n.variables))
     .forEach((folder) => {
       folder.variables.forEach((v) => {
-        if (v.disabled) return;
+        if (!v || v.disabled) return;
         put(v.key, v.value, `folder: ${folder.name}`, { secret: v.secret });
       });
     });
 
   if (environment) {
     (environment.variables || []).forEach((v) => {
-      if (v.enabled === false || v.disabled) return;
+      if (!v || v.enabled === false || v.disabled) return;
       put(v.key, v.value, `environment: ${environment.name}`, { secret: v.secret });
     });
   }

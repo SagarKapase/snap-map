@@ -37,6 +37,7 @@ const SPEC_ROWS = [
   { id: "openapi-yaml", label: "OpenAPI 3.1", hint: "yaml", icon: OpenApiIcon, tone: "text-[#6ba43a]" },
   { id: "swagger-json", label: "Swagger 2.0", hint: "json", icon: SwaggerIcon, tone: "text-[#85ea2d]" },
   { id: "postman", label: "Postman collection", hint: "v2.1", icon: PostmanIcon, tone: "text-[#ff6c37]" },
+  { id: "postman-environment", label: "Postman environment", hint: "variables", icon: PostmanIcon, tone: "text-[#ff6c37]" },
   { id: "http", label: "HTTP request file", hint: ".http", icon: Terminal, tone: "text-vz-blue" },
 ];
 
@@ -59,6 +60,11 @@ const ExportMenu = ({
   graphTitle = "API Graph",
   spec = null,
   sourceFormat = "",
+  // What the workspace knows beyond the document: the host given to the
+  // playground for a relative spec, and the resolved variables. Both go
+  // into the exported file so it runs where it lands.
+  origin = "",
+  variables = null,
   open: openProp,
   onOpenChange,
 }) => {
@@ -207,7 +213,7 @@ const ExportMenu = ({
     setNotesOpen(false);
     setExporting(row.id);
     try {
-      const converted = convertSpec(row.id, { spec, nodes: specNodes });
+      const converted = convertSpec(row.id, { spec, nodes: specNodes, origin, variables });
       downloadBlob(
         new Blob([converted.text], { type: converted.mime }),
         `${safeName}.${converted.ext}`,

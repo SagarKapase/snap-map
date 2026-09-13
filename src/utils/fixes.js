@@ -17,6 +17,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 /** Walk every request in an item tree, in place. */
 const eachRequest = (items, fn) => {
   (Array.isArray(items) ? items : []).forEach((item) => {
+    if (!item || typeof item !== "object") return;
     if (Array.isArray(item.item)) {
       eachRequest(item.item, fn);
       return;
