@@ -9,7 +9,7 @@ import { validateSignIn } from "../utils/auth";
 const nextFrom = (search) => {
   const next = new URLSearchParams(search).get("next") || "";
   // Only same-site paths; a full URL here would be an open redirect.
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/graph";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/home";
 };
 
 const LoginPage = () => {
@@ -83,7 +83,7 @@ const LoginPage = () => {
         <SubmitButton busy={busy}>{busy ? "Signing in…" : "Sign in"}</SubmitButton>
       </form>
       <p className="mt-4 text-center text-[12px] text-vz-dim">
-        <Link to="/graph" className="hover:text-vz-text">Continue without an account</Link>
+        <Link to="/home" className="hover:text-vz-text">Continue without an account</Link>
       </p>
     </AuthShell>
   );

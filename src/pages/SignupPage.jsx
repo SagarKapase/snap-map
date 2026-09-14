@@ -8,7 +8,7 @@ import { validateSignUp } from "../utils/auth";
 
 const nextFrom = (search) => {
   const next = new URLSearchParams(search).get("next") || "";
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/graph";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/home";
 };
 
 /** Which of the sign-up rules the typed password already meets. */

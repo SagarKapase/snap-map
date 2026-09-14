@@ -11,6 +11,7 @@ const PostmanGraphViewer = lazy(() => import("./PostmanGraphViewer"));
 const EmbedMap = lazy(() => import("./pages/EmbedMap"));
 // The multi-service map and the account pages are separate entry points.
 const ContractGraphPage = lazy(() => import("./pages/ContractGraphPage"));
+const HomePage = lazy(() => import("./pages/HomePage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const SignupPage = lazy(() => import("./pages/SignupPage"));
 
@@ -33,6 +34,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
+          <Route path="/home" element={<HomePage />} />
           <Route path="/graph" element={<ContractGraphPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />

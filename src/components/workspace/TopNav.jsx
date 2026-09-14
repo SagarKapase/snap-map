@@ -14,7 +14,8 @@ import {
   Check,
 } from "lucide-react";
 import { timeAgo } from "../../utils/analysis";
-import BrandMark from "../BrandMark";
+import ProductSwitcher from "../shell/ProductSwitcher";
+import AccountMenu from "../shell/AccountMenu";
 
 const NavButton = ({ active, icon: Icon, children, ...rest }) => (
   <button
@@ -56,7 +57,6 @@ const ToggleRow = ({ label, hint, checked, onChange }) => (
 );
 
 const TopNav = ({
-  onNavigateHome,
   onOpenPalette,
   onOpenCollections,
   onOpenDocs,
@@ -105,17 +105,7 @@ const TopNav = ({
           <PanelLeft size={15} />
         </button>
 
-        <button
-          type="button"
-          onClick={onNavigateHome}
-          title="Back to the Vizroute home page"
-          className="vz-t flex flex-shrink-0 items-center gap-2 rounded-lg px-1 py-0.5 hover:opacity-80"
-        >
-          <BrandMark size={24} />
-          <span className="text-[17px] font-bold tracking-tight text-vz-text">
-            Vizroute
-          </span>
-        </button>
+        <ProductSwitcher />
 
         <nav className="hidden min-w-0 items-center gap-1 overflow-hidden lg:flex">
           <NavButton active icon={LayoutGrid} onClick={onGoWorkspace}>
@@ -163,7 +153,6 @@ const TopNav = ({
                       <button
                         key={r.id}
                         type="button"
-                        disabled={!r.data}
                         onClick={() => {
                           onOpenRecent?.(r);
                           setOpenMenu(null);
@@ -320,6 +309,7 @@ const TopNav = ({
         >
           V
         </div>
+        <AccountMenu />
       </div>
     </header>
   );

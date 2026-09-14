@@ -202,6 +202,9 @@ const supabaseProvider = (url, anonKey) => {
     }
     if (!res.ok) {
       const message = data?.msg || data?.error_description || data?.message || `Sign-in service returned ${res.status}.`;
+      if (res.status === 429 || /rate limit/i.test(message)) {
+        throw new AuthError("Too many attempts for now. Wait a few minutes and try again.");
+      }
       throw new AuthError(/already registered|already exists/i.test(message) ? "An account with this email already exists. Sign in instead." : message);
     }
     return data;
@@ -272,9 +275,9 @@ export const getAuthProvider = () => {
   return provider;
 };
 
-/** For tests: force a provider and clear the cached session. */
+/** For tests: force a provider (`"local"` for the built-in one) and clear the cached session. */
 export const _setAuthProviderForTests = (next) => {
-  provider = next;
+  provider = next === "local" ? localProvider : next;
   memorySession = null;
 };
 

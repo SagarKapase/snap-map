@@ -12,9 +12,11 @@ globalThis.localStorage = {
 
 const good = { name: "Ada", email: "ada@example.com", password: "correct1horse" };
 
+// Unit tests never reach a network: the local provider is forced, and
+// vite.config.js blanks the Supabase keys for the test environment as well.
 beforeEach(() => {
   memory.clear();
-  _setAuthProviderForTests(null);
+  _setAuthProviderForTests("local");
 });
 
 describe("validation", () => {
@@ -41,7 +43,10 @@ describe("validation", () => {
 
 describe("local provider", () => {
   it("is the provider when no Supabase keys are configured", () => {
+    _setAuthProviderForTests(null);
+    expect(import.meta.env.VITE_SUPABASE_URL || "").toBe("");
     expect(isLocalAuth()).toBe(true);
+    _setAuthProviderForTests("local");
   });
 
   it("signs up, stores a hashed password, and starts a session", async () => {

@@ -560,10 +560,27 @@ const PostmanGraphViewer = () => {
       handleVisualize(shared);
       return;
     }
-    const demo = new URLSearchParams(window.location.search).get("demo");
+    const query = new URLSearchParams(window.location.search);
+    const demo = query.get("demo");
     if (demo && SAMPLE_DATA[demo]) {
       window.history.replaceState({}, "", window.location.pathname);
       handleLoadSample(demo);
+      return;
+    }
+    // Home links straight to a recent import or to a tool that needs no
+    // document (diff, breaking changes).
+    const recentId = query.get("recent");
+    if (recentId) {
+      window.history.replaceState({}, "", window.location.pathname);
+      const entry = getRecents().find((r) => r.id === recentId);
+      if (entry) handleOpenRecent(entry);
+      return;
+    }
+    const wanted = query.get("view");
+    if (wanted === "diff" || wanted === "breaking") {
+      window.history.replaceState({}, "", window.location.pathname);
+      setReturnView("input");
+      setView(wanted);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1047,7 +1064,6 @@ const PostmanGraphViewer = () => {
     return (
       <div className="flex h-screen w-full flex-col overflow-hidden bg-vz-bg text-vz-text">
         <TopNav
-          onNavigateHome={() => navigate("/")}
           onOpenPalette={() => setShowPalette(true)}
           onOpenCollections={() => openTool(setShowCollections)}
           onOpenDocs={() => openTool(setShowDocGenerator)}

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Plus, Trash2, Upload, Globe, Download, FileJson, Waypoints, Boxes, CopyMinus, Tags, ListChecks,
-  AlertCircle, ChevronDown, LogIn, LogOut, Sparkles, X, Share2, Check,
+  AlertCircle, ChevronDown, Sparkles, X, Share2, Check,
 } from "lucide-react";
-import BrandMark from "../components/BrandMark";
+import ProductSwitcher from "../components/shell/ProductSwitcher";
+import AccountMenu from "../components/shell/AccountMenu";
 import { useAuth } from "../components/auth/useAuth";
 import ServiceMap from "../components/contractgraph/ServiceMap";
 import { EntitiesView, DuplicatesView, ConceptsView, FindingsView, ServiceInspector } from "../components/contractgraph/Views";
@@ -46,13 +47,18 @@ const downloadJson = (name, data) => {
 };
 
 const ContractGraphPage = () => {
-  const { user, signOut, isLocal } = useAuth();
+  const { user, isLocal } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const userId = user?.id || null;
 
+  // A link from Home can name the workspace to open.
+  const wanted = new URLSearchParams(location.search).get("ws");
   const [workspaces, setWorkspaces] = useState(() => listWorkspaces(userId));
-  const [activeId, setActiveId] = useState(() => listWorkspaces(userId)[0]?.id || null);
+  const [activeId, setActiveId] = useState(() => {
+    const list = listWorkspaces(userId);
+    return (wanted && list.find((w) => w.id === wanted)?.id) || list[0]?.id || null;
+  });
   const [services, setServices] = useState([]); // with specs loaded
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("map");
@@ -81,7 +87,7 @@ const ContractGraphPage = () => {
   useEffect(() => {
     const list = listWorkspaces(userId);
     setWorkspaces(list);
-    setActiveId(list[0]?.id || null);
+    setActiveId((current) => (current && list.some((w) => w.id === current) ? current : list[0]?.id || null));
   }, [userId]);
 
   const active = workspaces.find((w) => w.id === activeId) || null;
@@ -117,6 +123,20 @@ const ContractGraphPage = () => {
     ro.observe(el);
     return () => ro.disconnect();
   }, [tab]);
+
+  // The workspace menu closes on an outside click or Escape, like every other menu.
+  const wsMenuRef = useRef(null);
+  useEffect(() => {
+    if (!wsMenuOpen) return undefined;
+    const onDown = (e) => wsMenuRef.current && !wsMenuRef.current.contains(e.target) && setWsMenuOpen(false);
+    const onKey = (e) => e.key === "Escape" && setWsMenuOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [wsMenuOpen]);
 
   const notify = (kind, text) => setNotices((n) => [...n.slice(-4), { id: Date.now() + Math.random(), kind, text }]);
   const dismiss = (id) => setNotices((n) => n.filter((x) => x.id !== id));
@@ -266,6 +286,7 @@ const ContractGraphPage = () => {
     if (name === null) return;
     renameWorkspace(userId, active.id, name);
     refresh();
+    setWsMenuOpen(false);
   };
 
   const destroy = async () => {
@@ -300,13 +321,10 @@ const ContractGraphPage = () => {
     <div className="flex h-screen flex-col bg-vz-bg text-vz-text" onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
       {/* ── Top bar ── */}
       <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-vz-line px-4">
-        <Link to="/" className="flex items-center gap-2 text-[15px] font-extrabold tracking-tight">
-          <BrandMark size={22} /> Vizroute
-        </Link>
+        <ProductSwitcher compact />
         <span className="hidden text-vz-dim sm:inline">/</span>
-        <span className="hidden text-[13px] font-semibold text-vz-soft sm:inline">Contract Graph</span>
 
-        <div className="relative ml-2">
+        <div className="relative" ref={wsMenuRef}>
           <button type="button" onClick={() => setWsMenuOpen((v) => !v)} className="vz-t flex h-9 max-w-[260px] items-center gap-2 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] text-vz-text hover:border-vz-accent/40" aria-haspopup="menu" aria-expanded={wsMenuOpen}>
             <span className="truncate">{active ? active.name : "No workspace"}</span>
             <ChevronDown size={13} className="flex-shrink-0 text-vz-dim" />
@@ -343,14 +361,7 @@ const ContractGraphPage = () => {
               </button>
             </>
           )}
-          {user ? (
-            <div className="flex items-center gap-2 pl-2">
-              <span className="hidden text-[12.5px] text-vz-soft sm:inline" title={user.email}>{user.name || user.email}</span>
-              <button type="button" onClick={() => signOut()} className="vz-t flex h-9 items-center gap-1.5 rounded-lg px-2 text-[12.5px] text-vz-dim hover:text-vz-text" title="Sign out"><LogOut size={14} /></button>
-            </div>
-          ) : (
-            <Link to="/login?next=/graph" className="vz-t flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-3.5 text-[12.5px] font-bold text-[#160a1d] hover:opacity-90"><LogIn size={14} /> Sign in</Link>
-          )}
+          <AccountMenu />
         </div>
       </header>
 
