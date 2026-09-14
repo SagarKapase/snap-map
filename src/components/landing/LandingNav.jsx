@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Github } from "lucide-react";
+import { ArrowRight, Github, LogOut } from "lucide-react";
 import BrandMark from "../BrandMark";
+import { useAuth } from "../auth/useAuth";
 
 export const GITHUB_URL = "https://github.com/SagarKapase/snap-map";
 
@@ -10,7 +11,9 @@ const LINKS = [
   { label: "Use Cases", href: "#use-cases" },
 ];
 
-const LandingNav = () => (
+const LandingNav = () => {
+  const { user, signOut } = useAuth();
+  return (
   <header className="sticky top-0 z-50 border-b border-white/5 bg-vz-bg/85 backdrop-blur-xl">
     <nav
       aria-label="Main"
@@ -37,6 +40,11 @@ const LandingNav = () => (
             </li>
           ))}
           <li>
+            <Link to="/graph" className="vz-t text-[13px] text-vz-soft hover:text-vz-text">
+              Contract Graph
+            </Link>
+          </li>
+          <li>
             <a
               href={GITHUB_URL}
               target="_blank"
@@ -50,15 +58,31 @@ const LandingNav = () => (
         </ul>
       </div>
 
-      <Link
-        to="/workspace"
-        className="vz-t flex h-[42px] flex-shrink-0 items-center gap-2 rounded-[10px] bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-5 text-[13px] font-bold text-[#190b20] shadow-[0_0_30px_rgba(168,85,247,0.12)] hover:-translate-y-px hover:shadow-[0_8px_32px_rgba(168,85,247,0.18)]"
-      >
-        Get Started
-        <ArrowRight size={15} aria-hidden="true" />
-      </Link>
+      <div className="flex flex-shrink-0 items-center gap-3">
+        {user ? (
+          <>
+            <span className="hidden text-[13px] text-vz-soft sm:inline" title={user.email}>{user.name || user.email}</span>
+            <button type="button" onClick={() => signOut()} className="vz-t flex items-center gap-1.5 text-[13px] text-vz-soft hover:text-vz-text" title="Sign out">
+              <LogOut size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
+          </>
+        ) : (
+          <Link to="/login" className="vz-t text-[13px] text-vz-soft hover:text-vz-text">
+            Sign in
+          </Link>
+        )}
+        <Link
+          to="/workspace"
+          className="vz-t flex h-[42px] flex-shrink-0 items-center gap-2 rounded-[10px] bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-5 text-[13px] font-bold text-[#190b20] shadow-[0_0_30px_rgba(168,85,247,0.12)] hover:-translate-y-px hover:shadow-[0_8px_32px_rgba(168,85,247,0.18)]"
+        >
+          Get Started
+          <ArrowRight size={15} aria-hidden="true" />
+        </Link>
+      </div>
     </nav>
   </header>
-);
+  );
+};
 
 export default LandingNav;

@@ -38,7 +38,6 @@ import EnvironmentManager from "./components/EnvironmentManager";
 import { getEnvironmentForResolution, importEnvironment } from "./utils/environments";
 import BreakingChangeDetector from "./components/BreakingChangeDetector";
 import DocGenerator from "./components/DocGenerator";
-import MultiServiceGraph from "./components/MultiServiceGraph";
 import MockServer from "./components/MockServer";
 import LoadTester from "./components/LoadTester";
 import WorkspaceManager from "./components/WorkspaceManager";
@@ -835,6 +834,16 @@ const PostmanGraphViewer = () => {
     setView(next);
   }, [view]);
 
+  /** Hand the loaded document to the multi-service map. */
+  const openContractGraph = useCallback(() => {
+    if (!collection) {
+      navigate("/graph");
+      return;
+    }
+    const name = collection?.info?.title || collection?.info?.name || collection?.name || "";
+    navigate("/graph", { state: { addSpec: collection, name } });
+  }, [collection, navigate]);
+
   // ── Sorted match list (stable order) ──
   const matchList = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -920,8 +929,8 @@ const PostmanGraphViewer = () => {
     { id: "autoimport", group: "Tools", icon: Wifi, label: "Auto-import from URL", keywords: "github sync remote", run: () => openTool(setShowAutoImport) },
     { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
     { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
-    { id: "multi", group: "Tools", icon: Network, label: "Multi-service graph", keywords: "services dependencies", run: () => openFullView("multiservice") },
-  ], [openPlayground, openBlankRequest, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush]);
+    { id: "multi", group: "Tools", icon: Network, label: "Add to Contract Graph", hint: "Map this API with the rest of the estate", keywords: "services dependencies multi contract graph estate", run: openContractGraph },
+  ], [openPlayground, openBlankRequest, openContractGraph, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush]);
 
   const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
   const liveResponse = selectedNode ? liveResponses[selectedNode.id] : null;
@@ -1487,14 +1496,12 @@ const PostmanGraphViewer = () => {
           onOpenDiff={() => openFullView("diff")}
           onOpenAutoImport={() => setShowAutoImport(true)}
           onOpenBreaking={() => openFullView("breaking")}
-          onOpenMultiService={() => openFullView("multiservice")}
+          onOpenMultiService={openContractGraph}
         />
       ) : view === "diff" ? (
         <DiffView onBack={() => setView(returnView)} />
-      ) : view === "breaking" ? (
-        <BreakingChangeDetector onBack={() => setView(returnView)} />
       ) : (
-        <MultiServiceGraph onBack={() => setView(returnView)} />
+        <BreakingChangeDetector onBack={() => setView(returnView)} />
       )}
 
       {modals}
