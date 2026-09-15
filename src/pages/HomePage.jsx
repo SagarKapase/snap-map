@@ -1,9 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import {
-  Upload, Sparkles, Network, Waypoints, Clock, Plus, ArrowRight, Terminal, ShieldAlert, GitCompareArrows,
-  Globe, Activity, Gauge, Server, BookOpen, ClipboardCheck, Target, ArrowRightLeft, WandSparkles, Send,
-} from "lucide-react";
+import { Upload, Sparkles, Network, Clock, ArrowRight, ShieldAlert } from "lucide-react";
 import ProductSwitcher from "../components/shell/ProductSwitcher";
 import AccountMenu from "../components/shell/AccountMenu";
 import { useAuth } from "../components/auth/useAuth";
@@ -12,37 +9,20 @@ import { listWorkspaces } from "../utils/contractWorkspace";
 import { timeAgo } from "../utils/analysis";
 
 /**
- * Everything the product can do, grouped by where it lives. Tools that need
- * an API loaded link into the API Map with a hint; the two that work on
- * their own deep-link straight to their view.
+ * Home shows what is the user's own — the APIs they imported and the
+ * estates they mapped — plus the few ways to start something new. The
+ * tools that work on a loaded API (playground, audit, mock server, docs…)
+ * live inside the API Map, where they can actually run; listing them here
+ * only sent people to the import screen.
  */
-const TOOLS = [
-  { label: "Playground", hint: "Send real requests with variables, auth and every body type", icon: Terminal, to: "/workspace", needsSpec: true },
-  { label: "Breaking changes", hint: "Compare two versions and see what breaks", icon: ShieldAlert, to: "/workspace?view=breaking" },
-  { label: "API diff", hint: "Added, removed and changed endpoints between two documents", icon: GitCompareArrows, to: "/workspace?view=diff" },
-  { label: "Audit", hint: "Documentation and consistency issues with fixes", icon: ClipboardCheck, to: "/workspace", needsSpec: true },
-  { label: "Coverage", hint: "Which endpoints a collection exercises", icon: Target, to: "/workspace", needsSpec: true },
-  { label: "Environments", hint: "Variable sets for every request", icon: Globe, to: "/workspace", needsSpec: true },
-  { label: "Health monitor", hint: "Poll endpoints and watch status over time", icon: Activity, to: "/workspace", needsSpec: true },
-  { label: "Load tester", hint: "Concurrency and latency from the browser", icon: Gauge, to: "/workspace", needsSpec: true },
-  { label: "Mock server", hint: "Responses generated from the schema", icon: Server, to: "/workspace", needsSpec: true },
-  { label: "Documentation", hint: "Generated reference docs", icon: BookOpen, to: "/workspace", needsSpec: true },
-  { label: "Convert & export", hint: "OpenAPI, Swagger, Postman, .http", icon: ArrowRightLeft, to: "/workspace", needsSpec: true },
-  { label: "Postman companion", hint: "Pull and push collections", icon: Send, to: "/workspace", needsSpec: true, needsAccount: true },
-  { label: "Ask the map", hint: "AI assistant over the loaded specification", icon: WandSparkles, to: "/workspace", needsSpec: true },
-];
-
-const Section = ({ title, action, children }) => (
+const Section = ({ title, children }) => (
   <section>
-    <div className="mb-3 flex items-center justify-between">
-      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-vz-dim">{title}</h2>
-      {action}
-    </div>
+    <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-vz-dim">{title}</h2>
     {children}
   </section>
 );
 
-const Card = ({ to, icon: Icon, title, hint, meta, accent = false }) => (
+const Card = ({ to, icon: Icon, title, hint, accent = false }) => (
   <Link
     to={to}
     className={`vz-t group flex items-start gap-3 rounded-xl border p-4 ${accent ? "border-vz-accent/30 bg-vz-accent/[0.08] hover:bg-vz-accent/[0.14]" : "border-vz-line bg-vz-panel hover:border-vz-accent/40"}`}
@@ -53,7 +33,6 @@ const Card = ({ to, icon: Icon, title, hint, meta, accent = false }) => (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-[13.5px] font-semibold text-vz-text">{title}</span>
       {hint && <span className="mt-0.5 block text-[12px] leading-snug text-vz-dim">{hint}</span>}
-      {meta && <span className="mt-1 block text-[11px] text-vz-dim">{meta}</span>}
     </span>
     <ArrowRight size={14} className="mt-1 flex-shrink-0 text-vz-dim opacity-0 transition-opacity group-hover:opacity-100" />
   </Link>
@@ -93,17 +72,14 @@ const HomePage = () => {
           </Section>
 
           <div className="grid gap-10 lg:grid-cols-2">
-            <Section
-              title="Recent APIs"
-              action={<Link to="/workspace" className="vz-t flex items-center gap-1 text-[12px] text-vz-soft hover:text-vz-text"><Waypoints size={12} /> Open API Map</Link>}
-            >
+            <Section title="Recent APIs">
               {recents.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-vz-line px-4 py-6 text-center text-[12.5px] text-vz-dim">
                   APIs you import appear here. They stay in this browser.
                 </p>
               ) : (
                 <ul className="divide-y divide-vz-line-soft rounded-xl border border-vz-line bg-vz-panel">
-                  {recents.slice(0, 6).map((r) => (
+                  {recents.map((r) => (
                     <li key={r.id}>
                       <Link to={`/workspace?recent=${encodeURIComponent(r.id)}`} className="vz-t flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03]">
                         <span className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg bg-white/6 text-vz-soft"><Clock size={14} /></span>
@@ -119,17 +95,14 @@ const HomePage = () => {
               )}
             </Section>
 
-            <Section
-              title="Contract Graph workspaces"
-              action={<Link to="/graph" className="vz-t flex items-center gap-1 text-[12px] text-vz-soft hover:text-vz-text"><Plus size={12} /> New workspace</Link>}
-            >
+            <Section title="Contract Graph workspaces">
               {workspaces.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-vz-line px-4 py-6 text-center text-[12.5px] text-vz-dim">
                   No estates mapped yet{user ? "" : " in this browser"}. <Link to="/graph" className="text-vz-accent-2 hover:underline">Add your first services</Link>.
                 </p>
               ) : (
                 <ul className="divide-y divide-vz-line-soft rounded-xl border border-vz-line bg-vz-panel">
-                  {workspaces.slice(0, 6).map((w) => (
+                  {workspaces.slice(0, 8).map((w) => (
                     <li key={w.id}>
                       <Link to={`/graph?ws=${encodeURIComponent(w.id)}`} className="vz-t flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03]">
                         <span className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg bg-white/6 text-vz-soft"><Network size={14} /></span>
@@ -143,16 +116,13 @@ const HomePage = () => {
                   ))}
                 </ul>
               )}
+              {workspaces.length > 8 && (
+                <p className="mt-2 text-[11.5px] text-vz-dim">
+                  {workspaces.length - 8} more in <Link to="/graph" className="text-vz-accent-2 hover:underline">Contract Graph</Link>.
+                </p>
+              )}
             </Section>
           </div>
-
-          <Section title="Tools in the API Map">
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {TOOLS.map((t) => (
-                <Card key={t.label} to={t.to} icon={t.icon} title={t.label} hint={t.hint} meta={t.needsAccount && !user ? "Needs an account — sign in first" : t.needsSpec ? "Opens the API Map — import an API first" : "Works on its own"} />
-              ))}
-            </div>
-          </Section>
         </div>
       </main>
     </div>
