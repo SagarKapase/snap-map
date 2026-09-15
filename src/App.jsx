@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import LandingPage from "./pages/LandingPage";
 import { AuthProvider } from "./components/auth/AuthContext";
+import { useAuth } from "./components/auth/useAuth";
 
 // The landing page is the entry route, so it ships in the main chunk.
 // The workspace is loaded on demand.
@@ -26,13 +27,21 @@ const Loader = () => (
   </div>
 );
 
+// The marketing page is for visitors. Someone with a session who opens the
+// root is in the product, so they go to Home; /landing shows the page anyway.
+const RootGate = () => {
+  const { user } = useAuth();
+  return user ? <Navigate to="/home" replace /> : <LandingPage />;
+};
+
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
       <Suspense fallback={<Loader />}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<RootGate />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
           <Route path="/home" element={<HomePage />} />
           <Route path="/graph" element={<ContractGraphPage />} />

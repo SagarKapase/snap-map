@@ -17,6 +17,17 @@ const NAME_LIMIT = 80;
 
 const bucket = (userId) => `${PREFIX}${userId || "anonymous"}`;
 
+// Every change reads the list, edits it and writes it back. Two changes in
+// flight at once — a second file drop before the first has finished — would
+// each write their own copy and the later one would drop the other's
+// service. They run one after another instead.
+let queue = Promise.resolve();
+const serialized = (work) => {
+  const run = queue.then(work, work);
+  queue = run.catch(() => {});
+  return run;
+};
+
 const read = (userId) => {
   try {
     const raw = localStorage.getItem(bucket(userId));
@@ -68,7 +79,9 @@ export const renameWorkspace = (userId, id, name) => {
   return workspace;
 };
 
-export const deleteWorkspace = async (userId, id) => {
+export const deleteWorkspace = (userId, id) => serialized(() => deleteWorkspaceNow(userId, id));
+
+const deleteWorkspaceNow = async (userId, id) => {
   const list = read(userId);
   const workspace = list.find((w) => w.id === id);
   if (!workspace) return false;
@@ -82,7 +95,9 @@ export const deleteWorkspace = async (userId, id) => {
  * only its metadata goes on the workspace record. Throws when the workspace
  * is full or the name is already taken, so the caller can say why.
  */
-export const addService = async (userId, workspaceId, { name, spec, sourceUrl = "", format = "" }) => {
+export const addService = (userId, workspaceId, input) => serialized(() => addServiceNow(userId, workspaceId, input));
+
+const addServiceNow = async (userId, workspaceId, { name, spec, sourceUrl = "", format = "" }) => {
   if (!spec || typeof spec !== "object") throw new Error("That file is not a specification the map can read.");
   const list = read(userId);
   const workspace = list.find((w) => w.id === workspaceId);
@@ -126,7 +141,9 @@ export const renameService = (userId, workspaceId, serviceId, name) => {
   return service;
 };
 
-export const removeService = async (userId, workspaceId, serviceId) => {
+export const removeService = (userId, workspaceId, serviceId) => serialized(() => removeServiceNow(userId, workspaceId, serviceId));
+
+const removeServiceNow = async (userId, workspaceId, serviceId) => {
   const list = read(userId);
   const workspace = list.find((w) => w.id === workspaceId);
   if (!workspace) return false;
