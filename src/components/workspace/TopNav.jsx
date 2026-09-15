@@ -303,12 +303,6 @@ const TopNav = ({
           <PanelRight size={15} />
         </button>
 
-        <div
-          className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#a855f7] text-[13px] font-semibold text-white"
-          title="Local session — specs stay in this browser"
-        >
-          V
-        </div>
         <AccountMenu />
       </div>
     </header>
