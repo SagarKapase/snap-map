@@ -1,12 +1,35 @@
-import { useMemo, useRef, useCallback } from "react";
-import { methodColor } from "../utils/constants";
+import { memo, useMemo, useRef, useCallback } from "react";
 
-const MINIMAP_W = 180;
-const MINIMAP_H = 110;
-const PADDING = 10;
+const MINIMAP_W = 196;
+const MINIMAP_H = 130;
+const PADDING = 12;
 
-const Minimap = ({ nodes, nodePositions, canvasRef, zoom, panX, panY }) => {
+const CARD_DIM = {
+  root: { w: 240, h: 110 },
+  folder: { w: 208, h: 80 },
+  request: { w: 256, h: 85 },
+};
+
+// A 196x130 thumbnail cannot show two thousand cards — past this many, drop
+// to the groups, which is the only structure legible at that size anyway.
+const DETAIL_LIMIT = 400;
+
+const Minimap = ({
+  nodes,
+  nodePositions,
+  canvasRef,
+  zoom,
+  panX,
+  panY,
+  selectedId,
+  viewportRect,
+}) => {
   const minimapRef = useRef(null);
+
+  const marks = useMemo(
+    () => (nodes.length > DETAIL_LIMIT ? nodes.filter((n) => n.type !== "request") : nodes),
+    [nodes],
+  );
 
   const { scale, offsetX, offsetY } = useMemo(() => {
     const positions = Object.values(nodePositions);
@@ -32,20 +55,18 @@ const Minimap = ({ nodes, nodePositions, canvasRef, zoom, panX, panY }) => {
     };
   }, [nodePositions]);
 
+  // The rectangle arrives in graph coordinates from the canvas, which tracks
+  // its own scrolling — reading the DOM here would only be right on the frames
+  // where something else happened to re-render this component.
   const viewport = useMemo(() => {
-    if (!canvasRef?.current) return null;
-    const el = canvasRef.current;
-    const vx = el.scrollLeft / zoom - panX;
-    const vy = el.scrollTop / zoom - panY;
-    const vw = el.clientWidth / zoom;
-    const vh = el.clientHeight / zoom;
+    if (!viewportRect || !viewportRect.w) return null;
     return {
-      x: vx * scale + offsetX,
-      y: vy * scale + offsetY,
-      w: vw * scale,
-      h: vh * scale,
+      x: viewportRect.left * scale + offsetX,
+      y: viewportRect.top * scale + offsetY,
+      w: viewportRect.w * scale,
+      h: viewportRect.h * scale,
     };
-  }, [canvasRef, zoom, panX, panY, scale, offsetX, offsetY]);
+  }, [viewportRect, scale, offsetX, offsetY]);
 
   const handleClick = useCallback(
     (e) => {
@@ -68,45 +89,26 @@ const Minimap = ({ nodes, nodePositions, canvasRef, zoom, panX, panY }) => {
     <div
       ref={minimapRef}
       onClick={handleClick}
-      className="absolute bottom-5 right-5 z-30 cursor-crosshair overflow-hidden rounded-xl"
-      style={{
-        width: MINIMAP_W,
-        height: MINIMAP_H,
-        background: "rgba(12,14,18,0.8)",
-        backdropFilter: "blur(12px)",
-        border: "1px solid rgba(70,72,76,0.2)",
-        boxShadow: "0 8px 32px -8px rgba(0,0,0,0.6)",
-        animation: "fadeIn 0.4s ease-out 600ms both",
-      }}
+      title="Click to pan the canvas"
+      className="absolute bottom-4 left-4 z-20 cursor-crosshair overflow-hidden rounded-[10px] border border-vz-line bg-vz-panel/92 backdrop-blur"
+      style={{ width: MINIMAP_W, height: MINIMAP_H }}
     >
-      <div
-        className="absolute top-1.5 left-2 text-[#73757a] uppercase tracking-widest font-bold pointer-events-none"
-        style={{ fontSize: "7px" }}
-      >
-        Minimap
-      </div>
-
       <svg width={MINIMAP_W} height={MINIMAP_H} className="absolute inset-0">
-        {nodes.map((node) => {
+        {marks.map((node) => {
           const pos = nodePositions[node.id];
           if (!pos) return null;
-          const x = pos.x * scale + offsetX;
-          const y = pos.y * scale + offsetY;
-
-          let fill = "#e08efe";
-          let r = node.type === "root" ? 4 : node.type === "folder" ? 3 : 2.5;
-
-          if (node.type === "folder") fill = "#3aa2ff";
-          if (node.type === "request") fill = methodColor(node.method).dot;
+          const dim = CARD_DIM[node.type] || CARD_DIM.request;
+          const selected = selectedId === node.id;
 
           return (
-            <circle
+            <rect
               key={node.id}
-              cx={x + (node.type === "root" ? 6 : 5)}
-              cy={y + 3}
-              r={r}
-              fill={fill}
-              opacity={0.8}
+              x={pos.x * scale + offsetX}
+              y={pos.y * scale + offsetY}
+              width={Math.max(dim.w * scale, 6)}
+              height={Math.max(dim.h * scale, 3)}
+              rx={1.5}
+              fill={selected ? "#a855f7" : node.type === "request" ? "#2a3446" : "#3a4457"}
               className="pointer-events-none"
             />
           );
@@ -118,8 +120,8 @@ const Minimap = ({ nodes, nodePositions, canvasRef, zoom, panX, panY }) => {
             y={viewport.y}
             width={Math.max(viewport.w, 10)}
             height={Math.max(viewport.h, 8)}
-            fill="rgba(224,142,254,0.06)"
-            stroke="rgba(224,142,254,0.4)"
+            fill="rgba(168,85,247,0.06)"
+            stroke="rgba(168,85,247,0.45)"
             strokeWidth={1}
             rx={2}
             className="pointer-events-none"
@@ -130,4 +132,4 @@ const Minimap = ({ nodes, nodePositions, canvasRef, zoom, panX, panY }) => {
   );
 };
 
-export default Minimap;
+export default memo(Minimap);

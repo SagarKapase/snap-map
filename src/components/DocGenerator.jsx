@@ -7,6 +7,12 @@ import { HTTP_METHODS } from "../utils/constants";
 
 const METHOD_COLOR = { GET: "#34d399", POST: "#fbbf24", PUT: "#60a5fa", PATCH: "#a78bfa", DELETE: "#f87171" };
 
+// The preview is a preview. A 1,671-operation spec renders roughly a
+// hundred thousand elements if every parameter table is mounted at once,
+// while the downloads and the copy button always carry the whole document.
+const PREVIEW_GROUPS = 12;
+const PREVIEW_TEXT_CHARS = 200_000;
+
 const extractDocs = (data) => {
   if (!data) return null;
   const doc = { title: "", version: "", description: "", baseUrl: "", groups: [] };
@@ -82,17 +88,17 @@ const generateMarkdown = (doc) => {
 
 const generateHTML = (doc) => {
   let html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${doc.title} — API Docs</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Inter,system-ui,sans-serif;background:#0c0e12;color:#f8f9fe;line-height:1.6;padding:2rem}
-.container{max-width:900px;margin:0 auto}h1{font-size:2rem;margin-bottom:0.5rem;color:#e08efe}h2{font-size:1.4rem;margin:2rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid #46484c33}
-h3{font-size:1rem;margin:1.5rem 0 0.5rem}.meta{color:#73757a;font-size:0.85rem;margin-bottom:1rem}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Inter,system-ui,sans-serif;background:#080b12;color:#f8f9fe;line-height:1.6;padding:2rem}
+.container{max-width:900px;margin:0 auto}h1{font-size:2rem;margin-bottom:0.5rem;color:#a855f7}h2{font-size:1.4rem;margin:2rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid #222a3933}
+h3{font-size:1rem;margin:1.5rem 0 0.5rem}.meta{color:#6f7788;font-size:0.85rem;margin-bottom:1rem}
 .method{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:700;margin-right:8px;text-transform:uppercase}
 .GET{background:#34d39920;color:#34d399}.POST{background:#fbbf2420;color:#fbbf24}.PUT{background:#60a5fa20;color:#60a5fa}
 .PATCH{background:#a78bfa20;color:#a78bfa}.DELETE{background:#f8717120;color:#f87171}
-.desc{color:#a9abb0;margin:0.5rem 0}code{background:#22262b;padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#81ecff}
-pre{background:#171a1e;border:1px solid #46484c33;border-radius:8px;padding:1rem;overflow-x:auto;margin:0.5rem 0;font-size:0.8rem;color:#a9abb0}
-table{width:100%;border-collapse:collapse;margin:0.5rem 0}th,td{text-align:left;padding:6px 12px;border-bottom:1px solid #46484c22;font-size:0.8rem}
-th{color:#a9abb0;font-weight:600;text-transform:uppercase;font-size:0.7rem;letter-spacing:0.05em}hr{border:none;border-top:1px solid #46484c22;margin:1.5rem 0}
-.deprecated{text-decoration:line-through;opacity:0.5}.footer{margin-top:3rem;text-align:center;color:#46484c;font-size:0.75rem}</style></head><body><div class="container">`;
+.desc{color:#a4acbc;margin:0.5rem 0}code{background:#121824;padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#60a5fa}
+pre{background:#0f141d;border:1px solid #222a3933;border-radius:8px;padding:1rem;overflow-x:auto;margin:0.5rem 0;font-size:0.8rem;color:#a4acbc}
+table{width:100%;border-collapse:collapse;margin:0.5rem 0}th,td{text-align:left;padding:6px 12px;border-bottom:1px solid #222a3922;font-size:0.8rem}
+th{color:#a4acbc;font-weight:600;text-transform:uppercase;font-size:0.7rem;letter-spacing:0.05em}hr{border:none;border-top:1px solid #222a3922;margin:1.5rem 0}
+.deprecated{text-decoration:line-through;opacity:0.5}.footer{margin-top:3rem;text-align:center;color:#222a39;font-size:0.75rem}</style></head><body><div class="container">`;
   html += `<h1>${doc.title}</h1>`;
   if (doc.version || doc.baseUrl) html += `<p class="meta">${doc.version ? `Version ${doc.version}` : ""}${doc.version && doc.baseUrl ? " · " : ""}${doc.baseUrl ? `Base URL: <code>${doc.baseUrl}</code>` : ""}</p>`;
   if (doc.description) html += `<p class="desc">${doc.description}</p>`;
@@ -115,13 +121,27 @@ th{color:#a9abb0;font-weight:600;text-transform:uppercase;font-size:0.7rem;lette
   return html;
 };
 
-const DocGenerator = ({ collection, detectedFormat, onBack }) => {
+const DocGenerator = ({ collection, onBack }) => {
   const [format, setFormat] = useState("preview"); // preview | markdown | html
   const [copied, setCopied] = useState(false);
+  const [groupLimit, setGroupLimit] = useState(PREVIEW_GROUPS);
 
   const doc = useMemo(() => extractDocs(collection), [collection]);
   const markdown = useMemo(() => doc ? generateMarkdown(doc) : "", [doc]);
   const htmlContent = useMemo(() => doc ? generateHTML(doc) : "", [doc]);
+
+  const rawText = format === "html" ? htmlContent : markdown;
+  const rawPreview = useMemo(
+    () =>
+      rawText.length > PREVIEW_TEXT_CHARS
+        ? `${rawText.slice(0, PREVIEW_TEXT_CHARS)}${String.fromCharCode(10)}… ${(rawText.length - PREVIEW_TEXT_CHARS).toLocaleString()} more characters — use the download buttons for the full document.`
+        : rawText,
+    [rawText],
+  );
+  const totalEndpoints = useMemo(
+    () => (doc ? doc.groups.reduce((n, g) => n + g.endpoints.length, 0) : 0),
+    [doc],
+  );
 
   const downloadFile = (content, filename, mime) => {
     const blob = new Blob([content], { type: mime });
@@ -136,41 +156,41 @@ const DocGenerator = ({ collection, detectedFormat, onBack }) => {
   };
 
   if (!doc) return (
-    <div className="flex-1 flex items-center justify-center"><p className="text-[#73757a]">Load an API spec first to generate documentation.</p></div>
+    <div className="flex-1 flex items-center justify-center"><p className="text-[#6f7788]">Load an API spec first to generate documentation.</p></div>
   );
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "rgba(12,14,18,0.98)", animation: "fadeIn 0.2s ease-out both" }}>
       {/* Header */}
-      <div className="px-6 py-4 border-b border-[#46484c]/20 flex items-center gap-4 flex-shrink-0">
-        <button onClick={onBack} className="p-2 hover:bg-[#22262b] rounded-lg text-[#a9abb0] hover:text-white transition-all group">
+      <div className="px-6 py-4 border-b border-[#222a39]/20 flex items-center gap-4 flex-shrink-0">
+        <button onClick={onBack} className="p-2 hover:bg-[#121824] rounded-lg text-[#a4acbc] hover:text-white transition-all group">
           <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
         </button>
         <div className="flex items-center gap-2">
-          <BookOpen size={18} className="text-[#e08efe]" />
+          <BookOpen size={18} className="text-[#a855f7]" />
           <h2 className="font-bold text-white text-lg">Documentation Generator</h2>
         </div>
 
         {/* Format tabs */}
-        <div className="flex items-center gap-1 bg-[#22262b]/40 border border-[#46484c]/20 rounded-lg p-1 ml-4">
+        <div className="flex items-center gap-1 bg-[#121824]/40 border border-[#222a39]/20 rounded-lg p-1 ml-4">
           {[{ id: "preview", icon: Eye, label: "Preview" }, { id: "markdown", icon: FileText, label: "Markdown" }, { id: "html", icon: Code, label: "HTML" }].map(({ id, icon: Icon, label }) => (
             <button key={id} onClick={() => setFormat(id)}
-              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded flex items-center gap-1.5 transition-all ${format === id ? "bg-[#e08efe]/15 text-[#e08efe]" : "text-[#73757a] hover:text-[#a9abb0]"}`}>
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded flex items-center gap-1.5 transition-all ${format === id ? "bg-[#a855f7]/15 text-[#a855f7]" : "text-[#6f7788] hover:text-[#a4acbc]"}`}>
               <Icon size={12} /> {label}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <button onClick={copyContent} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#a9abb0] hover:text-white hover:bg-[#22262b] border border-[#46484c]/20 transition-all">
-            {copied ? <><Check size={12} className="text-[#81ecff]" /> Copied!</> : <><Copy size={12} /> Copy</>}
+          <button onClick={copyContent} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#a4acbc] hover:text-white hover:bg-[#121824] border border-[#222a39]/20 transition-all">
+            {copied ? <><Check size={12} className="text-[#60a5fa]" /> Copied!</> : <><Copy size={12} /> Copy</>}
           </button>
           <button onClick={() => downloadFile(markdown, `${doc.title.replace(/\s+/g, "-").toLowerCase()}-docs.md`, "text/markdown")}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#a9abb0] hover:text-white hover:bg-[#22262b] border border-[#46484c]/20 transition-all">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#a4acbc] hover:text-white hover:bg-[#121824] border border-[#222a39]/20 transition-all">
             <Download size={12} /> .md
           </button>
           <button onClick={() => downloadFile(htmlContent, `${doc.title.replace(/\s+/g, "-").toLowerCase()}-docs.html`, "text/html")}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97]">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#080b12] bg-[#a855f7] hover:bg-[#c45cff] transition-all active:scale-[0.97]">
             <Download size={12} /> .html
           </button>
         </div>
@@ -181,42 +201,53 @@ const DocGenerator = ({ collection, detectedFormat, onBack }) => {
         {format === "preview" ? (
           <div className="max-w-4xl mx-auto p-8">
             <h1 className="text-3xl font-extrabold text-white mb-2">{doc.title}</h1>
-            <div className="flex items-center gap-3 text-sm text-[#73757a] mb-4">
-              {doc.version && <span className="px-2 py-0.5 bg-[#22262b] border border-[#46484c]/20 rounded font-mono text-xs">{doc.version}</span>}
-              {doc.baseUrl && <span className="font-mono text-xs text-[#81ecff]">{doc.baseUrl}</span>}
+            <div className="flex items-center gap-3 text-sm text-[#6f7788] mb-4">
+              {doc.version && <span className="px-2 py-0.5 bg-[#121824] border border-[#222a39]/20 rounded font-mono text-xs">{doc.version}</span>}
+              {doc.baseUrl && <span className="font-mono text-xs text-[#60a5fa]">{doc.baseUrl}</span>}
             </div>
-            {doc.description && <p className="text-[#a9abb0] mb-6 leading-relaxed">{doc.description}</p>}
-            {doc.groups.map((group) => (
+            {doc.description && <p className="text-[#a4acbc] mb-6 leading-relaxed">{doc.description}</p>}
+            {doc.groups.slice(0, groupLimit).map((group) => (
               <div key={group.name} className="mb-8">
-                <h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-[#46484c]/20">{group.name}</h2>
+                <h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-[#222a39]/20">{group.name}</h2>
                 {group.endpoints.map((ep, i) => (
-                  <div key={`${ep.method}-${ep.path}-${i}`} className={`mb-4 p-4 rounded-xl border border-[#46484c]/15 bg-[#171a1e]/30 ${ep.deprecated ? "opacity-50" : ""}`}>
+                  <div key={`${ep.method}-${ep.path}-${i}`} className={`mb-4 p-4 rounded-xl border border-[#222a39]/15 bg-[#0f141d]/30 ${ep.deprecated ? "opacity-50" : ""}`}>
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full uppercase" style={{ background: `${METHOD_COLOR[ep.method] || "#a9abb0"}20`, color: METHOD_COLOR[ep.method] || "#a9abb0" }}>{ep.method}</span>
-                      <code className="text-sm text-[#81ecff] font-mono">{ep.path}</code>
-                      {ep.deprecated && <span className="text-[10px] text-[#ff6e84] uppercase font-bold">deprecated</span>}
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full uppercase" style={{ background: `${METHOD_COLOR[ep.method] || "#a4acbc"}20`, color: METHOD_COLOR[ep.method] || "#a4acbc" }}>{ep.method}</span>
+                      <code className="text-sm text-[#60a5fa] font-mono">{ep.path}</code>
+                      {ep.deprecated && <span className="text-[10px] text-[#f43f5e] uppercase font-bold">deprecated</span>}
                     </div>
                     {ep.name && <p className="text-sm font-semibold text-white mb-1">{ep.name}</p>}
-                    {ep.description && <p className="text-xs text-[#a9abb0] leading-relaxed">{ep.description}</p>}
+                    {ep.description && <p className="text-xs text-[#a4acbc] leading-relaxed">{ep.description}</p>}
                     {ep.params.length > 0 && (
                       <div className="mt-3 overflow-x-auto">
                         <table className="w-full text-xs">
-                          <thead><tr className="text-[#73757a]"><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">Param</th><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">In</th><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">Required</th><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">Type</th></tr></thead>
-                          <tbody>{ep.params.map((p, pi) => (<tr key={pi} className="border-t border-[#46484c]/10"><td className="p-1.5 font-mono text-[#e08efe]">{p.name}</td><td className="p-1.5 text-[#a9abb0]">{p.in}</td><td className="p-1.5">{p.required ? <span className="text-[#ff6e84]">Yes</span> : <span className="text-[#46484c]">No</span>}</td><td className="p-1.5 text-[#73757a] font-mono">{p.schema?.type || "-"}</td></tr>))}</tbody>
+                          <thead><tr className="text-[#6f7788]"><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">Param</th><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">In</th><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">Required</th><th className="text-left p-1.5 font-bold uppercase tracking-wider text-[10px]">Type</th></tr></thead>
+                          <tbody>{ep.params.map((p, pi) => (<tr key={pi} className="border-t border-[#222a39]/10"><td className="p-1.5 font-mono text-[#a855f7]">{p.name}</td><td className="p-1.5 text-[#a4acbc]">{p.in}</td><td className="p-1.5">{p.required ? <span className="text-[#f43f5e]">Yes</span> : <span className="text-[#222a39]">No</span>}</td><td className="p-1.5 text-[#6f7788] font-mono">{p.schema?.type || "-"}</td></tr>))}</tbody>
                         </table>
                       </div>
                     )}
                     {ep.bodyExample && (
-                      <pre className="mt-3 bg-[#0c0e12] border border-[#46484c]/15 rounded-lg p-3 text-[10px] font-mono text-[#a9abb0] overflow-auto">{JSON.stringify(ep.bodyExample, null, 2)}</pre>
+                      <pre className="mt-3 bg-[#080b12] border border-[#222a39]/15 rounded-lg p-3 text-[10px] font-mono text-[#a4acbc] overflow-auto">{JSON.stringify(ep.bodyExample, null, 2)}</pre>
                     )}
                   </div>
                 ))}
               </div>
             ))}
+
+            {doc.groups.length > groupLimit && (
+              <button
+                onClick={() => setGroupLimit((n) => n + PREVIEW_GROUPS)}
+                className="w-full rounded-xl border border-[#222a39]/25 py-3 text-sm text-[#a4acbc] hover:text-white hover:bg-[#121824] transition-colors"
+              >
+                Show more — {groupLimit.toLocaleString()} of{" "}
+                {doc.groups.length.toLocaleString()} groups shown
+                {totalEndpoints > 0 && `, ${totalEndpoints.toLocaleString()} endpoints in the download`}
+              </button>
+            )}
           </div>
         ) : (
-          <pre className="p-8 font-mono text-xs text-[#a9abb0] whitespace-pre-wrap break-words leading-relaxed">
-            {format === "html" ? htmlContent : markdown}
+          <pre className="p-8 font-mono text-xs text-[#a4acbc] whitespace-pre-wrap break-words leading-relaxed">
+            {rawPreview}
           </pre>
         )}
       </div>

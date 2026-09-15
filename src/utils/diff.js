@@ -38,6 +38,7 @@ const extractEndpoints = (data) => {
   if (data.info && data.item && Array.isArray(data.item)) {
     const walk = (items) => {
       items.forEach((item) => {
+        if (!item || typeof item !== "object") return;
         if (item.item && Array.isArray(item.item)) {
           walk(item.item);
         } else {
@@ -61,6 +62,7 @@ const extractEndpoints = (data) => {
   // Custom JSON — flat array
   if (Array.isArray(data)) {
     data.forEach((ep) => {
+      if (!ep || typeof ep !== "object") return;
       const method = (ep.method || ep.type || "GET").toUpperCase();
       const path = ep.url || ep.path || ep.endpoint || "";
       endpoints.push({
@@ -79,6 +81,7 @@ const extractEndpoints = (data) => {
   Object.entries(data).forEach(([key, val]) => {
     if (Array.isArray(val) && !metaKeys.includes(key)) {
       val.forEach((ep) => {
+        if (!ep || typeof ep !== "object") return;
         const method = (ep.method || ep.type || "GET").toUpperCase();
         const path = ep.url || ep.path || ep.endpoint || "";
         endpoints.push({

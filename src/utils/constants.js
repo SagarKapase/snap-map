@@ -1,56 +1,58 @@
-import {
-  Layers,
-  Zap,
-  Search,
-  Share2,
-  FileJson,
-  Globe,
-  FileCode2,
-} from "lucide-react";
-
 // ─── HTTP method colour map ──────────────────
+// GET green · POST blue · PUT orange · PATCH purple · DELETE red
 export const METHOD_COLORS = {
   GET: {
-    bg: "bg-emerald-600/20",
-    text: "text-emerald-400",
-    badge: "bg-emerald-600",
-    glow: "shadow-emerald-500/50",
+    bg: "bg-[#34D399]/12",
+    text: "text-[#34D399]",
+    badge: "bg-[#34D399]",
+    glow: "shadow-[#34D399]/40",
+    border: "border-[#34D399]/30",
     line: "rgba(52,211,153,0.55)",
     dot: "#34d399",
   },
   POST: {
-    bg: "bg-amber-600/20",
-    text: "text-amber-400",
-    badge: "bg-amber-600",
-    glow: "shadow-amber-500/50",
-    line: "rgba(251,191,36,0.55)",
-    dot: "#fbbf24",
-  },
-  PUT: {
-    bg: "bg-blue-600/20",
-    text: "text-blue-400",
-    badge: "bg-blue-600",
-    glow: "shadow-blue-500/50",
+    bg: "bg-[#60A5FA]/12",
+    text: "text-[#60A5FA]",
+    badge: "bg-[#60A5FA]",
+    glow: "shadow-[#60A5FA]/40",
+    border: "border-[#60A5FA]/30",
     line: "rgba(96,165,250,0.55)",
     dot: "#60a5fa",
   },
+  PUT: {
+    bg: "bg-[#FB923C]/12",
+    text: "text-[#FB923C]",
+    badge: "bg-[#FB923C]",
+    glow: "shadow-[#FB923C]/40",
+    border: "border-[#FB923C]/30",
+    line: "rgba(251,146,60,0.55)",
+    dot: "#fb923c",
+  },
   PATCH: {
-    bg: "bg-purple-600/20",
-    text: "text-purple-400",
-    badge: "bg-purple-600",
-    glow: "shadow-purple-500/50",
-    line: "rgba(167,139,250,0.55)",
-    dot: "#a78bfa",
+    bg: "bg-[#C084FC]/12",
+    text: "text-[#C084FC]",
+    badge: "bg-[#C084FC]",
+    glow: "shadow-[#C084FC]/40",
+    border: "border-[#C084FC]/30",
+    line: "rgba(192,132,252,0.55)",
+    dot: "#c084fc",
   },
   DELETE: {
-    bg: "bg-red-600/20",
-    text: "text-red-400",
-    badge: "bg-red-600",
-    glow: "shadow-red-500/50",
-    line: "rgba(248,113,113,0.55)",
-    dot: "#f87171",
+    bg: "bg-[#F43F5E]/12",
+    text: "text-[#F43F5E]",
+    badge: "bg-[#F43F5E]",
+    glow: "shadow-[#F43F5E]/40",
+    border: "border-[#F43F5E]/30",
+    line: "rgba(244,63,94,0.55)",
+    dot: "#f43f5e",
   },
 };
+
+// Short labels for compact badges
+export const METHOD_SHORT = { DELETE: "DEL", OPTIONS: "OPT", PATCH: "PATCH" };
+
+// Legend / filter order
+export const LEGEND_METHODS = ["GET", "POST", "PUT", "DELETE"];
 
 export const methodColor = (m) => METHOD_COLORS[m] || METHOD_COLORS.GET;
 
@@ -76,30 +78,6 @@ export const GLASS = {
   boxShadow:
     "0 32px 64px -16px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.03)",
 };
-
-export const GLASS_SUBTLE = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(70,72,76,0.2)",
-};
-
-// ─── Landing page feature cards ──────────────
-export const FEATURES = [
-  {
-    icon: Layers,
-    label: "4 Layouts",
-    sub: "Tree · Flow · Radial · Mindmap",
-  },
-  { icon: Zap, label: "Playground", sub: "Live HTTP requests" },
-  { icon: Search, label: "Smart Search", sub: "Filter by method or name" },
-  { icon: Share2, label: "Canvas", sub: "Drag, pan & zoom" },
-];
-
-// ─── Landing page accepted formats ───────────
-export const ACCEPTED_FORMATS = [
-  { name: "Postman Collections", icon: FileJson },
-  { name: "OpenAPI / Swagger", icon: Globe },
-  { name: "Custom API JSON/YAML", icon: FileCode2 },
-];
 
 // ─── Sample data ─────────────────────────────
 export const SAMPLES_META = [

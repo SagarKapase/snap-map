@@ -1,21 +1,34 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import yaml from "js-yaml";
 import {
-  Upload, Download, ZoomIn, ZoomOut, RotateCcw, Maximize2, Search,
-  ChevronDown, X, Code, Menu, ArrowLeft, Eye, Sparkles,
-  Save, FolderOpen, Share2, GitCompareArrows, Link2, Check, Copy,
-  Activity, Zap, Globe, Server, BarChart3, Users, BookOpen, ShieldAlert,
-  Network,
+  ZoomIn, ZoomOut, RotateCcw, Search, Play, Share2,
+  Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
+  Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
+  Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
+  AlertCircle, Target, Upload, Code2, WandSparkles, Lock,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
-import { generateShareUrl, extractSharedSpec } from "./utils/sharing";
+import {
+  generateShareUrl, generateEmbedSnippet, extractSharedSpec, downloadSpecFile,
+} from "./utils/sharing";
+import {
+  LAYOUT_LABELS, ancestorsOf, buildGroupTree, countSchemas,
+} from "./utils/analysis";
+import {
+  computePositions, fitZoom, measureNodes,
+  LOD_ZOOM, MAX_ZOOM, MIN_ZOOM, SCALE_SAFE_AT,
+} from "./utils/layout";
+import { auditSpec } from "./utils/audit";
+import { addRecent, clearRecents, getRecents, loadRecentData } from "./utils/recents";
+import { getSession } from "./utils/auth";
+import BrandMark from "./components/BrandMark";
 import ConnectionLines from "./components/ConnectionLines";
 import GraphCard from "./components/GraphCard";
 import Minimap from "./components/Minimap";
 import JsonInputScreen from "./components/JsonInputScreen";
 import ApiPlaygroundModal from "./components/ApiPlaygroundModal";
-import RequestDetailsPanel from "./components/RequestDetailsPanel";
 import ExportMenu from "./components/ExportMenu";
 import { SaveCollectionModal, CollectionsModal } from "./components/CollectionManager";
 import DiffView from "./components/DiffView";
@@ -23,40 +36,98 @@ import AutoImportPanel from "./components/AutoImport";
 import HealthMonitor from "./components/HealthMonitor";
 import FlowBuilder from "./components/FlowBuilder";
 import EnvironmentManager from "./components/EnvironmentManager";
+import { getEnvironmentForResolution, importEnvironment } from "./utils/environments";
 import BreakingChangeDetector from "./components/BreakingChangeDetector";
 import DocGenerator from "./components/DocGenerator";
-import MultiServiceGraph from "./components/MultiServiceGraph";
 import MockServer from "./components/MockServer";
 import LoadTester from "./components/LoadTester";
 import WorkspaceManager from "./components/WorkspaceManager";
+import TopNav from "./components/workspace/TopNav";
+import ApiExplorer from "./components/workspace/ApiExplorer";
+import GraphToolbar from "./components/workspace/GraphToolbar";
+import EndpointInspector from "./components/workspace/EndpointInspector";
+import StatusBar from "./components/workspace/StatusBar";
+import CommandPalette from "./components/workspace/CommandPalette";
+import TableView from "./components/workspace/TableView";
+import RawSpecView from "./components/workspace/RawSpecView";
+import AuditView from "./components/workspace/AuditView";
+import CoverageView from "./components/workspace/CoverageView";
+import { PostmanIcon } from "./components/icons/BrandIcons";
+import VariableFlowLines from "./components/workspace/VariableFlowLines";
+import PostmanConnect from "./components/workspace/PostmanConnect";
+import AccountRequired from "./components/auth/AccountRequired";
+import { useAuth } from "./components/auth/useAuth";
+import { collectVariables, analyseVariableFlow } from "./utils/variables";
+import { curlToCollection, harToCollection, looksLikeCurl, looksLikeHar } from "./utils/importers";
+import { isPostmanVariableFile, readPostmanVariableFile } from "./utils/parsers";
+import { convertSpec } from "./utils/convert";
+import { applyFixes } from "./utils/fixes";
+import AiPanel from "./components/ai/AiPanel";
+
+const CENTER_TABS = [
+  { id: "map", label: "API Map", icon: Waypoints },
+  { id: "table", label: "Table View", icon: Table2 },
+  { id: "raw", label: "Raw Spec", icon: Braces },
+  { id: "audit", label: "Audit", icon: ShieldCheck },
+  { id: "coverage", label: "Coverage", icon: Target },
+];
+
+// Past these thresholds the canvas stops doing per-card work that only pays
+// off while every card is legible anyway.
+const CULL_ABOVE = 220;     // start clipping to the viewport
+const ANIMATE_UPTO = 150;   // entrance animation
+const HOVER_FOCUS_UPTO = 250; // dim-siblings-on-hover
+const VIEWPORT_MARGIN = 600; // graph px kept rendered outside the viewport
+
+/** The origin a relative `servers` entry resolves against, when it is known. */
+const relativeServerOrigin = (parsedNodes, sourceUrl) => {
+  const first = parsedNodes.find((n) => n.type === "root")?.servers?.[0];
+  if (!first || !sourceUrl || /^[a-zA-Z][\w+.-]*:\/\//.test(first)) return "";
+  try {
+    return new URL(sourceUrl).origin;
+  } catch {
+    return "";
+  }
+};
 
 const PostmanGraphViewer = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const paperRef = useRef(null);
+  const canvasShellRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   const [view, setView] = useState("input");
+  const [returnView, setReturnView] = useState("input");
   const [collection, setCollection] = useState(null);
   const [nodes, setNodes] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [nodePositions, setNodePositions] = useState({});
+  // Dragged cards override the computed layout. Keyed by a layout signature so
+  // a style change or a re-pack drops stale overrides instead of stranding
+  // cards at coordinates the new layout never produced.
+  const [dragOverrides, setDragOverrides] = useState({ base: null, moved: {} });
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   const [draggedNodeId, setDraggedNodeId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQueryState] = useState("");
+  const [focusedMatchIdx, setFocusedMatchIdx] = useState(0);
+  /** New search text always starts back at the first match. */
+  const setSearchQuery = useCallback((value) => {
+    setSearchQueryState(value);
+    setFocusedMatchIdx(0);
+  }, []);
   const [filterMethod, setFilterMethod] = useState("all");
-  const [graphStyle, setGraphStyle] = useState("tree");
-  const [showGraphMenu, setShowGraphMenu] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
+  const [graphStyle, setGraphStyle] = useState("graph");
   const [showPlayground, setShowPlayground] = useState(false);
   const [stats, setStats] = useState({ total: 0, get: 0, post: 0, put: 0, delete: 0, patch: 0 });
   const [detectedFormat, setDetectedFormat] = useState("");
   const [collapsedFolders, setCollapsedFolders] = useState(new Set());
-  const [showParticles, setShowParticles] = useState(true);
+  const [showParticles, setShowParticles] = useState(false);
   const [showRipple, setShowRipple] = useState(false);
-  const [focusedMatchIdx, setFocusedMatchIdx] = useState(0);
   // Phase 1 features
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showCollections, setShowCollections] = useState(false);
@@ -72,314 +143,515 @@ const PostmanGraphViewer = () => {
   const [showMockServer, setShowMockServer] = useState(false);
   const [showLoadTester, setShowLoadTester] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  // Workspace shell
+  const [centerTab, setCenterTab] = useState("map");
+  const [hoveredNodeId, setHoveredNodeId] = useState(null);
+  const [showPalette, setShowPalette] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [liveResponses, setLiveResponses] = useState({});
+  const [importedAt, setImportedAt] = useState(null);
+  const [recents, setRecents] = useState(() => getRecents());
+  // Scroll position of the canvas, tracked so the render set can be clipped
+  // to what is actually on screen.
+  const [viewport, setViewport] = useState({ left: 0, top: 0, w: 0, h: 0 });
+  const [shareState, setShareState] = useState(null);
+  // Postman companion state
+  const [showPostman, setShowPostman] = useState(false);
+  // The Postman companion moves collections in and out of a Postman account,
+  // so it is kept behind a Vizroute account. A signed-out visitor sees why
+  // and comes back to the same document with the panel open.
+  const { user } = useAuth();
+  const [accountPrompt, setAccountPrompt] = useState(null);
+  const currentRecentRef = useRef(null);
+  const requireAccount = useCallback((run) => {
+    if (user) {
+      run();
+      return;
+    }
+    const recent = currentRecentRef.current;
+    setAccountPrompt({
+      feature: "Postman companion",
+      next: `/workspace?${recent ? `recent=${encodeURIComponent(recent)}&` : ""}tool=postman`,
+    });
+  }, [user]);
+  const [pushPayload, setPushPayload] = useState(null);
+  const [pushLabel, setPushLabel] = useState("");
+  const [pulledEnvironment, setPulledEnvironment] = useState(null);
+  const [compare, setCompare] = useState(null);
+
+  // ── Assistant ──────────────────────────────
+  // The thread outlives the drawer so closing it does not lose the
+  // conversation; a new import starts a fresh one.
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [assistantThread, setAssistantThread] = useState([]);
+  // Endpoints the assistant pointed at, lit on the map like search matches.
+  const [aiHighlight, setAiHighlight] = useState(() => new Set());
+  // Where a relative path is sent from the playground. Asked for once per
+  // import rather than per request.
+  const [playgroundOrigin, setPlaygroundOrigin] = useState("");
+  // A blank request, for testing an API the document does not describe.
+  const [playgroundScratch, setPlaygroundScratch] = useState(false);
+  // Values typed over the collection's variables from the playground. They
+  // sit above every declared scope, the way Postman's local scope does, and
+  // last until the next import.
+  const [variableOverrides, setVariableOverrides] = useState({});
 
   const toggleFolderCollapse = useCallback((folderId) => {
     setCollapsedFolders((prev) => { const next = new Set(prev); if (next.has(folderId)) next.delete(folderId); else next.add(folderId); return next; });
   }, []);
 
-  const filteredNodes = useMemo(() => nodes.filter((n) => {
-    if (n.parentId && collapsedFolders.has(n.parentId)) return false;
-    const ms = n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase());
-    const mf = filterMethod === "all" || n.method === filterMethod || n.type !== "request";
-    return ms && mf;
-  }), [nodes, searchQuery, filterMethod, collapsedFolders]);
+  const isLarge = nodes.length > SCALE_SAFE_AT;
+
+  // Search and method filter, ignoring which groups happen to be collapsed.
+  // The table and the list views want every match, not only the ones whose
+  // group is open on the map.
+  const listNodes = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return nodes.filter((n) => {
+      const ms =
+        !q ||
+        n.name.toLowerCase().includes(q) ||
+        n.path?.toLowerCase().includes(q);
+      const mf =
+        filterMethod === "all" || n.method === filterMethod || n.type !== "request";
+      return ms && mf;
+    });
+  }, [nodes, searchQuery, filterMethod]);
+
+  // What the map is allowed to show: the above, minus collapsed children.
+  const filteredNodes = useMemo(
+    () => listNodes.filter((n) => !(n.parentId && collapsedFolders.has(n.parentId))),
+    [listNodes, collapsedFolders],
+  );
+
+  // What the layout is computed from. On a large spec the collapsed groups are
+  // packed on their own, so the first view is dense instead of a field of
+  // holes where the hidden endpoints would have gone.
+  const layoutNodes = useMemo(() => {
+    if (!isLarge) return nodes;
+    return nodes.filter((n) => !(n.parentId && collapsedFolders.has(n.parentId)));
+  }, [isLarge, nodes, collapsedFolders]);
 
   const highlightedIds = useMemo(() => {
-    if (!searchQuery) return new Set();
-    return new Set(nodes.filter((n) => n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase())).map((n) => n.id));
-  }, [nodes, searchQuery]);
+    const out = new Set(aiHighlight);
+    if (!searchQuery) return out;
+    nodes.forEach((n) => {
+      if (n.name.toLowerCase().includes(searchQuery.toLowerCase()) || n.path?.toLowerCase().includes(searchQuery.toLowerCase())) out.add(n.id);
+    });
+    return out;
+  }, [nodes, searchQuery, aiHighlight]);
 
-  const contentBounds = useMemo(() => {
-    const positions = Object.values(nodePositions);
-    if (!positions.length) return { w: 1600, h: 900 };
-    const minX = Math.min(...positions.map((p) => p.x));
-    const minY = Math.min(...positions.map((p) => p.y));
-    const maxX = Math.max(...positions.map((p) => p.x));
-    const maxY = Math.max(...positions.map((p) => p.y));
-    return { w: (maxX - minX) + 600, h: (maxY - minY) + 400 };
+  // Nodes that stay lit while another node is hovered (itself, parent, children)
+  const focusSet = useMemo(() => {
+    if (!hoveredNodeId || filteredNodes.length > HOVER_FOCUS_UPTO) return null;
+    const keep = new Set([hoveredNodeId]);
+    const hovered = nodes.find((n) => n.id === hoveredNodeId);
+    if (hovered?.parentId) keep.add(hovered.parentId);
+    nodes.forEach((n) => { if (n.parentId === hoveredNodeId) keep.add(n.id); });
+    return keep;
+  }, [hoveredNodeId, nodes, filteredNodes.length]);
+
+  const groups = useMemo(() => buildGroupTree(nodes), [nodes]);
+  // An environment pulled from Postman wins over a locally defined one: it is
+  // the live value, and it is what the user just chose.
+  const activeEnvironment = useMemo(
+    () => pulledEnvironment || (activeEnvId ? getEnvironmentForResolution(activeEnvId) : null),
+    [pulledEnvironment, activeEnvId],
+  );
+
+  const variables = useMemo(() => {
+    const map = collectVariables({ nodes, environment: activeEnvironment });
+    Object.entries(variableOverrides).forEach(([key, value]) => {
+      map.set(key, { key, value, source: "edited here", declared: map.get(key) || null });
+    });
+    return map;
+  }, [nodes, activeEnvironment, variableOverrides]);
+
+  const setVariableOverride = useCallback((key, value) => {
+    setVariableOverrides((prev) => ({ ...prev, [key]: value }));
+  }, []);
+  const clearVariableOverride = useCallback((key) => {
+    setVariableOverrides((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const variableFlow = useMemo(
+    () => analyseVariableFlow(nodes, variables),
+    [nodes, variables],
+  );
+
+  const declaredServers = useMemo(
+    () => nodes.find((n) => n.type === "root")?.servers || [],
+    [nodes],
+  );
+
+  const audit = useMemo(
+    () => auditSpec({ spec: collection, nodes, format: detectedFormat, flow: variableFlow }),
+    [collection, nodes, detectedFormat, variableFlow],
+  );
+  const schemaCount = useMemo(() => countSchemas(collection), [collection]);
+
+  const calculatePositions = useCallback(
+    (nodesData) => computePositions(nodesData, graphStyle, { large: isLarge }),
+    [graphStyle, isLarge],
+  );
+
+  // Layout runs against the currently visible tree, so collapsing a group on a
+  // large spec re-packs the map instead of leaving a hole behind.
+  const basePositions = useMemo(
+    () => calculatePositions(layoutNodes),
+    [layoutNodes, calculatePositions],
+  );
+
+  const nodePositions = useMemo(() => {
+    if (dragOverrides.base !== basePositions) return basePositions;
+    if (!Object.keys(dragOverrides.moved).length) return basePositions;
+    return { ...basePositions, ...dragOverrides.moved };
+  }, [basePositions, dragOverrides]);
+
+  const moveNode = useCallback((nodeId, position) => {
+    setDragOverrides((prev) => ({
+      base: basePositions,
+      moved: {
+        ...(prev.base === basePositions ? prev.moved : {}),
+        [nodeId]: position,
+      },
+    }));
+  }, [basePositions]);
+
+  // Bounds of what the map is currently showing — drives the paper size, the
+  // fit buttons and the minimap.
+  const visibleBounds = useMemo(
+    () => measureNodes(filteredNodes, nodePositions),
+    [filteredNodes, nodePositions],
+  );
+
+  // Mirrored into a ref so the deferred auto-fit can read the latest bounds
+  // without re-running the layout effect on every collapse toggle.
+  const boundsRef = useRef(visibleBounds);
+  useEffect(() => {
+    boundsRef.current = visibleBounds;
+  }, [visibleBounds]);
+
+  // Revealing a node expands its group, which re-packs the layout. The
+  // deferred scroll therefore has to read the positions that exist when it
+  // runs, not the ones captured when it was scheduled.
+  const positionsRef = useRef(nodePositions);
+  useEffect(() => {
+    positionsRef.current = nodePositions;
   }, [nodePositions]);
 
-  const calculatePositions = useCallback((nodesData) => {
-    const pos = {};
-    const root = nodesData.find((n) => n.type === "root");
-    if (!root) return pos;
-    pos[root.id] = { x: 120, y: 300 };
-    const rootFolders = nodesData.filter((n) => n.parentId === root.id && n.type === "folder");
-    const rootRequests = nodesData.filter((n) => n.parentId === root.id && n.type === "request");
-    const isFlatCollection = rootFolders.length === 0 && rootRequests.length > 0;
+  const contentBounds = useMemo(() => {
+    if (!visibleBounds) return { w: 1600, h: 900 };
+    return { w: visibleBounds.width + 400, h: visibleBounds.height + 300 };
+  }, [visibleBounds]);
 
-    if (graphStyle === "tree") {
-      // ── Top-down vertical tree layout ────────────────────
-      // Root at top-center, children spread horizontally below
-      const CARD_H = { root: 110, folder: 80, request: 85 };
-      const CARD_W = { root: 240, folder: 208, request: 256 };
-      const SIBLING_GAP = 24;   // horizontal gap between sibling subtrees
-      const LEVEL_GAP = 60;     // vertical gap between card bottom → child top
-      const TREE_PAD_Y = 50;    // top padding
+  // Cards are laid out absolutely across a canvas that can run to thousands of
+  // pixels; only the ones near the viewport need to exist in the DOM. Parents
+  // of visible cards are kept so their edges still have an anchor.
+  const renderNodes = useMemo(() => {
+    if (filteredNodes.length <= CULL_ABOVE || !viewport.w) return filteredNodes;
 
-      // Build children lookup
-      const childrenOf = {};
-      nodesData.forEach((n) => {
-        if (n.parentId) {
-          if (!childrenOf[n.parentId]) childrenOf[n.parentId] = [];
-          childrenOf[n.parentId].push(n);
-        }
-      });
+    const left = viewport.left - VIEWPORT_MARGIN;
+    const top = viewport.top - VIEWPORT_MARGIN;
+    const right = viewport.left + viewport.w + VIEWPORT_MARGIN;
+    const bottom = viewport.top + viewport.h + VIEWPORT_MARGIN;
 
-      // 1. Bottom-up: calculate the horizontal width each subtree needs
-      const subtreeWidth = {};
-      const calcSubtreeW = (nodeId) => {
-        if (subtreeWidth[nodeId] !== undefined) return subtreeWidth[nodeId];
-        const nd = nodesData.find((n) => n.id === nodeId);
-        const w = CARD_W[nd?.type || "request"];
-        const children = childrenOf[nodeId] || [];
-        if (children.length === 0) {
-          subtreeWidth[nodeId] = w;
-          return w;
-        }
-        const totalChildW = children.reduce((sum, ch) => sum + calcSubtreeW(ch.id), 0)
-          + (children.length - 1) * SIBLING_GAP;
-        // Subtree is at least as wide as the node itself
-        subtreeWidth[nodeId] = Math.max(totalChildW, w);
-        return subtreeWidth[nodeId];
-      };
-      calcSubtreeW(root.id);
+    const keep = new Set();
+    filteredNodes.forEach((n) => {
+      const p = nodePositions[n.id];
+      if (!p) return;
+      if (p.x > right || p.y > bottom || p.x + 260 < left || p.y + 110 < top) return;
+      keep.add(n.id);
+      if (n.parentId) keep.add(n.parentId);
+    });
+    return filteredNodes.filter((n) => keep.has(n.id));
+  }, [filteredNodes, nodePositions, viewport]);
 
-      // 2. Top-down: position nodes, centering parents above children
-      const placeNode = (nodeId, xCenter, y) => {
-        const nd = nodesData.find((n) => n.id === nodeId);
-        const w = CARD_W[nd?.type || "request"];
-        const h = CARD_H[nd?.type || "request"];
-        const children = childrenOf[nodeId] || [];
+  const simplified = zoom < LOD_ZOOM;
+  const animateCards = renderNodes.length <= ANIMATE_UPTO;
 
-        // Place this node centered at xCenter
-        pos[nodeId] = { x: xCenter - w / 2, y };
 
-        if (children.length === 0) return;
-
-        // Calculate total width of children subtrees
-        const totalChildW = children.reduce((sum, ch) => sum + subtreeWidth[ch.id], 0)
-          + (children.length - 1) * SIBLING_GAP;
-
-        // Start X: center the children block under this node
-        let cx = xCenter - totalChildW / 2;
-        const childY = y + h + LEVEL_GAP;
-
-        children.forEach((ch) => {
-          const chSubW = subtreeWidth[ch.id];
-          // Place child centered in its subtree allocation
-          placeNode(ch.id, cx + chSubW / 2, childY);
-          cx += chSubW + SIBLING_GAP;
-        });
-      };
-
-      // Start: center root horizontally based on total subtree width
-      const totalW = subtreeWidth[root.id];
-      placeNode(root.id, totalW / 2 + 60, TREE_PAD_Y);
-    } else if (graphStyle === "flowchart") {
-      let y = 60;
-      if (isFlatCollection) { rootRequests.forEach((node) => { pos[node.id] = { x: 440, y }; y += 110; }); pos[root.id] = { x: 120, y: Math.max(0, (y - 110) / 2 - 30) }; }
-      else { rootFolders.forEach((node) => { pos[node.id] = { x: 420, y }; let childY = y - 30; nodesData.forEach((child) => { if (child.parentId !== node.id) return; pos[child.id] = { x: 740, y: childY }; childY += 110; }); y += Math.max(180, nodesData.filter((c) => c.parentId === node.id).length * 110 + 40); }); rootRequests.forEach((node) => { pos[node.id] = { x: 420, y }; y += 110; }); }
-    } else if (graphStyle === "radial") {
-      // ── Concentric-ring radial layout ────────────────────
-      // Root at center, folders in ring 1, each folder's requests arc in ring 2
-      const RW = { root: 240, folder: 208, request: 256 };
-      const RH = { root: 110, folder: 80, request: 85 };
-      const CX = 800, CY = 550;
-
-      pos[root.id] = { x: CX - RW.root / 2, y: CY - RH.root / 2 };
-
-      if (isFlatCollection) {
-        // No folders — requests orbit root directly
-        const r = Math.max(280, rootRequests.length * 50);
-        rootRequests.forEach((node, i) => {
-          const a = (i / rootRequests.length) * Math.PI * 2 - Math.PI / 2;
-          pos[node.id] = {
-            x: CX + Math.cos(a) * r - RW.request / 2,
-            y: CY + Math.sin(a) * r - RH.request / 2,
-          };
-        });
-      } else {
-        // Ring 1: folders (+ bare requests treated as ring items)
-        const ringItems = [...rootFolders, ...rootRequests];
-        const ringCount = ringItems.length || 1;
-        const R1 = Math.max(300, ringCount * 55);
-
-        // Pre-calculate how much angular space each ring item needs
-        // Folders with children need more arc, bare requests need minimal
-        const childCounts = ringItems.map((item) =>
-          item.type === "folder" ? nodesData.filter((c) => c.parentId === item.id).length : 0,
-        );
-        const totalWeight = childCounts.reduce((s, c) => s + Math.max(1, c), 0);
-
-        let currentAngle = -Math.PI / 2; // start from top
-
-        ringItems.forEach((item, i) => {
-          const weight = Math.max(1, childCounts[i]);
-          const arcSize = (weight / totalWeight) * Math.PI * 2;
-          const itemAngle = currentAngle + arcSize / 2; // center of this item's arc
-
-          const ix = CX + Math.cos(itemAngle) * R1;
-          const iy = CY + Math.sin(itemAngle) * R1;
-          const w = RW[item.type] || RW.request;
-          const h = RH[item.type] || RH.request;
-          pos[item.id] = { x: ix - w / 2, y: iy - h / 2 };
-
-          // Ring 2: fan children outward from this folder
-          if (item.type === "folder") {
-            const children = nodesData.filter((c) => c.parentId === item.id);
-            if (children.length > 0) {
-              const R2 = Math.max(200, children.length * 26);
-              // Fan within this item's arc allocation (with padding)
-              const fanArc = arcSize * 0.8;
-              children.forEach((child, ci) => {
-                const ca = children.length === 1
-                  ? itemAngle
-                  : itemAngle - fanArc / 2 + (ci / (children.length - 1)) * fanArc;
-                pos[child.id] = {
-                  x: ix + Math.cos(ca) * R2 - RW.request / 2,
-                  y: iy + Math.sin(ca) * R2 - RH.request / 2,
-                };
-              });
-            }
-          }
-
-          currentAngle += arcSize;
-        });
-      }
-    } else if (graphStyle === "graph") {
-      // ── Clustered orbital graph layout ───────────────────
-      // Root at center → folders in a ring → requests fan outward from each folder
-      const CW = { root: 240, folder: 208, request: 256 };
-      const CH = { root: 110, folder: 80, request: 85 };
-      const CX = 750, CY = 500;
-
-      // Place root at dead center
-      pos[root.id] = { x: CX - CW.root / 2, y: CY - CH.root / 2 };
-
-      // All direct children of root form the orbital ring
-      const ringItems = nodesData.filter((n) => n.parentId === root.id);
-      const ringCount = ringItems.length || 1;
-
-      // Adaptive ring radius: more items = bigger ring
-      const R_RING = Math.max(300, ringCount * 55);
-
-      ringItems.forEach((item, i) => {
-        // Evenly distribute around the circle, starting from top (−π/2)
-        const angle = (i / ringCount) * Math.PI * 2 - Math.PI / 2;
-        const ix = CX + Math.cos(angle) * R_RING;
-        const iy = CY + Math.sin(angle) * R_RING;
-        const w = CW[item.type] || CW.request;
-        const h = CH[item.type] || CH.request;
-        pos[item.id] = { x: ix - w / 2, y: iy - h / 2 };
-
-        // If this ring item is a folder, fan its children outward
-        if (item.type === "folder") {
-          const children = nodesData.filter((c) => c.parentId === item.id);
-          if (children.length === 0) return;
-
-          // Child orbit radius: scales with count so they don't overlap
-          const R_CHILD = Math.max(200, children.length * 28);
-
-          // Fan spread: wider for more children, capped at ~130°
-          const fanSpread = Math.min(
-            Math.PI * 0.72,
-            Math.max(0.35, children.length * 0.22),
-          );
-
-          children.forEach((child, ci) => {
-            // Single child goes straight out; multiple children fan symmetrically
-            const ca =
-              children.length === 1
-                ? angle
-                : angle - fanSpread / 2 + (ci / (children.length - 1)) * fanSpread;
-
-            const rx = ix + Math.cos(ca) * R_CHILD;
-            const ry = iy + Math.sin(ca) * R_CHILD;
-            pos[child.id] = { x: rx - CW.request / 2, y: ry - CH.request / 2 };
-          });
-        }
-      });
-    } else {
-      // mindmap
-      const CHILD_STEP = 94, GROUP_GAP = 68, ROOT_X = 660, FOLD_X_L = 360, CHILD_X_L = 40, FOLD_X_R = 956, CHILD_X_R = 1228;
-      if (isFlatCollection) { const lefts = rootRequests.filter((_, i) => i % 2 === 0); const rights = rootRequests.filter((_, i) => i % 2 !== 0); const totalH = Math.max(lefts.length, rights.length) * CHILD_STEP + GROUP_GAP; pos[root.id] = { x: ROOT_X, y: totalH / 2 - 44 }; lefts.forEach((node, i) => { pos[node.id] = { x: CHILD_X_L, y: i * CHILD_STEP }; }); rights.forEach((node, i) => { pos[node.id] = { x: CHILD_X_R, y: i * CHILD_STEP }; }); }
-      else { const lefts = [], rights = []; rootFolders.forEach((n, fi) => (fi % 2 === 0 ? lefts : rights).push(n)); const numChildren = (f) => nodesData.filter((c) => c.parentId === f.id).length; const groupH = (f) => Math.max(1, numChildren(f)) * CHILD_STEP + GROUP_GAP; const totalH = (arr) => arr.reduce((s, f) => s + groupH(f), 0); const maxH = Math.max(totalH(lefts), totalH(rights), 260); pos[root.id] = { x: ROOT_X, y: maxH / 2 - 44 }; const placeGroup = (arr, folderX, childX) => { let y = 0; arr.forEach((folder) => { const children = nodesData.filter((c) => c.parentId === folder.id); const gh = groupH(folder); const usable = gh - GROUP_GAP; pos[folder.id] = { x: folderX, y: y + usable / 2 - 40 }; const span = (children.length - 1) * CHILD_STEP; const start = y + usable / 2 - span / 2 - 44; children.forEach((child, ci) => { pos[child.id] = { x: childX, y: start + ci * CHILD_STEP }; }); y += gh; }); }; placeGroup(lefts, FOLD_X_L, CHILD_X_L); placeGroup(rights, FOLD_X_R, CHILD_X_R); rootRequests.forEach((node, i) => { pos[node.id] = { x: CHILD_X_R, y: totalH(rights) + i * CHILD_STEP }; }); }
-    }
-
-    // ── Normalize: shift all positions so nothing is negative + add padding ──
-    const allPos = Object.values(pos);
-    if (allPos.length > 0) {
-      const PAD = 50;
-      const minX = Math.min(...allPos.map((p) => p.x));
-      const minY = Math.min(...allPos.map((p) => p.y));
-      if (minX < PAD || minY < PAD) {
-        const shiftX = minX < PAD ? PAD - minX : 0;
-        const shiftY = minY < PAD ? PAD - minY : 0;
-        Object.keys(pos).forEach((id) => {
-          pos[id] = { x: pos[id].x + shiftX, y: pos[id].y + shiftY };
-        });
+  /**
+   * Route an import to the right reader before it reaches the parser.
+   *
+   * A HAR and a Postman environment export are both valid JSON that mean
+   * something entirely different from a collection, and pasted cURL is not
+   * JSON at all.
+   */
+  const handleImportText = useCallback((text) => {
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return null;
+    if (looksLikeCurl(trimmed)) return { kind: "collection", data: curlToCollection(trimmed) };
+    let data;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      try {
+        data = yaml.load(trimmed);
+      } catch {
+        return null;
       }
     }
-
-    return pos;
-  }, [graphStyle]);
-
-  const handleVisualize = useCallback((data) => {
-    const parsed = parseCollection(data, setStats);
-    setDetectedFormat(Array.isArray(data) ? "Custom JSON" : formatLabel(data));
-    setCollection(data); setNodes(parsed); setSelectedNode(null); setCollapsedFolders(new Set()); setZoom(1); setPanX(0); setPanY(0); setView("graph");
+    if (!data || typeof data !== "object") return null;
+    if (looksLikeHar(data)) {
+      const { collection: har, stats } = harToCollection(data);
+      return { kind: "collection", data: har, note: `${stats.imported} of ${stats.entries} recorded requests kept; ${stats.skipped} assets and ${stats.duplicates} repeats skipped.` };
+    }
+    if (isPostmanVariableFile(data)) {
+      return { kind: "environment", data: readPostmanVariableFile(data) };
+    }
+    return { kind: "collection", data };
   }, []);
+
+  const handleVisualize = useCallback((data, { sourceUrl = "" } = {}) => {
+    const parsed = parseCollection(data, setStats);
+    const format = Array.isArray(data) ? "Custom JSON" : formatLabel(data);
+    setDetectedFormat(format);
+    setCollection(data); setNodes(parsed); setSelectedNode(null); setZoom(1); setPanX(0); setPanY(0);
+    setCollapsedFolders(new Set(parsed.filter((n) => n.type === "folder").map((n) => n.id)));
+    setSearchQuery(""); setFilterMethod("all"); setCenterTab("map");
+    setLiveResponses({});
+    // OpenAPI defines a relative server URL as relative to where the
+    // document itself was served from, so a spec fetched from a URL already
+    // says where its "/api/v3" lives.
+    setPlaygroundOrigin(relativeServerOrigin(parsed, sourceUrl));
+    setVariableOverrides({});
+    setAssistantThread([]);
+    setAiHighlight(new Set());
+    setImportedAt(new Date().toISOString());
+    const list = addRecent({
+      name: data?.info?.name || data?.info?.title || data?.name || "API Collection",
+      format,
+      endpoints: parsed.filter((n) => n.type === "request").length,
+      data,
+    });
+    setRecents(list);
+    currentRecentRef.current = list[0]?.id || null;
+    setView("graph");
+  }, [setSearchQuery]);
 
   const handleLoadSample = useCallback((format = "postman") => { handleVisualize(SAMPLE_DATA[format] || SAMPLE_DATA.postman); }, [handleVisualize]);
 
+  // Recent entries only carry metadata; the spec is fetched on demand.
+  const handleOpenRecent = useCallback(async (entry) => {
+    const data = await loadRecentData(entry);
+    if (data) handleVisualize(data);
+  }, [handleVisualize]);
+
+  // ── Postman companion ──────────────────────
+  // A collection pulled straight from a workspace behaves exactly like one
+  // dragged in from a file; the only difference is where it came from.
+  const handlePullFromPostman = useCallback((document, name) => {
+    handleVisualize(document);
+    setPushLabel(name ? `pulled from ${name}` : "");
+  }, [handleVisualize]);
+
+  const handlePulledEnvironment = useCallback((environment) => {
+    setPulledEnvironment(environment);
+    // Keep it for next time too, so a pulled environment behaves like any other.
+    const stored = importEnvironment(environment);
+    setActiveEnvId(stored.id);
+  }, []);
+
+  /** Hand the current collection to the push flow, converted if it is a spec. */
+  const openPostmanPush = useCallback(() => requireAccount(() => {
+    if (!nodes.length) return;
+    try {
+      const text = convertSpec("postman", {
+        spec: collection,
+        nodes,
+        origin: playgroundOrigin,
+        variables,
+      }).text;
+      setPushPayload(JSON.parse(text));
+      setPushLabel(/postman/i.test(detectedFormat) ? "" : `converted from ${detectedFormat}`);
+      setShowPostman(true);
+    } catch {
+      setPushPayload(null);
+    }
+  }), [collection, nodes, detectedFormat, playgroundOrigin, variables, requireAccount]);
+
+  /** Apply the chosen repairs and reload the workspace from the result. */
+  const handleApplyFixes = useCallback((ids) => {
+    if (!collection || !ids.length) return;
+    const { collection: fixed, changes } = applyFixes(collection, ids);
+    handleVisualize(fixed);
+    setPushPayload(fixed);
+    setPushLabel(`${changes.length} repair${changes.length === 1 ? "" : "s"} applied`);
+    setCenterTab("audit");
+  }, [collection, handleVisualize]);
+
+  /** Take the drafted documentation the user picked and reload from the copy. */
+  const handleApplyEnrichment = useCallback(({ spec, changes }) => {
+    if (!spec || !changes.length) return;
+    handleVisualize(spec);
+    if (spec.item) setPushPayload(spec);
+    setPushLabel(`${changes.length} field${changes.length === 1 ? "" : "s"} drafted by AI`);
+    setCenterTab("audit");
+  }, [handleVisualize]);
+
+  // ── Coverage ───────────────────────────────
+  const handleCompareFile = useCallback((file) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = handleImportText(ev.target.result);
+      if (!result || result.kind !== "collection") return;
+      const parsed = parseCollection(result.data, () => {});
+      setCompare({
+        nodes: parsed,
+        name: result.data?.info?.name || result.data?.info?.title || file.name,
+        format: Array.isArray(result.data) ? "Custom JSON" : formatLabel(result.data),
+      });
+    };
+    reader.readAsText(file);
+  }, [handleImportText]);
+
+  /** Turn the uncovered endpoints into a collection ready to push. */
+  const handleGenerateMissing = useCallback((items, count) => requireAccount(() => {
+    if (!items.length) return;
+    setPushPayload({
+      info: {
+        name: `${collection?.info?.name || collection?.info?.title || "API"} — missing endpoints`,
+        schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+      },
+      item: items,
+    });
+    setPushLabel(`${count} endpoint${count === 1 ? "" : "s"} with no request`);
+    setShowPostman(true);
+  }), [collection, requireAccount]);
+
   // ── Share link handler ─────────────────────
+  // A link carries the whole spec in its query string. Past a few tens of
+  // kilobytes that link is rejected by every proxy in the path, so the spec
+  // is handed over as a file rather than as a URL nobody can open.
   const handleShare = useCallback(() => {
     if (!collection) return;
-    const url = generateShareUrl(collection);
-    if (url) {
-      navigator.clipboard.writeText(url);
+    const result = generateShareUrl(collection);
+    if (result.ok) {
+      navigator.clipboard?.writeText(result.url);
+      setShareState(null);
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2500);
+      return;
     }
+    setShareState({
+      bytes: result.bytes,
+      urlLength: result.urlLength || 0,
+    });
   }, [collection]);
 
-  // ── Auto-load shared spec from URL on mount ──
+  /** An <iframe> snippet for a README, a wiki or a pull request. */
+  const handleCopyEmbed = useCallback(() => {
+    if (!collection) return;
+    const result = generateEmbedSnippet(collection);
+    if (result.ok) {
+      navigator.clipboard?.writeText(result.snippet);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+      return;
+    }
+    setShareState({ bytes: result.bytes, urlLength: result.urlLength || 0 });
+  }, [collection]);
+
+  const handleShareDownload = useCallback(() => {
+    if (!collection) return;
+    downloadSpecFile(
+      collection,
+      collection?.info?.name || collection?.info?.title || "api-spec",
+    );
+    setShareState(null);
+  }, [collection]);
+
+  // ── Auto-load a shared spec, or the sample the landing page asked for ──
+  // Reading the URL is the one thing that cannot happen during render: it
+  // also rewrites the address bar and then loads a whole specification.
   useEffect(() => {
+    // A document handed over from Contract Graph ("Open in API Explorer").
+    const handed = location.state?.openSpec;
+    if (handed && typeof handed === "object") {
+      navigate(location.pathname, { replace: true, state: null });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      handleVisualize(handed);
+      return;
+    }
     const shared = extractSharedSpec();
     if (shared) {
       // Clean URL without reloading
       window.history.replaceState({}, "", window.location.pathname);
       handleVisualize(shared);
+      return;
+    }
+    const query = new URLSearchParams(window.location.search);
+    const demo = query.get("demo");
+    if (demo && SAMPLE_DATA[demo]) {
+      window.history.replaceState({}, "", window.location.pathname);
+      handleLoadSample(demo);
+      return;
+    }
+    // Home links straight to a recent import or to a tool that needs no
+    // document (diff, breaking changes).
+    const recentId = query.get("recent");
+    const tool = query.get("tool");
+    if (recentId || tool) {
+      window.history.replaceState({}, "", window.location.pathname);
+      const entry = recentId ? getRecents().find((r) => r.id === recentId) : null;
+      if (entry) handleOpenRecent(entry);
+      // Back from sign-in: reopen the tool that asked for the account.
+      if (tool === "postman" && getSession()) {
+        setPushPayload(null);
+        setShowPostman(true);
+      }
+      return;
+    }
+    const wanted = query.get("view");
+    if (wanted === "diff" || wanted === "breaking") {
+      window.history.replaceState({}, "", window.location.pathname);
+      setReturnView("input");
+      setView(wanted);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-fit, but only when the spec or the layout actually changed —
+  // collapsing a group should re-pack without yanking the viewport.
+  const fitSignature = `${graphStyle}|${importedAt || ""}`;
+  const lastFitRef = useRef(null);
   useEffect(() => {
-    if (nodes.length > 0) {
-      const newPos = calculatePositions(nodes);
-      setNodePositions(newPos);
-      setShowRipple(true);
-      setTimeout(() => setShowRipple(false), 600);
-      // Auto-fit view after layout change so all nodes are visible
-      setTimeout(() => {
-        if (!canvasRef.current) return;
-        const positions = Object.values(newPos);
-        if (!positions.length) return;
-        const minX = Math.min(...positions.map((p) => p.x));
-        const minY = Math.min(...positions.map((p) => p.y));
-        const maxX = Math.max(...positions.map((p) => p.x)) + 280;
-        const maxY = Math.max(...positions.map((p) => p.y)) + 120;
-        const cW = canvasRef.current.offsetWidth;
-        const cH = canvasRef.current.offsetHeight;
-        const newZoom = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.2);
-        setZoom(newZoom);
-        setPanX(-minX + 40 / newZoom);
-        setPanY(-minY + 40 / newZoom);
-        canvasRef.current.scrollLeft = 0;
-        canvasRef.current.scrollTop = 0;
-      }, 60);
-    }
-  }, [graphStyle, nodes, calculatePositions]);
+    if (nodes.length === 0 || lastFitRef.current === fitSignature) return;
+    lastFitRef.current = fitSignature;
+    const rippleOn = setTimeout(() => setShowRipple(true), 0);
+    const ripple = setTimeout(() => setShowRipple(false), 620);
+    const fit = setTimeout(() => {
+      const el = canvasRef.current;
+      const bounds = boundsRef.current;
+      if (!el || !bounds) return;
+      const newZoom = fitZoom(bounds, el.offsetWidth, el.offsetHeight, 1.2);
+      setZoom(newZoom);
+      setPanX(-bounds.minX + 40 / newZoom);
+      setPanY(-bounds.minY + 40 / newZoom);
+      el.scrollLeft = 0;
+      el.scrollTop = 0;
+    }, 80);
+    return () => {
+      clearTimeout(rippleOn);
+      clearTimeout(ripple);
+      clearTimeout(fit);
+    };
+  }, [fitSignature, nodes.length]);
+
+  // Stable identity so memoised cards are not invalidated every render.
+  const handleSelectNode = useCallback((node) => {
+    setSelectedNode(node);
+    setInspectorOpen(true);
+  }, []);
 
   const handleNodeMouseDown = useCallback((e, nodeId) => {
     if (e.button !== 0) return; e.preventDefault();
@@ -392,45 +664,135 @@ const PostmanGraphViewer = () => {
 
   useEffect(() => {
     if (!draggedNodeId) return;
-    const onMove = (e) => { const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return; const scrollLeft = canvasRef.current?.scrollLeft || 0; const scrollTop = canvasRef.current?.scrollTop || 0; const mx = (e.clientX - rect.left + scrollLeft) / zoom - panX; const my = (e.clientY - rect.top + scrollTop) / zoom - panY; setNodePositions((prev) => ({ ...prev, [draggedNodeId]: { x: mx - dragOffset.x, y: my - dragOffset.y } })); };
+    const onMove = (e) => { const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return; const scrollLeft = canvasRef.current?.scrollLeft || 0; const scrollTop = canvasRef.current?.scrollTop || 0; const mx = (e.clientX - rect.left + scrollLeft) / zoom - panX; const my = (e.clientY - rect.top + scrollTop) / zoom - panY; moveNode(draggedNodeId, { x: mx - dragOffset.x, y: my - dragOffset.y }); };
     const onUp = () => setDraggedNodeId(null);
     document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-  }, [draggedNodeId, dragOffset, zoom, panX, panY]);
+  }, [draggedNodeId, dragOffset, zoom, panX, panY, moveNode]);
 
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); document.querySelector('input[placeholder*="Search"]')?.focus(); }
-      if (e.key === "Escape") { setSelectedNode(null); setShowPlayground(false); }
-      if (e.key === "Delete" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") setSearchQuery("");
-      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) { e.preventDefault(); const s = 24; if (e.key === "ArrowUp") setPanY((p) => p + s); if (e.key === "ArrowDown") setPanY((p) => p - s); if (e.key === "ArrowLeft") setPanX((p) => p + s); if (e.key === "ArrowRight") setPanX((p) => p - s); }
+      const el = document.activeElement;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setSidebarOpen(true);
+        searchInputRef.current?.focus();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "i" || e.key === "I")) {
+        e.preventDefault();
+        setShowAssistant((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showPalette) { setShowPalette(false); return; }
+        if (showAssistant && !typing) { setShowAssistant(false); return; }
+        setSelectedNode(null); setShowPlayground(false); setPlaygroundScratch(false);
+        return;
+      }
+      if (showPalette) return;
+      if (e.key === "Delete" && !typing) setSearchQuery("");
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        if (typing) return;
+        e.preventDefault(); const s = 24;
+        if (e.key === "ArrowUp") setPanY((p) => p + s);
+        if (e.key === "ArrowDown") setPanY((p) => p - s);
+        if (e.key === "ArrowLeft") setPanX((p) => p + s);
+        if (e.key === "ArrowRight") setPanX((p) => p - s);
+      }
     };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [showPalette, showAssistant, setSearchQuery]);
 
   useEffect(() => {
-    if (view !== "graph") return; const el = canvasRef.current; if (!el) return;
-    const onWheel = (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom((z) => Math.min(3, Math.max(0.3, z * (e.deltaY < 0 ? 1.1 : 0.9)))); } };
+    if (view !== "graph" || centerTab !== "map") return undefined;
+    const el = canvasRef.current; if (!el) return undefined;
+    const onWheel = (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.1 : 0.9)))); } };
     el.addEventListener("wheel", onWheel, { passive: false }); return () => el.removeEventListener("wheel", onWheel);
-  }, [view]);
+  }, [view, centerTab]);
+
+  // Track the visible slice of the canvas in graph coordinates. Coalesced to
+  // one update per frame so a scroll gesture costs a single re-render.
+  useEffect(() => {
+    if (view !== "graph" || centerTab !== "map") return undefined;
+    const el = canvasRef.current;
+    if (!el) return undefined;
+
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      setViewport((prev) => {
+        const next = {
+          left: el.scrollLeft / zoom - panX,
+          top: el.scrollTop / zoom - panY,
+          w: el.clientWidth / zoom,
+          h: el.clientHeight / zoom,
+        };
+        if (
+          Math.abs(next.left - prev.left) < 1 &&
+          Math.abs(next.top - prev.top) < 1 &&
+          Math.abs(next.w - prev.w) < 1 &&
+          Math.abs(next.h - prev.h) < 1
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(read);
+    };
+
+    read();
+    el.addEventListener("scroll", schedule, { passive: true });
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null;
+    observer?.observe(el);
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", schedule);
+      observer?.disconnect();
+    };
+  }, [view, centerTab, zoom, panX, panY]);
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   const handleReset = () => { setZoom(1); setPanX(0); setPanY(0); };
   const handleFitView = useCallback(() => {
-    const positions = Object.values(nodePositions); if (!positions.length || !canvasRef.current) return;
-    const minX = Math.min(...positions.map((p) => p.x)); const minY = Math.min(...positions.map((p) => p.y));
-    const maxX = Math.max(...positions.map((p) => p.x)) + 280; const maxY = Math.max(...positions.map((p) => p.y)) + 110;
-    const cW = canvasRef.current.offsetWidth; const cH = canvasRef.current.offsetHeight;
-    const newZoom = Math.min(cW / (maxX - minX + 80), cH / (maxY - minY + 80), 1.4);
-    setZoom(newZoom); setPanX(-minX + 40 / newZoom); setPanY(-minY + 40 / newZoom);
-    canvasRef.current.scrollLeft = 0; canvasRef.current.scrollTop = 0;
-  }, [nodePositions]);
+    const el = canvasRef.current;
+    if (!visibleBounds || !el) return;
+    const newZoom = fitZoom(visibleBounds, el.offsetWidth, el.offsetHeight, 1.4);
+    setZoom(newZoom);
+    setPanX(-visibleBounds.minX + 40 / newZoom);
+    setPanY(-visibleBounds.minY + 40 / newZoom);
+    el.scrollLeft = 0;
+    el.scrollTop = 0;
+  }, [visibleBounds]);
 
   // ── Focus on a single node: zoom in + scroll to center it ──
   const focusOnNode = useCallback((nodeId) => {
-    const pos = nodePositions[nodeId];
+    const pos = positionsRef.current[nodeId];
     if (!pos || !canvasRef.current) return;
     const el = canvasRef.current;
-    const cW = el.offsetWidth;
+    // The assistant drawer floats over the canvas's right edge; centre the
+    // node in the part of the canvas that is actually visible beside it.
+    const drawer = document.querySelector('aside[aria-label="Assistant"]');
+    const covered = drawer
+      ? Math.max(0, el.getBoundingClientRect().right - drawer.getBoundingClientRect().left)
+      : 0;
+    const cW = el.offsetWidth - Math.min(covered, el.offsetWidth * 0.6);
     const cH = el.offsetHeight;
     // Zoom to a comfortable level to see the node clearly
     const targetZoom = 1.15;
@@ -448,7 +810,92 @@ const PostmanGraphViewer = () => {
         behavior: "smooth",
       });
     });
-  }, [nodePositions]);
+  }, []);
+
+  // ── Select from a list (explorer, table, palette) and reveal on the map ──
+  const selectAndReveal = useCallback((node) => {
+    if (!node) return;
+    setCollapsedFolders((prev) => {
+      if (!prev.size) return prev;
+      const chain = ancestorsOf(nodes, node.id);
+      if (!chain.some((id) => prev.has(id))) return prev;
+      const next = new Set(prev);
+      chain.forEach((id) => next.delete(id));
+      return next;
+    });
+    setSelectedNode(node);
+    setInspectorOpen(true);
+    setSidebarOpen(false);
+    // Runs after the canvas has mounted; focusOnNode no-ops when it has not.
+    setTimeout(() => focusOnNode(node.id), 60);
+  }, [nodes, focusOnNode]);
+
+  // What the assistant is allowed to do to the workspace.
+  const assistantActions = useMemo(() => ({
+    showNodes: (ids) => {
+      const targets = ids.map((id) => nodes.find((n) => n.id === id)).filter(Boolean);
+      if (!targets.length) return;
+      setAiHighlight(new Set(targets.map((n) => n.id)));
+      setCenterTab("map");
+      // Open every group involved so the highlighted cards are on the canvas.
+      setCollapsedFolders((prev) => {
+        if (!prev.size) return prev;
+        const next = new Set(prev);
+        targets.forEach((n) => ancestorsOf(nodes, n.id).forEach((id) => next.delete(id)));
+        return next.size === prev.size ? prev : next;
+      });
+      setSelectedNode(targets[0]);
+      setTimeout(() => focusOnNode(targets[0].id), 80);
+    },
+    filterMap: ({ query, method } = {}) => {
+      setCenterTab("map");
+      if (typeof query === "string") setSearchQuery(query);
+      if (method) {
+        const m = String(method).toUpperCase();
+        setFilterMethod(m === "ALL" ? "all" : m);
+      }
+    },
+  }), [nodes, focusOnNode, setSearchQuery]);
+
+  const openPlayground = useCallback(() => {
+    const target = selectedNode?.type === "request"
+      ? selectedNode
+      : nodes.find((n) => n.type === "request");
+    if (target && target !== selectedNode) setSelectedNode(target);
+    // Nothing to pick from: open blank rather than not at all.
+    setPlaygroundScratch(!target);
+    setShowPlayground(true);
+  }, [selectedNode, nodes]);
+
+  const openBlankRequest = useCallback(() => {
+    setPlaygroundScratch(true);
+    setShowPlayground(true);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else canvasShellRef.current?.requestFullscreen?.();
+  }, []);
+
+  const openTool = useCallback((setter) => {
+    setReturnView("graph");
+    setter(true);
+  }, []);
+
+  const openFullView = useCallback((next) => {
+    setReturnView(view);
+    setView(next);
+  }, [view]);
+
+  /** Hand the loaded document to the multi-service map. */
+  const openContractGraph = useCallback(() => {
+    if (!collection) {
+      navigate("/graph");
+      return;
+    }
+    const name = collection?.info?.title || collection?.info?.name || collection?.name || "";
+    navigate("/graph", { state: { addSpec: collection, name } });
+  }, [collection, navigate]);
 
   // ── Sorted match list (stable order) ──
   const matchList = useMemo(() => {
@@ -459,20 +906,21 @@ const PostmanGraphViewer = () => {
     );
   }, [nodes, searchQuery]);
 
-  // ── Reset index when search text changes ──
-  useEffect(() => { setFocusedMatchIdx(0); }, [searchQuery]);
-
   // ── Focus on the currently indexed match ──
+  // The index changes on an event, but the list it indexes into is derived
+  // from the nodes and the query, so the selection can only be worked out
+  // once that list has been recomputed — which is here, not in the handler.
   useEffect(() => {
-    if (view !== "graph" || matchList.length === 0) return;
+    if (view !== "graph" || centerTab !== "map" || matchList.length === 0) return;
     const idx = Math.min(focusedMatchIdx, matchList.length - 1);
     const target = matchList[idx];
     if (target) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedNode(target);
       const timer = setTimeout(() => focusOnNode(target.id), 120);
       return () => clearTimeout(timer);
     }
-  }, [focusedMatchIdx, matchList, view, focusOnNode]);
+  }, [focusedMatchIdx, matchList, view, centerTab, focusOnNode]);
 
   // ── Navigate matches: Enter = next, Shift+Enter = prev ──
   const handleSearchKeyDown = useCallback((e) => {
@@ -495,268 +943,92 @@ const PostmanGraphViewer = () => {
     }
   }, [matchList]);
 
-  return (
-    <div className="w-full h-screen bg-[#0c0e12] text-[#f8f9fe] flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="bg-[#0c0e12] border-b border-[#46484c]/20 px-5 py-3 flex items-center gap-4 backdrop-blur-xl flex-shrink-0 transition-all duration-300 relative z-50">
-        <div className="flex items-center gap-3 flex-shrink-0">
-          {view === "graph" && (
-            <button onClick={() => setView("input")} className="p-1.5 hover:bg-[#22262b] rounded-lg text-[#a9abb0] hover:text-white transition-all duration-200 hover:scale-105 group">
-              <ArrowLeft size={17} className="group-hover:-translate-x-0.5 transition-transform duration-200" />
-            </button>
-          )}
-          <div className="text-xl font-black text-[#e08efe] tracking-tight">Vizroute</div>
-          {view === "graph" && collection && (<span className="text-sm text-[#73757a] truncate max-w-40">{collection.info?.name || "API Collection"}</span>)}
-        </div>
+  // ── Command palette actions (all wired to existing behaviour) ──
+  const commands = useMemo(() => [
+    { id: "import", group: "Actions", icon: Plus, label: "Import API", hint: "Back to the import screen", keywords: "upload paste url new spec", run: () => setView("input") },
+    { id: "search", group: "Actions", icon: Search, label: "Search endpoints", hint: "Ctrl /", keywords: "find filter", run: () => { setSidebarOpen(true); setTimeout(() => searchInputRef.current?.focus(), 30); } },
+    { id: "playground", group: "Actions", icon: Play, label: "Open playground", hint: "Send a real request", keywords: "try request http send", run: openPlayground },
+    { id: "playground-new", group: "Actions", icon: Play, label: "New request", hint: "Test any URL from scratch", keywords: "blank playground try request http send", run: openBlankRequest },
+    { id: "assistant", group: "Actions", icon: WandSparkles, label: "Ask the map", hint: "Ctrl I · AI assistant over this spec", keywords: "ai assistant chat ask question llm explain", run: () => setShowAssistant(true) },
+    { id: "enrich", group: "Actions", icon: WandSparkles, label: "Draft missing documentation with AI", hint: "Summaries, descriptions, operation ids, tags", keywords: "ai docs describe summary operationid tags enrich generate", run: () => setCenterTab("audit") },
+    { id: "fit", group: "Canvas", icon: Scan, label: "Fit graph", keywords: "zoom fit all", run: () => { setCenterTab("map"); handleFitView(); } },
+    { id: "reset", group: "Canvas", icon: RotateCcw, label: "Reset view", keywords: "zoom 100 pan", run: () => { setCenterTab("map"); handleReset(); } },
+    { id: "focus", group: "Canvas", icon: Crosshair, label: "Center selected node", keywords: "focus", run: () => { if (selectedNode) { setCenterTab("map"); focusOnNode(selectedNode.id); } } },
+    ...GRAPH_STYLES.map((style) => ({
+      id: `layout-${style}`, group: "Layout", icon: Waypoints,
+      label: `Switch layout: ${LAYOUT_LABELS[style] || style}`,
+      keywords: `graph layout ${style}`,
+      run: () => { setCenterTab("map"); setGraphStyle(style); },
+    })),
+    { id: "view-map", group: "Views", icon: Waypoints, label: "Open API Map", keywords: "graph canvas", run: () => setCenterTab("map") },
+    { id: "view-table", group: "Views", icon: Table2, label: "Open Table View", keywords: "list rows", run: () => setCenterTab("table") },
+    { id: "view-raw", group: "Views", icon: Braces, label: "Open Raw Spec", keywords: "json source", run: () => setCenterTab("raw") },
+    { id: "view-audit", group: "Views", icon: ShieldCheck, label: "Open audit", hint: "Lint, security and quality checks", keywords: "lint score security quality issues", run: () => setCenterTab("audit") },
+    { id: "view-coverage", group: "Views", icon: Target, label: "Open coverage", hint: "Compare a spec against a collection", keywords: "coverage missing endpoints gap compare spec collection qa", run: () => setCenterTab("coverage") },
+    { id: "postman-open", group: "Tools", icon: user ? Wifi : Lock, label: "Open a collection from Postman", hint: user ? "Browse your workspaces" : "Sign in required", keywords: "postman workspace pull import account api key", run: () => requireAccount(() => { setPushPayload(null); setShowPostman(true); }) },
+    { id: "postman-push", group: "Tools", icon: user ? Upload : Lock, label: "Send this collection to Postman", hint: user ? "Create or overwrite in a workspace" : "Sign in required", keywords: "postman push export workspace upload sync", run: openPostmanPush },
+    { id: "export", group: "Views", icon: Download, label: "Export or convert", hint: "OpenAPI, Swagger, Postman, PNG, SVG, CSV", keywords: "png svg json yaml download openapi swagger postman convert http csv", run: () => { setCenterTab("map"); setExportOpen(true); } },
+    { id: "share", group: "Views", icon: Link2, label: "Copy share link", keywords: "url share", run: handleShare },
+    { id: "embed", group: "Views", icon: Code2, label: "Copy embed code", hint: "An iframe for a README or wiki", keywords: "iframe embed readme confluence wiki publish", run: handleCopyEmbed },
+    { id: "save", group: "Tools", icon: Save, label: "Save to collections", keywords: "store bookmark", run: () => openTool(setShowSaveModal) },
+    { id: "collections", group: "Tools", icon: FolderOpen, label: "My collections", keywords: "saved open", run: () => openTool(setShowCollections) },
+    { id: "docs", group: "Tools", icon: BookOpen, label: "Generate docs", keywords: "documentation markdown", run: () => openTool(setShowDocGenerator) },
+    { id: "health", group: "Tools", icon: Activity, label: "Health monitor", keywords: "uptime ping", run: () => openTool(setShowHealthMonitor) },
+    { id: "flow", group: "Tools", icon: Zap, label: "Test flow builder", keywords: "chain scenario", run: () => openTool(setShowFlowBuilder) },
+    { id: "env", group: "Tools", icon: Globe, label: "Environments", keywords: "variables", run: () => openTool(setShowEnvManager) },
+    { id: "mock", group: "Tools", icon: Server, label: "Mock server", keywords: "stub fake", run: () => openTool(setShowMockServer) },
+    { id: "load", group: "Tools", icon: BarChart3, label: "Load tester", keywords: "benchmark stress", run: () => openTool(setShowLoadTester) },
+    { id: "workspace", group: "Tools", icon: Users, label: "Workspaces", keywords: "team", run: () => openTool(setShowWorkspace) },
+    { id: "autoimport", group: "Tools", icon: Wifi, label: "Auto-import from URL", keywords: "github sync remote", run: () => openTool(setShowAutoImport) },
+    { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
+    { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
+    { id: "multi", group: "Tools", icon: Network, label: "Add to Contract Graph", hint: "Map this API with the rest of the estate", keywords: "services dependencies multi contract graph estate", run: openContractGraph },
+  ], [openPlayground, openBlankRequest, openContractGraph, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush, requireAccount, user]);
 
-        {view === "graph" && (
-          <div className="flex items-center gap-3 ml-auto">
-            {/* Search */}
-            <div className="relative group">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#73757a] group-focus-within:text-[#a9abb0] transition-colors" />
-              <input type="text" placeholder="Search... (Ctrl+K)" value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className="w-64 bg-[#22262b]/50 border border-[#46484c]/30 rounded-lg py-1.5 pl-9 pr-20 text-sm text-white placeholder:text-[#73757a] focus:border-[#e08efe]/50 focus:ring-1 focus:ring-[#e08efe]/20 transition-all duration-200 backdrop-blur-sm" />
-              {searchQuery && (
-                <>
-                  <span className="absolute right-8 top-1/2 -translate-y-1/2 text-[10px] text-[#a9abb0] font-mono tabular-nums">
-                    {matchList.length > 0 ? (
-                      <><span className="text-[#e08efe] font-bold">{Math.min(focusedMatchIdx + 1, matchList.length)}</span><span className="text-[#73757a]">/{matchList.length}</span></>
-                    ) : (
-                      <span className="text-[#ff6e84]">0</span>
-                    )}
-                  </span>
-                  <button onClick={() => { setSearchQuery(""); setSelectedNode(null); handleFitView(); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#73757a] hover:text-white transition-colors"><X size={13} /></button>
-                </>
-              )}
-            </div>
+  const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
+  const liveResponse = selectedNode ? liveResponses[selectedNode.id] : null;
 
-            {/* Method filter */}
-            <div className="flex items-center gap-0.5 bg-[#22262b]/40 border border-[#46484c]/30 rounded-lg p-1">
-              {["all", "GET", "POST", "PUT", "DELETE"].map((m) => (
-                <button key={m} onClick={() => setFilterMethod(m)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-all duration-200 ${filterMethod === m ? "bg-[#e08efe] text-[#0c0e12] shadow-md shadow-[#e08efe]/20 animate-pill" : "text-[#73757a] hover:text-[#a9abb0]"}`}>
-                  {m === "all" ? "All" : m}
-                </button>
-              ))}
-            </div>
+  const inspector = (
+    <EndpointInspector
+      key={selectedNode?.id || "empty"}
+      node={selectedNode}
+      nodes={nodes}
+      spec={collection}
+      liveResponse={liveResponse}
+      variables={variables}
+      variableFlow={variableFlow}
+      onTest={() => { setPlaygroundScratch(false); setShowPlayground(true); }}
+      onSelectNode={selectAndReveal}
+      onClose={() => setInspectorOpen(false)}
+    />
+  );
 
-            {/* Graph style */}
-            <div className="relative">
-              <button onClick={() => setShowGraphMenu(!showGraphMenu)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#e08efe]/8 border border-[#e08efe]/20 rounded-lg hover:border-[#e08efe]/40 hover:bg-[#e08efe]/12 transition-all duration-200 text-[#e08efe] text-sm font-semibold group">
-                <Code size={14} />{graphStyle.charAt(0).toUpperCase() + graphStyle.slice(1)}
-                <ChevronDown size={14} className={`transition-transform duration-300 ${showGraphMenu ? "rotate-180" : ""}`} />
-              </button>
-              {showGraphMenu && (
-                <div className="absolute right-0 mt-2 w-44 bg-[#22262b]/95 border border-[#46484c]/40 rounded-xl shadow-2xl z-50 backdrop-blur-xl overflow-hidden" style={{ animation: "scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-                  {GRAPH_STYLES.map((s, i) => (
-                    <button key={s} onClick={() => { setGraphStyle(s); setShowGraphMenu(false); }}
-                      className={`w-full text-left px-4 py-2.5 text-sm transition-all duration-200 border-l-2 hover:bg-white/5 ${graphStyle === s ? "text-[#e08efe] border-[#e08efe] bg-[#e08efe]/8" : "text-[#a9abb0] border-transparent"}`}
-                      style={{ animation: `slideInUp 0.2s ease-out ${i * 40}ms both` }}>{s.charAt(0).toUpperCase() + s.slice(1)}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Particles toggle */}
-            <button onClick={() => setShowParticles((v) => !v)}
-              className={`p-2 rounded-lg transition-all duration-200 ${showParticles ? "bg-[#e08efe]/10 text-[#e08efe] border border-[#e08efe]/20" : "text-[#73757a] hover:text-[#a9abb0] hover:bg-[#22262b]"}`}
-              title={showParticles ? "Hide particle flow" : "Show particle flow"}>
-              <Sparkles size={15} />
-            </button>
-
-            <div className="w-px h-5 bg-[#46484c]/30 mx-0.5" />
-
-            {/* Export */}
-            <ExportMenu paperRef={paperRef} graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"} />
-
-            {/* Save to collection */}
-            <button onClick={() => setShowSaveModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#22262b]/60 border border-[#46484c]/30 rounded-lg hover:border-[#46484c]/60 hover:bg-[#22262b] transition-all duration-200 text-[#a9abb0] hover:text-white text-sm font-semibold"
-              title="Save to collections">
-              <Save size={14} /> Save
-            </button>
-
-            {/* Share link */}
-            <button onClick={handleShare}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all duration-200 text-sm font-semibold ${
-                shareCopied
-                  ? "bg-[#81ecff]/10 border-[#81ecff]/30 text-[#81ecff]"
-                  : "bg-[#22262b]/60 border-[#46484c]/30 hover:border-[#46484c]/60 hover:bg-[#22262b] text-[#a9abb0] hover:text-white"
-              }`}
-              title="Copy shareable link">
-              {shareCopied ? <><Check size={14} /> Copied!</> : <><Link2 size={14} /> Share</>}
-            </button>
-
-            <div className="w-px h-5 bg-[#46484c]/30 mx-0.5" />
-
-            {/* Health Monitor */}
-            <button onClick={() => setShowHealthMonitor(true)}
-              className="p-2 rounded-lg text-[#a9abb0] hover:text-[#81ecff] hover:bg-[#22262b] transition-all duration-200"
-              title="Health Monitor">
-              <Activity size={15} />
-            </button>
-
-            {/* Flow Builder */}
-            <button onClick={() => setShowFlowBuilder(true)}
-              className="p-2 rounded-lg text-[#a9abb0] hover:text-[#e08efe] hover:bg-[#22262b] transition-all duration-200"
-              title="Test Flow Builder">
-              <Zap size={15} />
-            </button>
-
-            {/* Environment */}
-            <button onClick={() => setShowEnvManager(true)}
-              className={`p-2 rounded-lg transition-all duration-200 ${
-                activeEnvId
-                  ? "bg-[#e08efe]/10 text-[#e08efe] border border-[#e08efe]/20"
-                  : "text-[#a9abb0] hover:text-white hover:bg-[#22262b]"
-              }`}
-              title="Environments">
-              <Globe size={15} />
-            </button>
-
-            {/* Menu */}
-            <div className="relative">
-              <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-white"><Menu size={18} /></button>
-              {showMenu && (
-                <div className="absolute right-0 mt-2 w-52 bg-[#22262b]/95 border border-[#46484c]/40 rounded-xl shadow-2xl z-50 backdrop-blur-xl overflow-hidden" style={{ animation: "scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both" }}>
-                  <button onClick={() => { setShowDocGenerator(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BookOpen size={14} className="text-[#3aa2ff]" /> Generate Docs</button>
-                  <button onClick={() => { setShowMockServer(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Server size={14} className="text-[#81ecff]" /> Mock Server</button>
-                  <button onClick={() => { setShowLoadTester(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><BarChart3 size={14} className="text-[#fbbf24]" /> Load Tester</button>
-                  <button onClick={() => { setShowWorkspace(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><Users size={14} className="text-[#34d399]" /> Workspace</button>
-                  <div className="border-t border-[#46484c]/30 my-1" />
-                  <button onClick={() => { handleReset(); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-[#a9abb0] hover:text-white text-sm flex items-center gap-2.5 transition-all duration-200"><RotateCcw size={14} className="text-[#73757a]" /> Reset View</button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </header>
-
-      {/* Stats bar */}
-      {view === "graph" && (
-        <div className="bg-[#111417]/60 border-b border-[#46484c]/15 px-5 py-2 flex items-center gap-6 flex-shrink-0 backdrop-blur-sm" style={{ animation: "slideInUp 0.3s ease-out both" }}>
-          {[
-            { label: "TOTAL", val: stats.total, cls: "text-white" },
-            { label: "GET", val: stats.get, cls: "text-emerald-400", dot: "bg-emerald-500" },
-            { label: "POST", val: stats.post, cls: "text-amber-400", dot: "bg-amber-500" },
-            { label: "PUT", val: stats.put, cls: "text-blue-400", dot: "bg-blue-500" },
-            { label: "PATCH", val: stats.patch, cls: "text-purple-400", dot: "bg-purple-500" },
-            { label: "DELETE", val: stats.delete, cls: "text-red-400", dot: "bg-red-500" },
-          ].map(({ label, val, cls, dot }) => (
-            <div key={label} className="flex items-center gap-2">
-              {dot && <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />}
-              <span className="text-xs text-[#73757a] font-bold">{label}</span>
-              <span className={`text-sm font-bold ${cls}`}>{val}</span>
-            </div>
-          ))}
-          {detectedFormat && (
-            <div className="ml-auto flex items-center gap-1.5 bg-[#22262b]/60 border border-[#46484c]/30 rounded-full px-3 py-1 text-xs font-bold text-[#a9abb0]">
-              <Code size={10} className="text-[#e08efe]" />{detectedFormat}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Main content */}
-      {view === "input" ? (
-        <JsonInputScreen
-          onVisualize={handleVisualize}
-          onLoadSample={handleLoadSample}
-          onOpenCollections={() => setShowCollections(true)}
-          onOpenDiff={() => setView("diff")}
-          onOpenAutoImport={() => setShowAutoImport(true)}
-          onOpenBreaking={() => setView("breaking")}
-          onOpenMultiService={() => setView("multiservice")}
+  const modals = (
+    <>
+      {showPlayground && (playgroundScratch || selectedNode?.type === "request") && (
+        <ApiPlaygroundModal
+          key={playgroundScratch ? "scratch" : selectedNode.id}
+          node={playgroundScratch ? null : selectedNode}
+          onClose={() => { setShowPlayground(false); setPlaygroundScratch(false); }}
+          onNewRequest={() => setPlaygroundScratch(true)}
+          onUpdate={(nodeId, updates) => {
+            setNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, ...updates } : n));
+            setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
+          }}
+          onResponse={(nodeId, result) => setLiveResponses((prev) => ({ ...prev, [nodeId]: result }))}
+          variables={variables}
+          overrides={variableOverrides}
+          onVariableChange={setVariableOverride}
+          onVariableReset={clearVariableOverride}
+          environmentName={activeEnvironment?.name || null}
+          onOpenEnvironments={() => { setShowPlayground(false); openTool(setShowEnvManager); }}
+          servers={declaredServers}
+          origin={playgroundOrigin}
+          onOriginChange={setPlaygroundOrigin}
+          spec={collection}
+          onNeedAiKey={() => setShowAssistant(true)}
         />
-      ) : view === "diff" ? (
-        <DiffView onBack={() => setView("input")} />
-      ) : view === "breaking" ? (
-        <BreakingChangeDetector onBack={() => setView("input")} />
-      ) : view === "multiservice" ? (
-        <MultiServiceGraph onBack={() => setView("input")} />
-      ) : (
-        <div className="flex-1 flex overflow-hidden" style={{ animation: "fadeIn 0.35s ease-out both" }}>
-          <div className="flex-1 relative overflow-hidden">
-            {/* Background ambient blurs */}
-            <div className="absolute pointer-events-none" style={{ top: "-5%", left: "-5%", width: "35%", height: "35%", background: "rgba(224,142,254,0.03)", filter: "blur(100px)", borderRadius: "50%", zIndex: 0 }} />
-            <div className="absolute pointer-events-none" style={{ bottom: "10%", right: "5%", width: "25%", height: "25%", background: "rgba(58,162,255,0.03)", filter: "blur(80px)", borderRadius: "50%", zIndex: 0 }} />
-
-            <div ref={canvasRef} className="absolute inset-0 overflow-auto"
-              onClick={(e) => { if (e.target === canvasRef.current || e.target === paperRef.current) setSelectedNode(null); }}>
-              {/* Paper — dot grid from reference */}
-              <div ref={paperRef} className="relative" style={{
-                width: contentBounds.w * zoom, height: contentBounds.h * zoom, minWidth: "100%", minHeight: "100%",
-                backgroundImage: `radial-gradient(circle, rgba(70,72,76,0.4) 1px, transparent 1px)`,
-                backgroundSize: `${40 * zoom}px ${40 * zoom}px`,
-                backgroundColor: "#111417",
-              }}>
-                {/* Ripple effect */}
-                {showRipple && nodePositions["node-root"] && (
-                  <div className="absolute pointer-events-none" style={{
-                    left: (nodePositions["node-root"].x + 112 + panX) * zoom, top: (nodePositions["node-root"].y + 50 + panY) * zoom,
-                    width: 80, height: 80, marginLeft: -40, marginTop: -40, borderRadius: "50%",
-                    border: "2px solid rgba(224,142,254,0.25)", animation: "ripple 0.6s ease-out both", zIndex: 5,
-                  }} />
-                )}
-
-                <div className="absolute inset-0 pointer-events-none" style={{ transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0" }}>
-                  <ConnectionLines nodes={filteredNodes} nodePositions={nodePositions} graphStyle={graphStyle} showParticles={showParticles} />
-                </div>
-
-                <div className="absolute inset-0 pointer-events-none" style={{
-                  transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0",
-                  transition: draggedNodeId ? "none" : "transform 0.18s cubic-bezier(0.34,1.56,0.64,1)",
-                }}>
-                  {filteredNodes.map((node, idx) => {
-                    const pos = nodePositions[node.id] || { x: 100, y: 100 };
-                    return (
-                      <GraphCard key={node.id} node={node} position={pos}
-                        isSelected={selectedNode?.id === node.id} isDragging={draggedNodeId === node.id}
-                        isHighlighted={highlightedIds.has(node.id)} isCollapsed={collapsedFolders.has(node.id)}
-                        entranceDelay={Math.min(idx * 35, 500)}
-                        onMouseDown={(e) => handleNodeMouseDown(e, node.id)} onSelect={() => setSelectedNode(node)} onCopy={() => {}}
-                        onToggleCollapse={node.type === "folder" ? toggleFolderCollapse : undefined} />
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Toolbar */}
-            <div className="absolute bottom-5 left-5 flex items-center gap-1 bg-[#0c0e12]/85 border border-[#46484c]/30 rounded-xl p-1.5 z-30 backdrop-blur-xl shadow-2xl shadow-black/40"
-              style={{ animation: "slideInUp 0.4s cubic-bezier(0.34,1.56,0.64,1) 300ms both" }}>
-              <button onClick={() => setZoom((z) => Math.min(3, z * 1.2))} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Zoom In"><ZoomIn size={15} /></button>
-              <span className="text-xs text-[#a9abb0] w-10 text-center font-mono font-bold tabular-nums">{(zoom * 100).toFixed(0)}%</span>
-              <button onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Zoom Out"><ZoomOut size={15} /></button>
-              <div className="w-px h-5 bg-[#46484c]/40 mx-0.5" />
-              <button onClick={handleFitView} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Fit All"><Maximize2 size={15} /></button>
-              <button onClick={handleReset} className="p-2 hover:bg-[#22262b] rounded-lg transition-all duration-200 text-[#a9abb0] hover:text-[#e08efe] hover:scale-110" title="Reset"><RotateCcw size={15} /></button>
-            </div>
-
-            <Minimap nodes={filteredNodes} nodePositions={nodePositions} canvasRef={canvasRef} zoom={zoom} panX={panX} panY={panY} />
-
-            {filteredNodes.length === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="text-center" style={{ animation: "scaleIn 0.4s ease-out both" }}>
-                  <Search size={40} className="text-[#46484c] mx-auto mb-3" /><p className="text-[#73757a]">No nodes match your search</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <RequestDetailsPanel node={selectedNode} onClose={() => setSelectedNode(null)} onTest={() => setShowPlayground(true)} />
-        </div>
       )}
-
-      {showPlayground && selectedNode && <ApiPlaygroundModal node={selectedNode} onClose={() => setShowPlayground(false)}
-        onUpdate={(nodeId, updates) => {
-          setNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, ...updates } : n));
-          setSelectedNode((prev) => prev?.id === nodeId ? { ...prev, ...updates } : prev);
-        }}
-      />}
 
       {/* Collection modals */}
       {showSaveModal && collection && (
@@ -777,21 +1049,32 @@ const PostmanGraphViewer = () => {
       {/* Phase 2 modals */}
       {showAutoImport && (
         <AutoImportPanel
-          onImport={(data) => handleVisualize(data)}
+          onImport={(data, meta) => handleVisualize(data, meta)}
           onClose={() => setShowAutoImport(false)}
         />
       )}
       {showHealthMonitor && (
-        <HealthMonitor
-          nodes={nodes}
-          onClose={() => setShowHealthMonitor(false)}
-        />
+        <HealthMonitor nodes={nodes} variables={variables} onClose={() => setShowHealthMonitor(false)} />
       )}
       {showFlowBuilder && (
-        <FlowBuilder
-          nodes={nodes}
-          onClose={() => setShowFlowBuilder(false)}
-          activeEnv={activeEnvId ? undefined : undefined}
+        <FlowBuilder nodes={nodes} workspaceVariables={variables} onClose={() => setShowFlowBuilder(false)} />
+      )}
+      {accountPrompt && (
+        <AccountRequired
+          feature={accountPrompt.feature}
+          reason="Connecting a Postman account moves collections between your Postman workspaces and Vizroute. It is tied to your Vizroute account so the connection, and what you push, stay yours."
+          next={accountPrompt.next}
+          onClose={() => setAccountPrompt(null)}
+        />
+      )}
+
+      {showPostman && (
+        <PostmanConnect
+          onClose={() => { setShowPostman(false); setPushPayload(null); }}
+          onLoadCollection={handlePullFromPostman}
+          onLoadEnvironment={handlePulledEnvironment}
+          pushPayload={pushPayload}
+          pushLabel={pushLabel}
         />
       )}
       {showEnvManager && (
@@ -804,20 +1087,486 @@ const PostmanGraphViewer = () => {
 
       {/* Phase 3 modals */}
       {showDocGenerator && collection && (
-        <DocGenerator collection={collection} detectedFormat={detectedFormat} onBack={() => setShowDocGenerator(false)} />
+        <DocGenerator collection={collection} onBack={() => setShowDocGenerator(false)} />
       )}
       {showMockServer && collection && (
         <MockServer collection={collection} onClose={() => setShowMockServer(false)} />
       )}
       {showLoadTester && (
-        <LoadTester nodes={nodes} onClose={() => setShowLoadTester(false)} />
+        <LoadTester nodes={nodes} variables={variables} onClose={() => setShowLoadTester(false)} />
       )}
       {showWorkspace && (
         <WorkspaceManager onClose={() => setShowWorkspace(false)} />
       )}
 
-      <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml" className="hidden"
-        onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { try { const text = ev.target.result; let data; try { data = JSON.parse(text); } catch { data = yaml.load(text); } if (data && typeof data === "object") handleVisualize(data); } catch {} }; reader.readAsText(file); e.target.value = ""; }} />
+      <input ref={fileInputRef} type="file" accept=".json,.yaml,.yml,.har" className="hidden"
+        onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { const result = handleImportText(ev.target.result); if (!result) return; if (result.kind === "environment") { handlePulledEnvironment(result.data); return; } handleVisualize(result.data); }; reader.readAsText(file); e.target.value = ""; }} />
+    </>
+  );
+
+  // ─── Workspace (after a spec is parsed) ───────────────────────
+  if (view === "graph") {
+    return (
+      <div className="flex h-screen w-full flex-col overflow-hidden bg-vz-bg text-vz-text">
+        <TopNav
+          onOpenPalette={() => setShowPalette(true)}
+          onOpenCollections={() => openTool(setShowCollections)}
+          onOpenDocs={() => openTool(setShowDocGenerator)}
+          onOpenGithubImport={() => openTool(setShowAutoImport)}
+          onOpenWorkspaceManager={() => openTool(setShowWorkspace)}
+          onOpenEnvManager={() => openTool(setShowEnvManager)}
+          onResetView={() => { setCenterTab("map"); handleReset(); }}
+          onGoWorkspace={() => setCenterTab("map")}
+          recents={recents}
+          onOpenRecent={handleOpenRecent}
+          onClearRecents={() => setRecents(clearRecents())}
+          showParticles={showParticles}
+          onToggleParticles={() => setShowParticles((v) => !v)}
+          showMinimap={showMinimap}
+          onToggleMinimap={() => setShowMinimap((v) => !v)}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid((v) => !v)}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          onToggleInspector={() => setInspectorOpen((v) => !v)}
+        />
+
+        <div className="relative flex min-h-0 flex-1 gap-2.5 overflow-hidden p-2.5">
+          {sidebarOpen && (
+            <div className="fixed inset-0 z-[35] bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
+          )}
+          {inspectorOpen && (
+            <div className="fixed inset-0 z-[35] bg-black/50 xl:hidden" onClick={() => setInspectorOpen(false)} />
+          )}
+
+          {/* Explorer */}
+          <aside
+            className={`z-40 w-[300px] flex-shrink-0 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel ${
+              sidebarOpen ? "fixed bottom-[50px] left-2.5 top-[70px] flex" : "hidden"
+            } lg:relative lg:inset-auto lg:flex xl:w-[312px]`}
+          >
+            <ApiExplorer
+              key={importedAt || "explorer"}
+              collection={collection}
+              detectedFormat={detectedFormat}
+              nodes={nodes}
+              groups={groups}
+              endpointCount={endpointCount}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onSearchKeyDown={handleSearchKeyDown}
+              searchInputRef={searchInputRef}
+              matchCount={matchList.length}
+              matchIndex={focusedMatchIdx}
+              selectedNodeId={selectedNode?.id}
+              onSelectNode={selectAndReveal}
+              onImport={() => setView("input")}
+              recents={recents}
+              onOpenRecent={handleOpenRecent}
+              onSeeAllRecents={() => openTool(setShowCollections)}
+            />
+          </aside>
+
+          {/* Centre workspace */}
+          <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel">
+            <div className="flex h-[56px] flex-shrink-0 items-center justify-between gap-3 border-b border-vz-line-soft px-3">
+              <div className="vz-scroll flex min-w-0 items-center gap-1 overflow-x-auto rounded-[9px] border border-vz-line-soft bg-vz-bg p-1">
+                {CENTER_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setCenterTab(tab.id)}
+                    title={tab.label}
+                    aria-label={tab.label}
+                    className={`vz-t flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] px-2.5 py-[7px] text-[12px] ${
+                      centerTab === tab.id
+                        ? "bg-vz-accent/18 text-vz-text"
+                        : "text-vz-soft hover:text-vz-text"
+                    }`}
+                  >
+                    <tab.icon size={13} className="flex-shrink-0" />
+                    <span
+                      className={centerTab === tab.id ? "hidden sm:inline" : "hidden 2xl:inline"}
+                    >
+                      {tab.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={openPlayground}
+                  className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
+                >
+                  <Play size={14} className="flex-shrink-0" />
+                  <span className="hidden 2xl:inline">Playground</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAssistant((v) => !v)}
+                  title="Ask the map — AI assistant over this spec (Ctrl I)"
+                  className={`vz-t flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium ${
+                    showAssistant
+                      ? "border-vz-accent/40 bg-vz-accent/12 text-vz-text"
+                      : "border-vz-line bg-vz-panel-2 text-vz-soft hover:text-vz-text"
+                  }`}
+                >
+                  <WandSparkles size={14} className="flex-shrink-0 text-vz-accent-2" />
+                  <span className="hidden 2xl:inline">Ask AI</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openPostmanPush}
+                  title={user ? "Open a collection from Postman, or send this one back" : "Postman companion — sign in to use"}
+                  className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
+                >
+                  <PostmanIcon size={14} className="flex-shrink-0 text-[#ff6c37]" />
+                  <span className="hidden 2xl:inline">Postman</span>
+                  {!user && <Lock size={11} className="flex-shrink-0 text-vz-dim" aria-label="Sign in required" />}
+                </button>
+
+                <ExportMenu
+                  nodes={filteredNodes}
+                  allNodes={nodes}
+                  positions={nodePositions}
+                  graphStyle={graphStyle}
+                  graphTitle={collection?.info?.name || collection?.info?.title || "API Graph"}
+                  spec={collection}
+                  sourceFormat={detectedFormat}
+                  origin={playgroundOrigin}
+                  variables={variables}
+                  open={exportOpen}
+                  onOpenChange={setExportOpen}
+                />
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className={`vz-t flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-[13px] font-semibold ${
+                      shareCopied
+                        ? "bg-vz-green/15 text-vz-green"
+                        : "bg-gradient-to-r from-[#a855f7] to-[#c45cff] text-[#160a1d] hover:opacity-90"
+                    }`}
+                  >
+                    {shareCopied ? <><Check size={14} /> Copied</> : <><Share2 size={14} /> Share</>}
+                  </button>
+
+                  {shareState && (
+                    <div className="absolute right-0 z-50 mt-2 w-[300px] rounded-xl border border-vz-line bg-vz-panel p-3.5 shadow-2xl shadow-black/50">
+                      <p className="flex items-start gap-2 text-[12.5px] leading-relaxed text-vz-soft">
+                        <AlertCircle size={13} className="mt-0.5 flex-shrink-0 text-vz-warn" />
+                        <span>
+                          This specification is{" "}
+                          <strong className="text-vz-text">
+                            {(shareState.bytes / 1_048_576).toFixed(1)} MB
+                          </strong>
+                          {" "}— too large to travel in a link. Send the file instead.
+                        </span>
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleShareDownload}
+                          className="vz-t flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-vz-accent/18 text-[12.5px] font-semibold text-vz-text hover:bg-vz-accent/26"
+                        >
+                          <Download size={13} /> Download spec
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShareState(null)}
+                          className="vz-t h-8 rounded-lg border border-vz-line px-3 text-[12.5px] text-vz-soft hover:text-vz-text"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="relative min-h-0 flex-1">
+              {centerTab === "map" ? (
+                <div ref={canvasShellRef} className="vz-canvas-shell absolute inset-0 overflow-hidden bg-[#0a0e16]">
+                  <GraphToolbar
+                    graphStyle={graphStyle}
+                    onChangeStyle={setGraphStyle}
+                    zoom={zoom}
+                    onFit={handleFitView}
+                    onResetZoom={handleReset}
+                    onFocusSelected={() => selectedNode && focusOnNode(selectedNode.id)}
+                    canFocus={!!selectedNode}
+                    onToggleFullscreen={toggleFullscreen}
+                    isFullscreen={isFullscreen}
+                    filterMethod={filterMethod}
+                    onFilterMethod={setFilterMethod}
+                    stats={stats}
+                  />
+
+                  <div
+                    ref={canvasRef}
+                    className="absolute inset-0 overflow-auto vz-scroll"
+                    onClick={(e) => { if (e.target === canvasRef.current || e.target === paperRef.current) setSelectedNode(null); }}
+                  >
+                    <div
+                      ref={paperRef}
+                      className="relative"
+                      style={{
+                        width: contentBounds.w * zoom,
+                        height: contentBounds.h * zoom,
+                        minWidth: "100%",
+                        minHeight: "100%",
+                        backgroundColor: "#0a0e16",
+                        backgroundImage: showGrid
+                          ? "radial-gradient(circle, rgba(115,125,150,0.22) 1px, transparent 1px)"
+                          : "none",
+                        backgroundSize: `${21 * zoom}px ${21 * zoom}px`,
+                      }}
+                    >
+                      {showRipple && nodePositions["node-root"] && (
+                        <div className="pointer-events-none absolute" style={{
+                          left: (nodePositions["node-root"].x + 112 + panX) * zoom,
+                          top: (nodePositions["node-root"].y + 50 + panY) * zoom,
+                          width: 80, height: 80, marginLeft: -40, marginTop: -40, borderRadius: "50%",
+                          border: "2px solid rgba(168,85,247,0.25)", animation: "ripple 0.6s ease-out both", zIndex: 5,
+                        }} />
+                      )}
+
+                      <div className="pointer-events-none absolute inset-0" style={{ transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0" }}>
+                        <ConnectionLines
+                          nodes={renderNodes}
+                          nodePositions={nodePositions}
+                          graphStyle={graphStyle}
+                          showParticles={showParticles}
+                          activeId={hoveredNodeId || selectedNode?.id || null}
+                        />
+                        <VariableFlowLines
+                          nodes={renderNodes}
+                          nodePositions={nodePositions}
+                          flow={variableFlow}
+                          selectedId={selectedNode?.type === "request" ? selectedNode.id : null}
+                        />
+                      </div>
+
+                      <div className="pointer-events-none absolute inset-0" style={{
+                        transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`, transformOrigin: "0 0",
+                        transition: draggedNodeId ? "none" : "transform 0.15s cubic-bezier(0.2,0,0,1)",
+                      }}>
+                        {renderNodes.map((node, idx) => {
+                          const pos = nodePositions[node.id];
+                          if (!pos) return null;
+                          return (
+                            <GraphCard key={node.id} node={node} position={pos}
+                              isSelected={selectedNode?.id === node.id} isDragging={draggedNodeId === node.id}
+                              isHighlighted={highlightedIds.has(node.id)} isCollapsed={collapsedFolders.has(node.id)}
+                              isDimmed={focusSet ? !focusSet.has(node.id) : false}
+                              simplified={simplified}
+                              animate={animateCards}
+                              entranceDelay={animateCards ? Math.min(idx * 12, 220) : 0}
+                              onMouseDown={handleNodeMouseDown}
+                              onSelect={handleSelectNode}
+                              onHoverChange={filteredNodes.length <= HOVER_FOCUS_UPTO ? setHoveredNodeId : undefined}
+                              onToggleCollapse={node.type === "folder" ? toggleFolderCollapse : undefined} />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {showMinimap && (
+                    <Minimap nodes={filteredNodes} nodePositions={nodePositions} canvasRef={canvasRef}
+                      zoom={zoom} panX={panX} panY={panY} selectedId={selectedNode?.id}
+                      viewportRect={viewport} />
+                  )}
+
+                  <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5">
+                    <button type="button" onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.2))} title="Zoom in"
+                      className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
+                      <ZoomIn size={15} />
+                    </button>
+                    <button type="button" onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.2))} title="Zoom out"
+                      className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
+                      <ZoomOut size={15} />
+                    </button>
+                    <button type="button" onClick={handleReset} title="Reset view"
+                      className="vz-t grid h-9 w-9 place-items-center rounded-lg border border-vz-line bg-vz-panel/92 text-vz-soft backdrop-blur hover:text-vz-text">
+                      <RotateCcw size={15} />
+                    </button>
+                  </div>
+
+                  {filteredNodes.length === 0 && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <Search size={34} className="mx-auto mb-3 text-vz-line" />
+                        <p className="text-[13px] text-vz-dim">No nodes match the current search or filter</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : centerTab === "table" ? (
+                <div className="absolute inset-0">
+                  <TableView
+                    nodes={listNodes}
+                    selectedNodeId={selectedNode?.id}
+                    onSelectNode={(n) => { setSelectedNode(n); setInspectorOpen(true); }}
+                    onShowInMap={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+                  />
+                </div>
+              ) : centerTab === "coverage" ? (
+                <div className="absolute inset-0">
+                  <CoverageView
+                    nodes={nodes}
+                    detectedFormat={detectedFormat}
+                    variables={variables}
+                    compareNodes={compare?.nodes || null}
+                    compareName={compare?.name || ""}
+                    compareFormat={compare?.format || ""}
+                    onPickFile={handleCompareFile}
+                    onClearCompare={() => setCompare(null)}
+                    onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+                    onGenerate={handleGenerateMissing}
+                  />
+                </div>
+              ) : centerTab === "audit" ? (
+                <div className="absolute inset-0">
+                  <AuditView
+                    audit={audit}
+                    nodes={nodes}
+                    collection={collection}
+                    detectedFormat={detectedFormat}
+                    onApplyFixes={handleApplyFixes}
+                    onApplyEnrichment={handleApplyEnrichment}
+                    onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+                  />
+                </div>
+              ) : (
+                <div className="absolute inset-0">
+                  <RawSpecView spec={collection} title={collection?.info?.name || collection?.info?.title || "spec"} />
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Inspector */}
+          <aside
+            className={`z-40 w-[330px] flex-shrink-0 flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel ${
+              inspectorOpen ? "fixed bottom-[50px] right-2.5 top-[70px] flex" : "hidden"
+            } xl:relative xl:inset-auto xl:flex`}
+          >
+            {inspector}
+          </aside>
+        </div>
+
+        <StatusBar
+          endpointCount={endpointCount}
+          schemaCount={schemaCount}
+          warnings={audit.findings}
+          score={audit.score}
+          onOpenAudit={() => setCenterTab("audit")}
+          detectedFormat={detectedFormat}
+          importedAt={importedAt}
+          activeEnvName={activeEnvironment?.name || null}
+          onSelectWarning={(w) => {
+            const node = nodes.find((n) => n.id === w.nodeId);
+            if (node) { setCenterTab("map"); selectAndReveal(node); }
+          }}
+        />
+
+        {showPalette && (
+          <CommandPalette
+            onClose={() => setShowPalette(false)}
+            commands={commands}
+            endpoints={nodes}
+            onSelectEndpoint={selectAndReveal}
+          />
+        )}
+
+        {showAssistant && (
+          <AiPanel
+            nodes={nodes}
+            spec={collection}
+            format={detectedFormat}
+            audit={audit}
+            thread={assistantThread}
+            onThreadChange={setAssistantThread}
+            actions={assistantActions}
+            onSelectNode={(n) => { setCenterTab("map"); selectAndReveal(n); }}
+            onClose={() => setShowAssistant(false)}
+          />
+        )}
+
+        {modals}
+      </div>
+    );
+  }
+
+  // ─── Import screen and the full-page tools ────────────────────
+  return (
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-vz-bg text-vz-text">
+      <header className="relative z-50 flex h-[60px] flex-shrink-0 items-center justify-between gap-4 border-b border-vz-line-soft bg-vz-bg px-4 sm:px-5">
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          title="Back to the Vizroute home page"
+          className="vz-t flex items-center gap-2 rounded-lg px-1 py-0.5 hover:opacity-80"
+        >
+          <BrandMark size={24} />
+          <span className="text-[17px] font-bold tracking-tight text-vz-text">
+            Vizroute
+          </span>
+        </button>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowCollections(true)}
+            className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel px-3 text-[13px] text-vz-soft hover:text-vz-text"
+          >
+            <FolderOpen size={14} />
+            <span className="hidden sm:inline">Collections</span>
+          </button>
+          <a
+            href="https://github.com/SagarKapase/snap-map"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel px-3 text-[13px] text-vz-soft hover:text-vz-text"
+          >
+            <Github size={14} />
+            <span className="hidden sm:inline">GitHub</span>
+          </a>
+          {nodes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setView("graph")}
+              className="vz-t flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-3.5 text-[13px] font-semibold text-[#160a1d] hover:opacity-90"
+            >
+              <Waypoints size={14} /> Back to map
+            </button>
+          )}
+        </div>
+      </header>
+
+      {view === "input" ? (
+        <JsonInputScreen
+          onVisualize={handleVisualize}
+          onLoadSample={handleLoadSample}
+          onOpenCollections={() => setShowCollections(true)}
+          onOpenDiff={() => openFullView("diff")}
+          onOpenAutoImport={() => setShowAutoImport(true)}
+          onOpenBreaking={() => openFullView("breaking")}
+          onOpenMultiService={openContractGraph}
+        />
+      ) : view === "diff" ? (
+        <DiffView onBack={() => setView(returnView)} />
+      ) : (
+        <BreakingChangeDetector onBack={() => setView(returnView)} />
+      )}
+
+      {modals}
     </div>
   );
 };

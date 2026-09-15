@@ -3,7 +3,7 @@ import {
   X, Copy, Check, Server, Play, Download, RefreshCw,
   ChevronDown, Database, Code, Shuffle, Clock, AlertCircle,
 } from "lucide-react";
-import { HTTP_METHODS, methodColor } from "../utils/constants";
+import { HTTP_METHODS } from "../utils/constants";
 
 const METHOD_BADGE = { GET: "bg-emerald-600/20 text-emerald-400", POST: "bg-amber-600/20 text-amber-400", PUT: "bg-blue-600/20 text-blue-400", PATCH: "bg-purple-600/20 text-purple-400", DELETE: "bg-red-600/20 text-red-400" };
 
@@ -67,8 +67,14 @@ const extractMockEndpoints = (data) => {
   return eps;
 };
 
+// A large spec produces well over a thousand mock entries, each with two
+// selects and an editor. Filter and page them rather than mounting the lot.
+const LIST_LIMIT = 100;
+
 const MockServer = ({ collection, onClose }) => {
   const [endpoints, setEndpoints] = useState(() => extractMockEndpoints(collection));
+  const [query, setQuery] = useState("");
+  const [listLimit, setListLimit] = useState(LIST_LIMIT);
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [copied, setCopied] = useState(null);
   const [globalDelay, setGlobalDelay] = useState(0);
@@ -86,7 +92,9 @@ const MockServer = ({ collection, onClose }) => {
     try {
       const parsed = JSON.parse(json);
       setEndpoints((prev) => prev.map((ep, i) => i === idx ? { ...ep, mockResponse: parsed } : ep));
-    } catch {} // ignore invalid JSON while typing
+    } catch {
+      /* half-typed JSON is the normal state of an editor, not an error */
+    }
   };
 
   const copyMock = (idx) => {
@@ -104,85 +112,108 @@ const MockServer = ({ collection, onClose }) => {
     URL.revokeObjectURL(url);
   };
 
+  // Indices travel with each row so the existing update handlers keep
+  // addressing the real position in `endpoints`.
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const withIndex = endpoints.map((ep, idx) => ({ ep, idx }));
+    if (!q) return withIndex;
+    return withIndex.filter(
+      ({ ep }) =>
+        ep.path.toLowerCase().includes(q) ||
+        String(ep.name || "").toLowerCase().includes(q) ||
+        ep.method.toLowerCase() === q,
+    );
+  }, [endpoints, query]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ animation: "fadeIn 0.2s ease-out both" }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-3xl rounded-2xl border border-[#46484c]/30 overflow-hidden flex flex-col"
+      <div className="relative w-full max-w-3xl rounded-2xl border border-[#222a39]/30 overflow-hidden flex flex-col"
         style={{ maxHeight: "90vh", background: "rgba(12,14,18,0.95)", backdropFilter: "blur(20px)", animation: "scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both" }}>
 
         {/* Header */}
-        <div className="px-6 py-5 border-b border-[#46484c]/20 flex-shrink-0">
+        <div className="px-6 py-5 border-b border-[#222a39]/20 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Server size={18} className="text-[#e08efe]" />
+              <Server size={18} className="text-[#a855f7]" />
               <h2 className="font-bold text-white text-lg">Mock Server</h2>
-              <span className="text-xs text-[#73757a] bg-[#22262b] px-2 py-0.5 rounded-full">{endpoints.length} endpoints</span>
+              <span className="text-xs text-[#6f7788] bg-[#121824] px-2 py-0.5 rounded-full">{endpoints.length} endpoints</span>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-[#22262b] rounded-lg transition-colors"><X size={16} className="text-[#a9abb0]" /></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-[#121824] rounded-lg transition-colors"><X size={16} className="text-[#a4acbc]" /></button>
           </div>
-          <p className="text-xs text-[#73757a] mt-2">Auto-generated mock responses from your API schema. Edit, regenerate, or export.</p>
+          <p className="text-xs text-[#6f7788] mt-2">Auto-generated mock responses from your API schema. Edit, regenerate, or export.</p>
         </div>
 
         {/* Controls */}
-        <div className="px-6 py-3 border-b border-[#46484c]/15 flex items-center gap-3 flex-shrink-0 flex-wrap">
-          <button onClick={regenerateAll} className="px-4 py-2 rounded-lg text-xs font-bold text-[#0c0e12] bg-[#e08efe] hover:bg-[#ce7eec] transition-all active:scale-[0.97] flex items-center gap-2">
+        <div className="px-6 py-3 border-b border-[#222a39]/15 flex items-center gap-3 flex-shrink-0 flex-wrap">
+          <button onClick={regenerateAll} className="px-4 py-2 rounded-lg text-xs font-bold text-[#080b12] bg-[#a855f7] hover:bg-[#c45cff] transition-all active:scale-[0.97] flex items-center gap-2">
             <Shuffle size={13} /> Regenerate All
           </button>
-          <button onClick={exportAll} className="px-3 py-2 rounded-lg text-xs font-semibold text-[#a9abb0] hover:text-white hover:bg-[#22262b] border border-[#46484c]/20 transition-all flex items-center gap-1.5">
+          <button onClick={exportAll} className="px-3 py-2 rounded-lg text-xs font-semibold text-[#a4acbc] hover:text-white hover:bg-[#121824] border border-[#222a39]/20 transition-all flex items-center gap-1.5">
             <Download size={12} /> Export Config
           </button>
           <div className="flex items-center gap-2 ml-auto">
-            <span className="text-[10px] text-[#73757a] uppercase tracking-widest">Delay</span>
+            <span className="text-[10px] text-[#6f7788] uppercase tracking-widest">Delay</span>
             <select value={globalDelay} onChange={(e) => setGlobalDelay(Number(e.target.value))}
-              className="bg-[#22262b] border border-[#46484c]/30 rounded px-2 py-1 text-[10px] text-[#a9abb0] focus:outline-none">
+              className="bg-[#121824] border border-[#222a39]/30 rounded px-2 py-1 text-[10px] text-[#a4acbc] focus:outline-none">
               <option value={0}>0ms</option><option value={200}>200ms</option><option value={500}>500ms</option><option value={1000}>1s</option><option value={3000}>3s</option>
             </select>
-            <span className="text-[10px] text-[#73757a] uppercase tracking-widest">Status</span>
+            <span className="text-[10px] text-[#6f7788] uppercase tracking-widest">Status</span>
             <select value={globalStatus} onChange={(e) => setGlobalStatus(Number(e.target.value))}
-              className="bg-[#22262b] border border-[#46484c]/30 rounded px-2 py-1 text-[10px] text-[#a9abb0] focus:outline-none">
+              className="bg-[#121824] border border-[#222a39]/30 rounded px-2 py-1 text-[10px] text-[#a4acbc] focus:outline-none">
               <option value={200}>200</option><option value={201}>201</option><option value={400}>400</option><option value={401}>401</option><option value={404}>404</option><option value={500}>500</option>
             </select>
           </div>
         </div>
 
         {/* Endpoint list */}
+        <div className="px-6 py-2.5 border-b border-[#222a39]/15 flex-shrink-0">
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setListLimit(LIST_LIMIT); }}
+            placeholder="Filter by path, name or method"
+            className="w-full bg-[#121824]/60 border border-[#222a39]/30 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#6f7788] focus:border-[#a855f7]/50 focus:outline-none"
+          />
+        </div>
+
         <div className="flex-1 overflow-auto p-4 space-y-2">
-          {endpoints.map((ep, idx) => {
+          {matches.slice(0, listLimit).map(({ ep, idx }, i) => {
             const badge = METHOD_BADGE[ep.method] || "";
             const isExpanded = expandedIdx === idx;
             return (
               <div key={`${ep.method}-${ep.path}-${idx}`}
-                className={`rounded-xl border transition-all duration-200 ${isExpanded ? "border-[#e08efe]/30 bg-[#e08efe]/5" : "border-[#46484c]/20 bg-[#171a1e]/40"}`}
-                style={{ animation: `slideInUp 0.15s ease-out ${idx * 15}ms both` }}>
+                className={`rounded-xl border transition-all duration-200 ${isExpanded ? "border-[#a855f7]/30 bg-[#a855f7]/5" : "border-[#222a39]/20 bg-[#0f141d]/40"}`}
+                style={i < 30 ? { animation: `slideInUp 0.15s ease-out ${i * 15}ms both` } : undefined}>
                 <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 ${badge}`}>{ep.method}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{ep.name}</p>
-                    <p className="text-[10px] text-[#46484c] font-mono truncate">{ep.path}</p>
+                    <p className="text-[10px] text-[#222a39] font-mono truncate">{ep.path}</p>
                   </div>
-                  <span className="text-[10px] font-mono text-[#73757a] flex-shrink-0">{ep.statusCode}</span>
-                  {ep.delay > 0 && <span className="text-[10px] text-[#46484c] flex items-center gap-0.5"><Clock size={8} />{ep.delay}ms</span>}
+                  <span className="text-[10px] font-mono text-[#6f7788] flex-shrink-0">{ep.statusCode}</span>
+                  {ep.delay > 0 && <span className="text-[10px] text-[#222a39] flex items-center gap-0.5"><Clock size={8} />{ep.delay}ms</span>}
                   <button onClick={(e) => { e.stopPropagation(); copyMock(idx); }}
-                    className="p-1 text-[#46484c] hover:text-[#e08efe] transition-colors flex-shrink-0">
-                    {copied === idx ? <Check size={13} className="text-[#81ecff]" /> : <Copy size={13} />}
+                    className="p-1 text-[#222a39] hover:text-[#a855f7] transition-colors flex-shrink-0">
+                    {copied === idx ? <Check size={13} className="text-[#60a5fa]" /> : <Copy size={13} />}
                   </button>
                   <button onClick={(e) => { e.stopPropagation(); regenerate(idx); }}
-                    className="p-1 text-[#46484c] hover:text-[#e08efe] transition-colors flex-shrink-0">
+                    className="p-1 text-[#222a39] hover:text-[#a855f7] transition-colors flex-shrink-0">
                     <RefreshCw size={13} />
                   </button>
-                  <ChevronDown size={14} className={`text-[#46484c] transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                  <ChevronDown size={14} className={`text-[#222a39] transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                 </div>
                 {isExpanded && (
-                  <div className="px-4 pb-4 border-t border-[#46484c]/10 mt-1 pt-3" style={{ animation: "crossfadeIn 0.2s ease-out both" }}>
+                  <div className="px-4 pb-4 border-t border-[#222a39]/10 mt-1 pt-3" style={{ animation: "crossfadeIn 0.2s ease-out both" }}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#73757a]">Mock Response</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#6f7788]">Mock Response</span>
                       <div className="flex items-center gap-2">
                         <select value={ep.statusCode} onChange={(e) => setEndpoints((prev) => prev.map((x, i) => i === idx ? { ...x, statusCode: Number(e.target.value) } : x))}
-                          className="bg-[#22262b] border border-[#46484c]/20 rounded px-2 py-0.5 text-[10px] text-[#a9abb0] focus:outline-none">
+                          className="bg-[#121824] border border-[#222a39]/20 rounded px-2 py-0.5 text-[10px] text-[#a4acbc] focus:outline-none">
                           {[200, 201, 204, 400, 401, 403, 404, 500].map((s) => <option key={s} value={s}>{s}</option>)}
                         </select>
                         <select value={ep.delay} onChange={(e) => setEndpoints((prev) => prev.map((x, i) => i === idx ? { ...x, delay: Number(e.target.value) } : x))}
-                          className="bg-[#22262b] border border-[#46484c]/20 rounded px-2 py-0.5 text-[10px] text-[#a9abb0] focus:outline-none">
+                          className="bg-[#121824] border border-[#222a39]/20 rounded px-2 py-0.5 text-[10px] text-[#a4acbc] focus:outline-none">
                           {[0, 100, 200, 500, 1000, 2000, 5000].map((d) => <option key={d} value={d}>{d}ms</option>)}
                         </select>
                       </div>
@@ -191,14 +222,27 @@ const MockServer = ({ collection, onClose }) => {
                       value={JSON.stringify(ep.mockResponse, null, 2)}
                       onChange={(e) => updateResponse(idx, e.target.value)}
                       spellCheck={false}
-                      className="w-full bg-[#0c0e12] border border-[#46484c]/15 rounded-lg p-3 font-mono text-[10px] text-[#a9abb0] resize-none focus:outline-none focus:border-[#e08efe]/30 transition-all"
-                      style={{ minHeight: 120, lineHeight: "1.7", caretColor: "#e08efe" }}
+                      className="w-full bg-[#080b12] border border-[#222a39]/15 rounded-lg p-3 font-mono text-[10px] text-[#a4acbc] resize-none focus:outline-none focus:border-[#a855f7]/30 transition-all"
+                      style={{ minHeight: 120, lineHeight: "1.7", caretColor: "#a855f7" }}
                     />
                   </div>
                 )}
               </div>
             );
           })}
+
+          {matches.length > listLimit && (
+            <button
+              onClick={() => setListLimit((n) => n + LIST_LIMIT)}
+              className="w-full rounded-xl border border-[#222a39]/25 py-2.5 text-xs text-[#a4acbc] hover:text-white hover:bg-[#121824] transition-colors"
+            >
+              Show more ({(matches.length - listLimit).toLocaleString()} hidden)
+            </button>
+          )}
+
+          {matches.length === 0 && (
+            <p className="py-10 text-center text-xs text-[#6f7788]">No endpoints match that filter.</p>
+          )}
         </div>
       </div>
     </div>

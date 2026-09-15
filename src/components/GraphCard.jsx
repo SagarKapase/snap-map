@@ -1,6 +1,46 @@
-import { useState } from "react";
-import { Lock, Layers, Copy, CheckCircle, ChevronRight } from "lucide-react";
+import { memo, useState } from "react";
+import { Copy, Check, ChevronRight, Boxes, Layers } from "lucide-react";
 import { methodColor } from "../utils/constants";
+import MethodBadge from "./workspace/MethodBadge";
+import { displayPath } from "../utils/format";
+
+// Card sizes are mirrored by utils/graphGeometry — keep width/min-height in
+// sync with CARD_DIM there.
+const SHELL = {
+  root: "w-60 min-h-[110px]",
+  folder: "w-52 min-h-[80px]",
+  request: "w-64 min-h-[85px]",
+};
+
+const DIM = {
+  root: { w: 240, h: 110 },
+  folder: { w: 208, h: 80 },
+  request: { w: 256, h: 85 },
+};
+
+/**
+ * Zoomed far out a card is a few pixels across, so its twelve elements of
+ * text, icons and badges cost a full layout for something nobody can read.
+ * The placeholder keeps the shape and the colour and nothing else.
+ */
+const PlaceholderCard = ({ node, position, isSelected, isHighlighted, accent }) => {
+  const dim = DIM[node.type] || DIM.request;
+  return (
+    <div
+      data-node-id={node.id}
+      className="pointer-events-none absolute rounded-md"
+      style={{
+        left: position.x,
+        top: position.y,
+        width: dim.w,
+        height: dim.h,
+        background: isSelected ? "#3b1d63" : "#1b2231",
+        border: `2px solid ${isSelected || isHighlighted ? "#a855f7" : accent}`,
+        zIndex: isSelected ? 50 : 10,
+      }}
+    />
+  );
+};
 
 const GraphCard = ({
   node,
@@ -9,9 +49,13 @@ const GraphCard = ({
   isDragging,
   isHighlighted,
   isCollapsed,
+  isDimmed,
+  simplified,
+  animate = true,
   onMouseDown,
   onSelect,
   onCopy,
+  onHoverChange,
   onToggleCollapse,
   entranceDelay = 0,
 }) => {
@@ -20,12 +64,26 @@ const GraphCard = ({
 
   const mc = node.type === "request" ? methodColor(node.method) : null;
 
+  if (simplified) {
+    return (
+      <PlaceholderCard
+        node={node}
+        position={position}
+        isSelected={isSelected}
+        isHighlighted={isHighlighted}
+        accent={
+          node.type === "root" ? "#a855f7" : node.type === "folder" ? "#60a5fa" : mc.dot
+        }
+      />
+    );
+  }
+
   const handleCopy = (e) => {
     e.stopPropagation();
     if (!node.path) return;
-    navigator.clipboard.writeText(node.path);
+    navigator.clipboard?.writeText(node.path);
     setCopyDone(true);
-    setTimeout(() => setCopyDone(false), 2000);
+    setTimeout(() => setCopyDone(false), 1800);
     onCopy?.();
   };
 
@@ -34,186 +92,139 @@ const GraphCard = ({
     onToggleCollapse?.(node.id);
   };
 
+  const setHover = (value) => {
+    setHovered(value);
+    onHoverChange?.(value ? node.id : null);
+  };
+
+  // One shared surface treatment — selection is purple, hover only lifts contrast.
+  const surface = isSelected
+    ? "border-vz-accent bg-[#1b1230] shadow-[0_0_0_1px_rgba(168,85,247,0.35),0_10px_30px_-12px_rgba(168,85,247,0.45)]"
+    : isHighlighted
+      ? "border-vz-accent/45 bg-vz-panel-2"
+      : hovered
+        ? "border-[#3a4457] bg-vz-elev"
+        : "border-vz-line bg-vz-panel-2";
+
   return (
     <div
-      className={`absolute pointer-events-none node-position-transition ${isDragging ? "dragging" : ""}`}
+      data-node-id={node.id}
+      className={`node-position-transition pointer-events-none absolute ${
+        isDragging ? "dragging" : ""
+      }`}
       style={{
         left: position.x,
         top: position.y,
         zIndex: isSelected ? 50 : isDragging ? 45 : hovered ? 30 : 10,
-        animation: `nodeEntrance 0.45s cubic-bezier(0.22,1,0.36,1) ${entranceDelay}ms both`,
+        opacity: isDimmed ? 0.4 : 1,
+        transition: "opacity 150ms cubic-bezier(0.2,0,0,1)",
+        animation: animate
+          ? `nodeEntrance 0.28s ease-out ${entranceDelay}ms both`
+          : undefined,
       }}
     >
       <div
-        className="pointer-events-auto"
-        style={{
-          transform: isSelected
-            ? "scale(1.06)"
-            : hovered
-              ? "scale(1.02)"
-              : "scale(1)",
-          transition: isDragging
-            ? "none"
-            : "transform 0.2s cubic-bezier(0.34,1.56,0.64,1)",
-          willChange: "transform",
-        }}
-        onMouseDown={onMouseDown}
-        onClick={onSelect}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        className={`pointer-events-auto vz-t cursor-grab rounded-xl border p-3.5 active:cursor-grabbing ${SHELL[node.type] || SHELL.request} ${surface}`}
+        onMouseDown={(e) => onMouseDown?.(e, node.id)}
+        onClick={() => onSelect?.(node)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
       >
-        {/* ── Root node ── */}
         {node.type === "root" ? (
-          <div
-            className={`w-60 rounded-2xl cursor-grab active:cursor-grabbing backdrop-blur-sm p-4 group transition-all duration-300 relative overflow-hidden
-              ${
-                isSelected
-                  ? "border-2 border-[#e08efe] bg-gradient-to-br from-[#1c2025] to-[#111417] shadow-2xl shadow-[#e08efe]/30"
-                  : isHighlighted
-                    ? "border-2 border-[#e08efe]/50 bg-gradient-to-br from-[#1c2025]/90 to-[#111417]/90 shadow-lg shadow-[#e08efe]/15"
-                    : "border border-[#e08efe]/20 bg-gradient-to-br from-[#1c2025]/80 to-[#111417]/80 hover:border-[#e08efe]/40 hover:shadow-xl hover:shadow-[#e08efe]/10"
-              }`}
-          >
-            <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[#e08efe]/50 to-transparent" />
-            {isSelected && (
-              <div
-                className="absolute -inset-8 rounded-full pointer-events-none animate-spotlight"
-                style={{
-                  background:
-                    "radial-gradient(circle, rgba(224,142,254,0.08) 0%, transparent 70%)",
-                }}
-              />
-            )}
-            <div className="flex items-center gap-2.5 mb-3">
-              <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-300
-                  ${isSelected ? "bg-[#e08efe]/25 border border-[#e08efe]/40" : "bg-[#e08efe]/10 border border-[#e08efe]/20 group-hover:border-[#e08efe]/40"}`}
-              >
-                <Lock
-                  size={13}
-                  className={`transition-colors duration-300 ${isSelected || hovered ? "text-[#e08efe]" : "text-[#ce7eec]"}`}
-                />
-              </div>
-              <span className="text-xs font-bold text-[#e08efe]/80 uppercase tracking-widest">
-                Root API
+          <>
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-[38px] w-[38px] flex-shrink-0 place-items-center rounded-[9px] bg-vz-accent/14 text-vz-accent">
+                <Boxes size={17} />
               </span>
+              <div className="min-w-0">
+                <p className="truncate text-[14px] font-semibold text-vz-text">
+                  {node.name}
+                </p>
+                <p className="text-[11px] text-vz-dim">
+                  {node.itemCount} nodes
+                </p>
+              </div>
             </div>
-            <h3 className="text-base font-bold text-white mb-2.5 group-hover:text-[#e08efe] transition-colors duration-300 truncate leading-tight">
-              {node.name}
-            </h3>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[#a9abb0] bg-[#171a1e] border border-[#46484c]/40 rounded-md px-2 py-0.5 font-mono">
+            <div className="mt-2.5 flex items-center gap-2">
+              <span className="vz-mono rounded-md border border-vz-line bg-vz-bg px-2 py-0.5 text-[11px] text-vz-soft">
                 {node.version}
               </span>
-              <span className="text-xs text-[#e08efe]/70 font-semibold">
-                {node.itemCount} nodes
+              <span className="text-[11px] uppercase tracking-wider text-vz-dim">
+                API root
               </span>
             </div>
-          </div>
+          </>
         ) : node.type === "folder" ? (
-          /* ── Folder node ── */
-          <div
-            className={`w-52 rounded-xl cursor-grab active:cursor-grabbing backdrop-blur-sm p-3.5 group transition-all duration-300
-              ${
-                isSelected
-                  ? "border-2 border-[#3aa2ff]/60 bg-[#171a1e]/95 shadow-xl shadow-[#3aa2ff]/20"
-                  : isHighlighted
-                    ? "border border-[#46484c]/70 bg-[#171a1e]/80 shadow-md"
-                    : "border border-[#46484c]/40 bg-[#171a1e]/60 hover:border-[#46484c]/70 hover:bg-[#171a1e]/80 hover:shadow-lg"
-              }`}
-          >
-            <div className="flex items-center justify-between gap-2 mb-2.5">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-[#3aa2ff]/10 border border-[#3aa2ff]/20 flex items-center justify-center flex-shrink-0">
-                  <Layers size={11} className="text-[#3aa2ff]" />
-                </div>
-                <span className="text-xs font-bold text-[#a9abb0] uppercase tracking-wider">
-                  Folder
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs bg-[#22262b] border border-[#46484c]/40 text-[#a9abb0] px-2 py-0.5 rounded-full font-bold tabular-nums">
-                  {node.itemCount}
-                </span>
-                {onToggleCollapse && node.itemCount > 0 && (
-                  <button
-                    onClick={handleCollapseClick}
-                    className="p-0.5 hover:bg-[#46484c]/30 rounded transition-all duration-200"
-                  >
-                    <ChevronRight
-                      size={12}
-                      className={`text-[#a9abb0] hover:text-[#3aa2ff] transition-all duration-300 ${
-                        isCollapsed ? "" : "rotate-90"
-                      }`}
-                    />
-                  </button>
-                )}
-              </div>
-            </div>
-            <h3 className="text-sm font-semibold text-white group-hover:text-[#3aa2ff] transition-colors duration-300 truncate">
-              {node.name}
-            </h3>
-            {isCollapsed && (
-              <p className="text-xs text-[#73757a] mt-1.5 italic">
-                {node.itemCount} items collapsed
+          <div className="flex items-center gap-3">
+            <span className="grid h-[38px] w-[38px] flex-shrink-0 place-items-center rounded-[9px] bg-vz-blue/12 text-vz-blue">
+              <Layers size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-semibold text-vz-text">
+                {node.name}
               </p>
+              <p className="text-[11px] text-vz-dim">
+                {node.itemCount} {node.itemCount === 1 ? "endpoint" : "endpoints"}
+              </p>
+            </div>
+            {onToggleCollapse && node.itemCount > 0 && (
+              <button
+                type="button"
+                onClick={handleCollapseClick}
+                title={isCollapsed ? "Expand group" : "Collapse group"}
+                className="vz-t flex-shrink-0 rounded-md p-1 text-vz-dim hover:bg-white/6 hover:text-vz-text"
+              >
+                <ChevronRight
+                  size={13}
+                  className={`transition-transform duration-150 ${
+                    isCollapsed ? "" : "rotate-90"
+                  }`}
+                />
+              </button>
             )}
           </div>
         ) : (
-          /* ── Request node ── */
-          <div
-            className={`w-64 rounded-xl cursor-grab active:cursor-grabbing backdrop-blur-sm group transition-all duration-300 overflow-hidden
-              ${
-                isSelected
-                  ? "border border-[#46484c]/60 bg-[#171a1e]/95 shadow-xl"
-                  : isHighlighted
-                    ? "border border-[#46484c]/50 bg-[#171a1e]/80 shadow-md"
-                    : "border border-[#46484c]/30 bg-[#171a1e]/60 hover:border-[#46484c]/50 hover:bg-[#171a1e]/80 hover:shadow-lg"
-              }`}
-          >
-            {mc && <div className={`h-0.5 w-full ${mc.badge}`} />}
-            <div className="p-3">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                {mc && (
-                  <span
-                    className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${mc.bg} ${mc.text} uppercase flex-shrink-0 transition-all duration-300 ${isSelected ? `shadow-md ${mc.glow}` : ""}`}
-                  >
-                    {node.method}
-                  </span>
-                )}
-                <span className="text-xs text-[#73757a] uppercase opacity-0 group-hover:opacity-100 transition-opacity duration-300 tracking-wider ml-auto">
-                  Request
-                </span>
-              </div>
-              <h3 className="text-sm font-semibold text-white mb-2 group-hover:text-[#f8f9fe] transition-colors duration-300 line-clamp-2 leading-snug">
+          <>
+            <div className="flex items-center gap-2">
+              <MethodBadge method={node.method} size="xs" />
+              <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-vz-text">
                 {node.name}
-              </h3>
-              {node.path && (
-                <div className="flex items-center gap-1.5">
-                  <p className="text-xs text-[#81ecff]/70 font-mono truncate flex-1 group-hover:text-[#81ecff] transition-colors duration-300">
-                    {node.path}
-                  </p>
-                  <button
-                    onClick={handleCopy}
-                    className="opacity-0 group-hover:opacity-100 transition-all duration-300 p-1 hover:bg-[#46484c]/30 rounded flex-shrink-0 hover:scale-110"
-                  >
-                    {copyDone ? (
-                      <CheckCircle size={11} className="text-emerald-400" />
-                    ) : (
-                      <Copy
-                        size={11}
-                        className="text-[#73757a] hover:text-[#a9abb0] transition-colors"
-                      />
-                    )}
-                  </button>
-                </div>
-              )}
+              </p>
             </div>
-          </div>
+            {node.path && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <p
+                  className="vz-mono min-w-0 flex-1 truncate text-[11px]"
+                  style={{ color: mc?.dot }}
+                  title={node.path}
+                >
+                  {displayPath(node)}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  title="Copy URL"
+                  className="vz-t flex-shrink-0 rounded p-1 text-vz-dim hover:bg-white/6 hover:text-vz-text"
+                  style={{
+                    opacity: hovered ? 1 : 0,
+                    pointerEvents: hovered ? "auto" : "none",
+                  }}
+                >
+                  {copyDone ? (
+                    <Check size={11} className="text-vz-green" />
+                  ) : (
+                    <Copy size={11} />
+                  )}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 };
 
-export default GraphCard;
+// Memoised: on a large graph the canvas re-renders on every hover, drag frame
+// and pan step, and without this every mounted card re-rendered with it.
+export default memo(GraphCard);

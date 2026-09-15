@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import yaml from "js-yaml";
+import { parseSpecText } from "../utils/readSpec";
 import {
   ArrowLeft, Plus, Minus, RefreshCw, AlertCircle, ChevronDown,
   FileJson, Upload, Braces, GitCompareArrows, Check, X, Filter,
@@ -19,16 +19,12 @@ const METHOD_BADGE = {
 
 const CHANGE_META = {
   added:     { label: "Added",     color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: Plus, dot: "bg-emerald-500" },
-  removed:   { label: "Removed",   color: "text-[#ff6e84]",   bg: "bg-[#ff6e84]/10",   border: "border-[#ff6e84]/30",   icon: Minus, dot: "bg-[#ff6e84]" },
+  removed:   { label: "Removed",   color: "text-[#f43f5e]",   bg: "bg-[#f43f5e]/10",   border: "border-[#f43f5e]/30",   icon: Minus, dot: "bg-[#f43f5e]" },
   modified:  { label: "Modified",  color: "text-amber-400",   bg: "bg-amber-500/10",   border: "border-amber-500/30",   icon: RefreshCw, dot: "bg-amber-500" },
-  unchanged: { label: "Unchanged", color: "text-[#73757a]",   bg: "bg-[#22262b]/50",   border: "border-[#46484c]/20",   icon: Check, dot: "bg-[#46484c]" },
+  unchanged: { label: "Unchanged", color: "text-[#6f7788]",   bg: "bg-[#121824]/50",   border: "border-[#222a39]/20",   icon: Check, dot: "bg-[#222a39]" },
 };
 
-const tryParse = (text) => {
-  try { return JSON.parse(text); } catch {}
-  try { return yaml.load(text); } catch {}
-  return null;
-};
+const tryParse = parseSpecText;
 
 const SpecEditor = ({ label, value, onChange, placeholder }) => {
   const fileRef = useRef(null);
@@ -40,12 +36,12 @@ const SpecEditor = ({ label, value, onChange, placeholder }) => {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 rounded-xl overflow-hidden border border-[#46484c]/20" style={{ background: "rgba(12,14,18,0.7)" }}>
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#46484c]/15" style={{ background: "rgba(255,255,255,0.02)" }}>
-        <span className="text-xs font-bold text-[#a9abb0] uppercase tracking-widest">{label}</span>
+    <div className="flex-1 flex flex-col min-w-0 rounded-xl overflow-hidden border border-[#222a39]/20" style={{ background: "rgba(12,14,18,0.7)" }}>
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#222a39]/15" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <span className="text-xs font-bold text-[#a4acbc] uppercase tracking-widest">{label}</span>
         <button
           onClick={() => fileRef.current?.click()}
-          className="flex items-center gap-1 text-[10px] font-bold text-[#73757a] hover:text-[#a9abb0] uppercase tracking-wider transition-colors"
+          className="flex items-center gap-1 text-[10px] font-bold text-[#6f7788] hover:text-[#a4acbc] uppercase tracking-wider transition-colors"
         >
           <Upload size={10} /> File
         </button>
@@ -57,8 +53,8 @@ const SpecEditor = ({ label, value, onChange, placeholder }) => {
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         spellCheck={false}
-        className="flex-1 bg-transparent resize-none font-mono text-xs text-[#f8f9fe] p-4 focus:outline-none placeholder:text-[#46484c]"
-        style={{ lineHeight: "1.75", caretColor: "#e08efe", minHeight: 200 }}
+        className="flex-1 bg-transparent resize-none font-mono text-xs text-[#f8f9fe] p-4 focus:outline-none placeholder:text-[#222a39]"
+        style={{ lineHeight: "1.75", caretColor: "#a855f7", minHeight: 200 }}
       />
     </div>
   );
@@ -82,7 +78,7 @@ const EndpointRow = ({ ep, type }) => {
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-white truncate">{ep.name}</p>
-        <p className="text-xs text-[#73757a] font-mono truncate mt-0.5">{ep.path}</p>
+        <p className="text-xs text-[#6f7788] font-mono truncate mt-0.5">{ep.path}</p>
       </div>
       <span className={`text-[10px] font-bold uppercase tracking-widest ${meta.color} flex-shrink-0`}>
         {meta.label}
@@ -129,16 +125,16 @@ const DiffView = ({ onBack }) => {
         <div className="flex items-center gap-4 mb-8">
           <button
             onClick={onBack}
-            className="p-2 hover:bg-[#22262b] rounded-lg text-[#a9abb0] hover:text-white transition-all group"
+            className="p-2 hover:bg-[#121824] rounded-lg text-[#a4acbc] hover:text-white transition-all group"
           >
             <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
           </button>
           <div>
             <h1 className="text-2xl font-extrabold text-white flex items-center gap-3">
-              <GitCompareArrows size={24} className="text-[#e08efe]" />
+              <GitCompareArrows size={24} className="text-[#a855f7]" />
               API Diff Visualizer
             </h1>
-            <p className="text-sm text-[#73757a] mt-1">Compare two API specs side-by-side. See added, removed, and modified endpoints.</p>
+            <p className="text-sm text-[#6f7788] mt-1">Compare two API specs side-by-side. See added, removed, and modified endpoints.</p>
           </div>
         </div>
 
@@ -166,15 +162,15 @@ const DiffView = ({ onBack }) => {
             className="px-8 py-3 rounded-xl text-sm font-bold uppercase tracking-widest transition-all duration-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed btn-shimmer flex items-center gap-2"
             style={
               specAText.trim() && specBText.trim()
-                ? { background: "#e08efe", color: "#0c0e12", boxShadow: "0 12px 24px -6px rgba(224,142,254,0.3)" }
-                : { background: "rgba(255,255,255,0.03)", color: "#73757a", border: "1px solid rgba(70,72,76,0.2)" }
+                ? { background: "#a855f7", color: "#080b12", boxShadow: "0 12px 24px -6px rgba(224,142,254,0.3)" }
+                : { background: "rgba(255,255,255,0.03)", color: "#6f7788", border: "1px solid rgba(70,72,76,0.2)" }
             }
           >
             <GitCompareArrows size={16} />
             Compare Specs
           </button>
           {error && (
-            <div className="flex items-center gap-2 text-[#ff6e84] text-sm">
+            <div className="flex items-center gap-2 text-[#f43f5e] text-sm">
               <AlertCircle size={14} /> {error}
             </div>
           )}
@@ -200,13 +196,13 @@ const DiffView = ({ onBack }) => {
                     className={`p-4 rounded-xl border transition-all duration-200 text-left ${
                       filterType === key
                         ? `${meta.border} ${meta.bg} shadow-lg`
-                        : "border-[#46484c]/20 bg-[#171a1e]/40 hover:bg-[#171a1e]/60"
+                        : "border-[#222a39]/20 bg-[#0f141d]/40 hover:bg-[#0f141d]/60"
                     }`}
                     style={{ animation: `slideInUp 0.3s ease-out ${i * 60}ms both` }}
                   >
                     <div className="flex items-center gap-2 mb-2">
                       <span className={`w-2 h-2 rounded-full ${meta.dot}`} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#a9abb0]">{meta.label}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#a4acbc]">{meta.label}</span>
                     </div>
                     <span className={`text-2xl font-extrabold ${meta.color}`}>{count}</span>
                   </button>
@@ -215,11 +211,11 @@ const DiffView = ({ onBack }) => {
             </div>
 
             {/* Totals row */}
-            <div className="flex items-center gap-6 mb-6 px-1 text-xs text-[#73757a]">
+            <div className="flex items-center gap-6 mb-6 px-1 text-xs text-[#6f7788]">
               <span>Version A: <strong className="text-white">{diff.totalA}</strong> endpoints</span>
               <span>Version B: <strong className="text-white">{diff.totalB}</strong> endpoints</span>
               {filterType !== "all" && (
-                <button onClick={() => setFilterType("all")} className="flex items-center gap-1 text-[#e08efe] hover:underline">
+                <button onClick={() => setFilterType("all")} className="flex items-center gap-1 text-[#a855f7] hover:underline">
                   <X size={10} /> Clear filter
                 </button>
               )}
@@ -228,8 +224,8 @@ const DiffView = ({ onBack }) => {
             {/* Endpoint list */}
             <div className="space-y-2">
               {allEntries.length === 0 ? (
-                <div className="text-center py-12 text-[#73757a]">
-                  <Filter size={32} className="mx-auto mb-3 text-[#46484c]" />
+                <div className="text-center py-12 text-[#6f7788]">
+                  <Filter size={32} className="mx-auto mb-3 text-[#222a39]" />
                   <p className="text-sm">No endpoints match this filter</p>
                 </div>
               ) : (
