@@ -541,7 +541,7 @@ const ContractGraphPage = () => {
                           <button type="button" onClick={() => setAiHighlight({ ids: [], reason: "" })} className="vz-t text-vz-dim hover:text-vz-text" aria-label="Clear highlight"><X size={12} /></button>
                         </div>
                       )}
-                      <div ref={mapRef} className="min-h-[360px] flex-1">
+                      <div ref={mapRef} className="vz-canvas-grid min-h-[360px] flex-1" style={{ backgroundSize: "21px 21px" }}>
                         <ServiceMap graph={graph} selectedId={selectedId} onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))} impacted={impacted} highlighted={aiHighlight.ids} width={mapSize.w} height={mapSize.h} />
                       </div>
                       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-vz-line-soft px-4 py-2 text-[11px] text-vz-dim">
