@@ -12,8 +12,9 @@ const EDGE_STYLE = {
  * selects it for the inspector. Edges are drawn by kind, and each carries its
  * evidence as a tooltip.
  */
-const ServiceMap = ({ graph, selectedId, onSelect, impacted = [], width = 900, height = 560 }) => {
+const ServiceMap = ({ graph, selectedId, onSelect, impacted = [], highlighted = [], width = 900, height = 560 }) => {
   const [hovered, setHovered] = useState(null);
+  const highlightSet = new Set(highlighted);
   const positions = useMemo(() => layoutServices(graph.services, graph.edges, width, height), [graph, width, height]);
   const maxOps = Math.max(1, ...graph.services.map((s) => s.operations.length));
   const radiusOf = (s) => 18 + Math.round(16 * Math.sqrt(s.operations.length / maxOps));
@@ -59,7 +60,8 @@ const ServiceMap = ({ graph, selectedId, onSelect, impacted = [], width = 900, h
           const r = radiusOf(s);
           const isActive = active === s.id;
           const isImpacted = impactSet.has(s.id);
-          const dim = active && !isActive && !isImpacted;
+          const isHighlighted = highlightSet.has(s.id);
+          const dim = active && !isActive && !isImpacted && !isHighlighted;
           return (
             <g
               key={s.id}
@@ -75,6 +77,7 @@ const ServiceMap = ({ graph, selectedId, onSelect, impacted = [], width = 900, h
               onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect?.(s.id)}
             >
               {isImpacted && <circle r={r + 7} fill="none" stroke="#fbbf24" strokeWidth="2" strokeDasharray="4 3" />}
+              {isHighlighted && <circle r={r + 11} fill="none" stroke="#c45cff" strokeWidth="2.5" opacity="0.9" />}
               <circle r={r} fill={s.color} fillOpacity={s.isCollection ? 0.25 : 0.9} stroke={isActive ? "#f6f7fb" : s.color} strokeWidth={isActive ? 2.5 : s.isCollection ? 2 : 0} strokeDasharray={s.isCollection ? "4 3" : ""} />
               <text textAnchor="middle" dy="0.35em" fontSize="11" fontWeight="700" fill={s.isCollection ? s.color : "#0b0710"} style={{ pointerEvents: "none" }}>
                 {s.operations.length}

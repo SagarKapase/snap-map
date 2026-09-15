@@ -269,6 +269,8 @@ export const runAssistant = async ({
   history = [],
   userText,
   runTool,
+  tools = TOOLS,
+  describe = describeStep,
   signal,
   onToken,
   onStep,
@@ -285,7 +287,7 @@ export const runAssistant = async ({
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const res = await chat({
       messages,
-      tools: TOOLS,
+      tools,
       signal,
       maxTokens: 3000,
       onToken: (delta, full) => onToken?.(full),
@@ -307,7 +309,7 @@ export const runAssistant = async ({
     });
 
     for (const tc of res.toolCalls) {
-      const step = { name: tc.name, args: tc.args, label: describeStep(tc.name, tc.args) };
+      const step = { name: tc.name, args: tc.args, label: describe(tc.name, tc.args) };
       steps.push(step);
       onStep?.(step);
       let result;

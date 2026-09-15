@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { hasApiKey, getModel, AiError } from "../../utils/ai/client";
 import {
-  SUGGESTIONS, buildSystemPrompt, createToolRunner, runAssistant,
+  SUGGESTIONS, TOOLS, buildSystemPrompt, createToolRunner, describeStep, runAssistant,
 } from "../../utils/ai/assistant";
 import Markdown from "./Markdown";
 import AiSetup from "./AiSetup";
@@ -17,6 +17,15 @@ const STEP_ICON = {
   get_audit_findings: ShieldCheck,
   show_on_map: Crosshair,
   filter_map: Filter,
+  // Contract Graph engine
+  get_service: FileText,
+  get_entity: Braces,
+  list_duplicates: Search,
+  list_concepts: Search,
+  list_findings: ShieldCheck,
+  impact_of: Crosshair,
+  highlight_services: Crosshair,
+  open_tab: Filter,
 };
 
 const shortModel = (id) => String(id || "").split("/").pop().replace(/:free$/, " (free)");
@@ -52,11 +61,14 @@ const Steps = ({ steps }) => {
 };
 
 /**
- * "Ask the map": a drawer over the workspace.
+ * The assistant drawer.
  *
- * The thread lives in the parent so closing the drawer keeps the
- * conversation; a new import clears it. The system prompt is the spec index,
- * rebuilt only when the spec changes.
+ * By default it is "Ask the map" over one specification: the system prompt
+ * is the spec index and the tools read the spec. An `engine` swaps all of
+ * that for another subject — Contract Graph passes its own title, index,
+ * tools, tool runner and chip renderer — while the thread, key setup and
+ * composer stay the same. The thread lives in the parent so closing the
+ * drawer keeps the conversation.
  */
 const AiPanel = ({
   nodes = [],
@@ -68,6 +80,8 @@ const AiPanel = ({
   actions = {},
   onSelectNode,
   onClose,
+  engine = null,
+  placement = "workspace",
 }) => {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,11 +94,23 @@ const AiPanel = ({
   const ready = useMemo(() => hasApiKey(), [keyTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const model = useMemo(() => getModel(), [keyTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const system = useMemo(() => buildSystemPrompt({ nodes, spec, format }), [nodes, spec, format]);
-  const runTool = useMemo(
-    () => createToolRunner({ nodes, spec, audit, actions }),
-    [nodes, spec, audit, actions],
+  const specSystem = useMemo(() => (engine ? null : buildSystemPrompt({ nodes, spec, format })), [engine, nodes, spec, format]);
+  const specRunTool = useMemo(
+    () => (engine ? null : createToolRunner({ nodes, spec, audit, actions })),
+    [engine, nodes, spec, audit, actions],
   );
+  const system = engine ? engine.system : specSystem;
+  const runTool = engine ? engine.runTool : specRunTool;
+  const tools = engine ? engine.tools : TOOLS;
+  const describe = engine ? engine.describe : describeStep;
+  const title = engine ? engine.title : "Ask the map";
+  const subtitle = engine
+    ? engine.subtitle
+    : `${system.index.endpoints.toLocaleString()} endpoints indexed`;
+  const suggestions = engine ? engine.suggestions : SUGGESTIONS;
+  const intro = engine
+    ? engine.intro
+    : "Ask about this API. Answers come from the specification; endpoints the assistant mentions are clickable and can be highlighted on the map.";
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -130,6 +156,8 @@ const AiPanel = ({
         history,
         userText,
         runTool,
+        tools,
+        describe,
         signal: controller.signal,
         onToken: (full) => patchLast({ content: full }),
         onStep: (step) => patchLast((last) => ({ steps: [...(last.steps || []), step], content: "" })),
@@ -165,7 +193,9 @@ const AiPanel = ({
   // server has not rescanned this file for classes.
   return (
     <aside
-      className="fixed bottom-[50px] right-2.5 top-[70px] flex flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel shadow-2xl shadow-black/60 2xl:right-[352px]"
+      className={`fixed right-2.5 flex flex-col overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel shadow-2xl shadow-black/60 ${
+        placement === "workspace" ? "bottom-[50px] top-[70px] 2xl:right-[352px]" : "bottom-3 top-[66px]"
+      }`}
       style={{ zIndex: 46, width: "min(430px, calc(100vw - 20px))" }}
       aria-label="Assistant"
     >
@@ -175,9 +205,9 @@ const AiPanel = ({
           <WandSparkles size={14} />
         </span>
         <div className="min-w-0 flex-1 leading-tight">
-          <p className="text-[13px] font-semibold text-vz-text">Ask the map</p>
+          <p className="text-[13px] font-semibold text-vz-text">{title}</p>
           <p className="vz-mono truncate text-[10.5px] text-vz-dim" title={`${model} · index ≈ ${system.index.tokens.toLocaleString()} tokens`}>
-            {shortModel(model)} · {system.index.endpoints.toLocaleString()} endpoints indexed
+            {shortModel(model)} · {subtitle}
           </p>
         </div>
         <button
@@ -223,11 +253,8 @@ const AiPanel = ({
       <div ref={scrollRef} className="vz-scroll min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
         {thread.length === 0 && ready && !showSetup && (
           <div className="flex h-full flex-col justify-end gap-2">
-            <p className="px-1 text-[12px] leading-relaxed text-vz-dim">
-              Ask about this API. Answers come from the specification; endpoints the assistant mentions are
-              clickable and can be highlighted on the map.
-            </p>
-            {SUGGESTIONS.map((s) => (
+            <p className="px-1 text-[12px] leading-relaxed text-vz-dim">{intro}</p>
+            {suggestions.map((s) => (
               <button
                 key={s}
                 type="button"
@@ -263,7 +290,7 @@ const AiPanel = ({
                   </p>
                 ) : (
                   <>
-                    <Markdown text={m.content} nodes={nodes} onSelectNode={onSelectNode} />
+                    <Markdown text={m.content} nodes={nodes} onSelectNode={onSelectNode} chipFor={engine?.chipFor} />
                     {m.stopped && <p className="mt-1 text-[11px] italic text-vz-dim">Stopped.</p>}
                   </>
                 )}
@@ -288,7 +315,7 @@ const AiPanel = ({
                 }
               }}
               rows={1}
-              placeholder="Ask about this API… (Enter to send)"
+              placeholder={engine ? engine.placeholder : "Ask about this API… (Enter to send)"}
               className="vz-scroll max-h-[120px] min-h-[24px] flex-1 resize-none bg-transparent text-[13px] leading-[1.5] text-vz-text placeholder:text-vz-dim focus:outline-none"
               style={{ height: `${Math.min(120, 24 + (input.split("\n").length - 1) * 19)}px` }}
             />

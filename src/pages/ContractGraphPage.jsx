@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Plus, Trash2, Upload, Globe, Download, FileJson, Waypoints, Boxes, CopyMinus, Tags, ListChecks,
-  AlertCircle, ChevronDown, Sparkles, X, Share2, Check,
+  AlertCircle, ChevronDown, Sparkles, X, Share2, Check, WandSparkles,
 } from "lucide-react";
+import AiPanel from "../components/ai/AiPanel";
+import { GRAPH_SUGGESTIONS, GRAPH_TOOLS, buildGraphSystemPrompt, createGraphToolRunner, describeGraphStep } from "../utils/ai/graphAssistant";
 import ProductSwitcher from "../components/shell/ProductSwitcher";
 import AccountMenu from "../components/shell/AccountMenu";
 import { useAuth } from "../components/auth/useAuth";
@@ -72,6 +74,10 @@ const ContractGraphPage = () => {
   const [dragOver, setDragOver] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [copied, setCopied] = useState("");
+  // "Ask the estate": the thread outlives the drawer; a workspace switch clears it.
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [assistantThread, setAssistantThread] = useState([]);
+  const [aiHighlight, setAiHighlight] = useState(() => ({ ids: [], reason: "" }));
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
   const mapRef = useRef(null);
@@ -112,6 +118,55 @@ const ContractGraphPage = () => {
 
   const graph = useMemo(() => buildContractGraph(services), [services]);
   const impacted = useMemo(() => (selectedId ? impactOf(graph, selectedId) : []), [graph, selectedId]);
+
+  // The assistant's view of the graph, and what it may do to the page.
+  const assistantActions = useMemo(
+    () => ({
+      highlightServices: (ids, reason) => {
+        setAiHighlight({ ids, reason });
+        setSelectedId(ids[0] || null);
+        setTab("map");
+      },
+      openTab: (next) => setTab(next),
+    }),
+    [],
+  );
+  const assistantEngine = useMemo(() => {
+    const system = buildGraphSystemPrompt(graph);
+    const byId = new Map(graph.services.map((s) => [s.id, s]));
+    return {
+      title: "Ask the estate",
+      subtitle: `${graph.services.length} service${graph.services.length === 1 ? "" : "s"} indexed`,
+      intro: "Ask about these services together. Answers come from the graph — shared entities, duplicates, concepts, dependencies — and services the assistant mentions are clickable.",
+      placeholder: "Ask about this estate… (Enter to send)",
+      suggestions: GRAPH_SUGGESTIONS,
+      system,
+      tools: GRAPH_TOOLS,
+      describe: describeGraphStep,
+      runTool: createGraphToolRunner({ graph, actions: assistantActions }),
+      chipFor: (id, key) => {
+        const s = byId.get(id);
+        if (!s) return null;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => { setSelectedId(s.id); setTab("map"); }}
+            className="vz-t inline-flex max-w-full items-center gap-1.5 rounded-md border border-vz-line bg-vz-panel-2 px-1.5 py-px align-middle text-[11.5px] text-vz-text hover:border-vz-accent/60 hover:bg-vz-accent/10"
+          >
+            <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color }} />
+            <span className="truncate">{s.name}</span>
+          </button>
+        );
+      },
+    };
+  }, [graph, assistantActions]);
+
+  // A different workspace is a different conversation.
+  useEffect(() => {
+    setAssistantThread([]);
+    setAiHighlight({ ids: [], reason: "" });
+  }, [activeId]);
 
   useEffect(() => {
     const el = mapRef.current;
@@ -353,6 +408,14 @@ const ContractGraphPage = () => {
         <div className="ml-auto flex items-center gap-2">
           {hasServices && (
             <>
+              <button
+                type="button"
+                onClick={() => setShowAssistant((v) => !v)}
+                title="Ask the estate — AI assistant over these services"
+                className={`vz-t flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12.5px] font-medium ${showAssistant ? "border-vz-accent/40 bg-vz-accent/12 text-[#e6c4ff]" : "border-vz-line bg-vz-panel-2 text-vz-soft hover:text-vz-text"}`}
+              >
+                <WandSparkles size={13} className="text-vz-accent-2" /><span className="hidden md:inline">Ask AI</span>
+              </button>
               <button type="button" onClick={copyMermaid} title="Copy the map as a Mermaid diagram" className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[12.5px] text-vz-soft hover:text-vz-text">
                 {copied === "mermaid" ? <Check size={13} className="text-vz-green" /> : <Share2 size={13} />}<span className="hidden md:inline">Mermaid</span>
               </button>
@@ -441,7 +504,7 @@ const ContractGraphPage = () => {
         </aside>
 
         {/* ── Main ── */}
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className={`flex min-w-0 flex-1 flex-col ${showAssistant && hasServices ? "lg:mr-[446px]" : ""}`}>
           {hasServices ? (
             <>
               <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-vz-line px-4 text-[12px] text-vz-dim">
@@ -471,8 +534,15 @@ const ContractGraphPage = () => {
                 <div className="vz-scroll min-w-0 flex-1 overflow-auto">
                   {tab === "map" && (
                     <div className="flex h-full flex-col">
+                      {aiHighlight.ids.length > 0 && (
+                        <div className="flex flex-shrink-0 items-center gap-2 border-b border-vz-line-soft bg-vz-accent/[0.06] px-4 py-1.5 text-[12px] text-vz-soft">
+                          <WandSparkles size={12} className="text-vz-accent-2" />
+                          <span className="min-w-0 flex-1 truncate">{aiHighlight.reason || "Highlighted by the assistant"} · {aiHighlight.ids.length} service{aiHighlight.ids.length === 1 ? "" : "s"}</span>
+                          <button type="button" onClick={() => setAiHighlight({ ids: [], reason: "" })} className="vz-t text-vz-dim hover:text-vz-text" aria-label="Clear highlight"><X size={12} /></button>
+                        </div>
+                      )}
                       <div ref={mapRef} className="min-h-[360px] flex-1">
-                        <ServiceMap graph={graph} selectedId={selectedId} onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))} impacted={impacted} width={mapSize.w} height={mapSize.h} />
+                        <ServiceMap graph={graph} selectedId={selectedId} onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))} impacted={impacted} highlighted={aiHighlight.ids} width={mapSize.w} height={mapSize.h} />
                       </div>
                       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-vz-line-soft px-4 py-2 text-[11px] text-vz-dim">
                         <span><span className="mr-1.5 inline-block h-0.5 w-5 bg-vz-soft align-middle" />calls</span>
@@ -511,6 +581,16 @@ const ContractGraphPage = () => {
           )}
         </main>
       </div>
+
+      {showAssistant && hasServices && (
+        <AiPanel
+          engine={assistantEngine}
+          placement="page"
+          thread={assistantThread}
+          onThreadChange={setAssistantThread}
+          onClose={() => setShowAssistant(false)}
+        />
+      )}
     </div>
   );
 };

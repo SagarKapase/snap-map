@@ -9,7 +9,8 @@ import { displayPath } from "../../utils/format";
  * `[[node-12]]` references that become endpoint chips.
  */
 
-const INLINE = /(\[\[(node-[\w-]+)\]\])|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\))/g;
+// Chips: [[node-12]] for endpoints, [[svc_ab12]] for services on a Contract Graph.
+const INLINE = /(\[\[((?:node-|svc_)[\w-]+)\]\])|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\))/g;
 
 /** A clickable method + path chip for an endpoint the model referred to. */
 export const EndpointChip = ({ node, onSelect, label }) => {
@@ -42,8 +43,12 @@ const renderInline = (text, ctx, keyBase) => {
     if (match.index > last) out.push(text.slice(last, match.index));
     const key = `${keyBase}-${match.index}`;
     if (match[1]) {
-      const node = ctx.nodeById?.get(match[2]);
-      out.push(<EndpointChip key={key} node={node} label={match[2]} onSelect={ctx.onSelectNode} />);
+      const custom = ctx.chipFor?.(match[2], key);
+      if (custom) out.push(custom);
+      else {
+        const node = ctx.nodeById?.get(match[2]);
+        out.push(<EndpointChip key={key} node={node} label={match[2]} onSelect={ctx.onSelectNode} />);
+      }
     } else if (match[3]) {
       out.push(
         <code key={key} className="vz-mono rounded bg-white/8 px-1 py-px text-[11.5px] text-[#fca5a5]">
@@ -116,10 +121,11 @@ const parseBlocks = (source) => {
   return blocks;
 };
 
-const Markdown = ({ text, nodes = [], onSelectNode, className = "" }) => {
+/** `chipFor(id, key)` may return a custom chip element for an id; otherwise ids resolve to endpoints in `nodes`. */
+const Markdown = ({ text, nodes = [], onSelectNode, chipFor, className = "" }) => {
   const ctx = useMemo(
-    () => ({ nodeById: new Map(nodes.map((n) => [n.id, n])), onSelectNode }),
-    [nodes, onSelectNode],
+    () => ({ nodeById: new Map(nodes.map((n) => [n.id, n])), onSelectNode, chipFor }),
+    [nodes, onSelectNode, chipFor],
   );
   const blocks = useMemo(() => parseBlocks(text), [text]);
 
