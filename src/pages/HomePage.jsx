@@ -28,7 +28,7 @@ const TOOLS = [
   { label: "Mock server", hint: "Responses generated from the schema", icon: Server, to: "/workspace", needsSpec: true },
   { label: "Documentation", hint: "Generated reference docs", icon: BookOpen, to: "/workspace", needsSpec: true },
   { label: "Convert & export", hint: "OpenAPI, Swagger, Postman, .http", icon: ArrowRightLeft, to: "/workspace", needsSpec: true },
-  { label: "Postman companion", hint: "Pull and push collections", icon: Send, to: "/workspace", needsSpec: true },
+  { label: "Postman companion", hint: "Pull and push collections", icon: Send, to: "/workspace", needsSpec: true, needsAccount: true },
   { label: "Ask the map", hint: "AI assistant over the loaded specification", icon: WandSparkles, to: "/workspace", needsSpec: true },
 ];
 
@@ -149,7 +149,7 @@ const HomePage = () => {
           <Section title="Tools in the API Map">
             <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               {TOOLS.map((t) => (
-                <Card key={t.label} to={t.to} icon={t.icon} title={t.label} hint={t.hint} meta={t.needsSpec ? "Opens the API Map — import an API first" : "Works on its own"} />
+                <Card key={t.label} to={t.to} icon={t.icon} title={t.label} hint={t.hint} meta={t.needsAccount && !user ? "Needs an account — sign in first" : t.needsSpec ? "Opens the API Map — import an API first" : "Works on its own"} />
               ))}
             </div>
           </Section>

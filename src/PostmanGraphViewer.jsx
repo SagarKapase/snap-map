@@ -6,7 +6,7 @@ import {
   Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
   Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
   Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
-  AlertCircle, Target, Upload, Code2, WandSparkles,
+  AlertCircle, Target, Upload, Code2, WandSparkles, Lock,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
 import { parseCollection, formatLabel } from "./utils/parsers";
@@ -22,6 +22,7 @@ import {
 } from "./utils/layout";
 import { auditSpec } from "./utils/audit";
 import { addRecent, clearRecents, getRecents, loadRecentData } from "./utils/recents";
+import { getSession } from "./utils/auth";
 import BrandMark from "./components/BrandMark";
 import ConnectionLines from "./components/ConnectionLines";
 import GraphCard from "./components/GraphCard";
@@ -54,6 +55,8 @@ import CoverageView from "./components/workspace/CoverageView";
 import { PostmanIcon } from "./components/icons/BrandIcons";
 import VariableFlowLines from "./components/workspace/VariableFlowLines";
 import PostmanConnect from "./components/workspace/PostmanConnect";
+import AccountRequired from "./components/auth/AccountRequired";
+import { useAuth } from "./components/auth/useAuth";
 import { collectVariables, analyseVariableFlow } from "./utils/variables";
 import { curlToCollection, harToCollection, looksLikeCurl, looksLikeHar } from "./utils/importers";
 import { isPostmanVariableFile, readPostmanVariableFile } from "./utils/parsers";
@@ -158,6 +161,23 @@ const PostmanGraphViewer = () => {
   const [shareState, setShareState] = useState(null);
   // Postman companion state
   const [showPostman, setShowPostman] = useState(false);
+  // The Postman companion moves collections in and out of a Postman account,
+  // so it is kept behind a Vizroute account. A signed-out visitor sees why
+  // and comes back to the same document with the panel open.
+  const { user } = useAuth();
+  const [accountPrompt, setAccountPrompt] = useState(null);
+  const currentRecentRef = useRef(null);
+  const requireAccount = useCallback((run) => {
+    if (user) {
+      run();
+      return;
+    }
+    const recent = currentRecentRef.current;
+    setAccountPrompt({
+      feature: "Postman companion",
+      next: `/workspace?${recent ? `recent=${encodeURIComponent(recent)}&` : ""}tool=postman`,
+    });
+  }, [user]);
   const [pushPayload, setPushPayload] = useState(null);
   const [pushLabel, setPushLabel] = useState("");
   const [pulledEnvironment, setPulledEnvironment] = useState(null);
@@ -407,12 +427,14 @@ const PostmanGraphViewer = () => {
     setAssistantThread([]);
     setAiHighlight(new Set());
     setImportedAt(new Date().toISOString());
-    setRecents(addRecent({
+    const list = addRecent({
       name: data?.info?.name || data?.info?.title || data?.name || "API Collection",
       format,
       endpoints: parsed.filter((n) => n.type === "request").length,
       data,
-    }));
+    });
+    setRecents(list);
+    currentRecentRef.current = list[0]?.id || null;
     setView("graph");
   }, [setSearchQuery]);
 
@@ -440,7 +462,7 @@ const PostmanGraphViewer = () => {
   }, []);
 
   /** Hand the current collection to the push flow, converted if it is a spec. */
-  const openPostmanPush = useCallback(() => {
+  const openPostmanPush = useCallback(() => requireAccount(() => {
     if (!nodes.length) return;
     try {
       const text = convertSpec("postman", {
@@ -455,7 +477,7 @@ const PostmanGraphViewer = () => {
     } catch {
       setPushPayload(null);
     }
-  }, [collection, nodes, detectedFormat, playgroundOrigin, variables]);
+  }), [collection, nodes, detectedFormat, playgroundOrigin, variables, requireAccount]);
 
   /** Apply the chosen repairs and reload the workspace from the result. */
   const handleApplyFixes = useCallback((ids) => {
@@ -493,7 +515,7 @@ const PostmanGraphViewer = () => {
   }, [handleImportText]);
 
   /** Turn the uncovered endpoints into a collection ready to push. */
-  const handleGenerateMissing = useCallback((items, count) => {
+  const handleGenerateMissing = useCallback((items, count) => requireAccount(() => {
     if (!items.length) return;
     setPushPayload({
       info: {
@@ -504,7 +526,7 @@ const PostmanGraphViewer = () => {
     });
     setPushLabel(`${count} endpoint${count === 1 ? "" : "s"} with no request`);
     setShowPostman(true);
-  }, [collection]);
+  }), [collection, requireAccount]);
 
   // ── Share link handler ─────────────────────
   // A link carries the whole spec in its query string. Past a few tens of
@@ -570,10 +592,16 @@ const PostmanGraphViewer = () => {
     // Home links straight to a recent import or to a tool that needs no
     // document (diff, breaking changes).
     const recentId = query.get("recent");
-    if (recentId) {
+    const tool = query.get("tool");
+    if (recentId || tool) {
       window.history.replaceState({}, "", window.location.pathname);
-      const entry = getRecents().find((r) => r.id === recentId);
+      const entry = recentId ? getRecents().find((r) => r.id === recentId) : null;
       if (entry) handleOpenRecent(entry);
+      // Back from sign-in: reopen the tool that asked for the account.
+      if (tool === "postman" && getSession()) {
+        setPushPayload(null);
+        setShowPostman(true);
+      }
       return;
     }
     const wanted = query.get("view");
@@ -929,8 +957,8 @@ const PostmanGraphViewer = () => {
     { id: "view-raw", group: "Views", icon: Braces, label: "Open Raw Spec", keywords: "json source", run: () => setCenterTab("raw") },
     { id: "view-audit", group: "Views", icon: ShieldCheck, label: "Open audit", hint: "Lint, security and quality checks", keywords: "lint score security quality issues", run: () => setCenterTab("audit") },
     { id: "view-coverage", group: "Views", icon: Target, label: "Open coverage", hint: "Compare a spec against a collection", keywords: "coverage missing endpoints gap compare spec collection qa", run: () => setCenterTab("coverage") },
-    { id: "postman-open", group: "Tools", icon: Wifi, label: "Open a collection from Postman", hint: "Browse your workspaces", keywords: "postman workspace pull import account api key", run: () => { setPushPayload(null); setShowPostman(true); } },
-    { id: "postman-push", group: "Tools", icon: Upload, label: "Send this collection to Postman", hint: "Create or overwrite in a workspace", keywords: "postman push export workspace upload sync", run: openPostmanPush },
+    { id: "postman-open", group: "Tools", icon: user ? Wifi : Lock, label: "Open a collection from Postman", hint: user ? "Browse your workspaces" : "Sign in required", keywords: "postman workspace pull import account api key", run: () => requireAccount(() => { setPushPayload(null); setShowPostman(true); }) },
+    { id: "postman-push", group: "Tools", icon: user ? Upload : Lock, label: "Send this collection to Postman", hint: user ? "Create or overwrite in a workspace" : "Sign in required", keywords: "postman push export workspace upload sync", run: openPostmanPush },
     { id: "export", group: "Views", icon: Download, label: "Export or convert", hint: "OpenAPI, Swagger, Postman, PNG, SVG, CSV", keywords: "png svg json yaml download openapi swagger postman convert http csv", run: () => { setCenterTab("map"); setExportOpen(true); } },
     { id: "share", group: "Views", icon: Link2, label: "Copy share link", keywords: "url share", run: handleShare },
     { id: "embed", group: "Views", icon: Code2, label: "Copy embed code", hint: "An iframe for a README or wiki", keywords: "iframe embed readme confluence wiki publish", run: handleCopyEmbed },
@@ -947,7 +975,7 @@ const PostmanGraphViewer = () => {
     { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
     { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
     { id: "multi", group: "Tools", icon: Network, label: "Add to Contract Graph", hint: "Map this API with the rest of the estate", keywords: "services dependencies multi contract graph estate", run: openContractGraph },
-  ], [openPlayground, openBlankRequest, openContractGraph, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush]);
+  ], [openPlayground, openBlankRequest, openContractGraph, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush, requireAccount, user]);
 
   const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
   const liveResponse = selectedNode ? liveResponses[selectedNode.id] : null;
@@ -1023,6 +1051,15 @@ const PostmanGraphViewer = () => {
       {showFlowBuilder && (
         <FlowBuilder nodes={nodes} workspaceVariables={variables} onClose={() => setShowFlowBuilder(false)} />
       )}
+      {accountPrompt && (
+        <AccountRequired
+          feature={accountPrompt.feature}
+          reason="Connecting a Postman account moves collections between your Postman workspaces and Vizroute. It is tied to your Vizroute account so the connection, and what you push, stay yours."
+          next={accountPrompt.next}
+          onClose={() => setAccountPrompt(null)}
+        />
+      )}
+
       {showPostman && (
         <PostmanConnect
           onClose={() => { setShowPostman(false); setPushPayload(null); }}
@@ -1175,11 +1212,12 @@ const PostmanGraphViewer = () => {
                 <button
                   type="button"
                   onClick={openPostmanPush}
-                  title="Open a collection from Postman, or send this one back"
+                  title={user ? "Open a collection from Postman, or send this one back" : "Postman companion — sign in to use"}
                   className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] font-medium text-vz-soft hover:text-vz-text"
                 >
                   <PostmanIcon size={14} className="flex-shrink-0 text-[#ff6c37]" />
                   <span className="hidden 2xl:inline">Postman</span>
+                  {!user && <Lock size={11} className="flex-shrink-0 text-vz-dim" aria-label="Sign in required" />}
                 </button>
 
                 <ExportMenu
