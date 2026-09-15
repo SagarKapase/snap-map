@@ -325,3 +325,64 @@ export const ServiceInspector = ({ graph, serviceId, impacted, onClose }) => {
     </div>
   );
 };
+
+// ─── Map alternatives: list and table ─────────
+
+/** Every service as a row: what it is, what it depends on, what uses it. */
+export const ServicesListView = ({ graph, selectedId, onSelect }) => (
+  <div className="cg-scroll">
+    <table className="cg-table">
+      <thead>
+        <tr><th>Service</th><th>Format</th><th>Operations</th><th>Entities</th><th>Depends on</th><th>Used by</th></tr>
+      </thead>
+      <tbody>
+        {graph.services.map((s) => {
+          const out = [...new Set(graph.edges.filter((e) => e.from === s.id && e.kind !== "shares").map((e) => e.to))];
+          const inn = [...new Set(graph.edges.filter((e) => e.to === s.id && e.kind !== "shares").map((e) => e.from))];
+          const name = (id) => graph.services.find((x) => x.id === id)?.name || id;
+          return (
+            <tr key={s.id} onClick={() => onSelect?.(s.id)} style={{ cursor: "pointer", background: selectedId === s.id ? "rgba(168,85,247,0.12)" : undefined }}>
+              <td><span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "#f6f7fb", fontWeight: 600 }}><span className="cg-dot" style={{ background: s.color }} />{s.name}</span></td>
+              <td>{s.isCollection ? "Consumer collection" : s.formatLabel}</td>
+              <td>{s.operations.length}</td>
+              <td>{s.entities.length}</td>
+              <td>{out.length ? out.map(name).join(", ") : "—"}</td>
+              <td>{inn.length ? inn.map(name).join(", ") : "—"}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+);
+
+/** Every operation across the estate, with the service it belongs to. */
+export const OperationsTableView = ({ graph, onSelect, filter = "" }) => {
+  const q = filter.trim().toLowerCase();
+  const rows = graph.services.flatMap((s) =>
+    s.operations
+      .filter((op) => !q || `${s.name} ${op.method} ${op.path} ${op.name}`.toLowerCase().includes(q))
+      .map((op) => ({ s, op })));
+  return (
+    <div className="cg-scroll">
+      <table className="cg-table">
+        <thead>
+          <tr><th>Service</th><th>Method</th><th>Path</th><th>Summary</th><th>Returns</th><th>Auth</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(({ s, op }) => (
+            <tr key={op.id} onClick={() => onSelect?.(s.id)} style={{ cursor: "pointer" }}>
+              <td><span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><span className="cg-dot" style={{ width: 8, height: 8, background: s.color }} />{s.name}</span></td>
+              <td><Method m={op.method} /></td>
+              <td className="mono">{s.servers[0] && op.path.startsWith(s.servers[0]) ? op.path.slice(s.servers[0].length) || "/" : op.path}</td>
+              <td>{op.name !== `${op.method} ${op.path}` ? op.name : ""}</td>
+              <td className="mono">{op.responseRef || (op.responseFields.length ? `${op.responseFields.length} fields` : "")}</td>
+              <td>{s.isCollection ? "" : op.auth.length ? op.auth.join(", ") : <span style={{ color: "#fbbf24" }}>none</span>}</td>
+            </tr>
+          ))}
+          {!rows.length && <tr><td colSpan={6} style={{ textAlign: "center", padding: 24 }}>No operations match.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+};

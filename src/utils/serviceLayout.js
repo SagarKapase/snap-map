@@ -3,7 +3,13 @@
  * repulsion, edge springs and a pull to the centre. No randomness, so the
  * same estate always draws the same map.
  */
-export const layoutServices = (services, edges, width, height) => {
+export const LAYOUTS = [
+  { id: "force", label: "Force" },
+  { id: "ring", label: "Ring" },
+  { id: "grid", label: "Grid" },
+];
+
+export const layoutServices = (services, edges, width, height, mode = "force") => {
   const n = services.length;
   if (!n) return new Map();
   const cx = width / 2;
@@ -15,10 +21,24 @@ export const layoutServices = (services, edges, width, height) => {
       return [s.id, { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius, vx: 0, vy: 0 }];
     }),
   );
-  if (n === 1) return pos;
+  if (mode === "ring" || n === 1) return pos;
+  if (mode === "grid") {
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const gapX = Math.min(360, (width - 220) / Math.max(1, cols - 1) || 0);
+    const gapY = Math.min(280, (height - 200) / Math.max(1, rows - 1) || 0);
+    const x0 = cx - (gapX * (cols - 1)) / 2;
+    const y0 = cy - (gapY * (rows - 1)) / 2;
+    services.forEach((s, i) => {
+      const p = pos.get(s.id);
+      p.x = x0 + (i % cols) * gapX;
+      p.y = y0 + Math.floor(i / cols) * gapY;
+    });
+    return pos;
+  }
   const index = new Map(services.map((s) => [s.id, s]));
   const springs = edges.filter((e) => index.has(e.from) && index.has(e.to));
-  const ideal = Math.max(140, Math.min(260, (Math.min(width, height) * 1.6) / Math.sqrt(n)));
+  const ideal = Math.max(170, Math.min(340, (Math.min(width, height) * 1.9) / Math.sqrt(n)));
   for (let iter = 0; iter < 260; iter++) {
     const cooling = 1 - iter / 260;
     services.forEach((a) => {
@@ -52,8 +72,8 @@ export const layoutServices = (services, edges, width, height) => {
       pa.vy = (pa.vy + fy) * 0.5;
     });
     pos.forEach((p) => {
-      p.x = Math.min(width - 60, Math.max(60, p.x + p.vx * cooling));
-      p.y = Math.min(height - 50, Math.max(50, p.y + p.vy * cooling));
+      p.x = Math.min(width - 110, Math.max(110, p.x + p.vx * cooling));
+      p.y = Math.min(height - 100, Math.max(80, p.y + p.vy * cooling));
     });
   }
   return pos;

@@ -248,9 +248,15 @@ export const normalizeService = ({ id, name, spec, sourceUrl = "", color } = {},
     entities.push(...byResource.values());
   }
 
+  const info = spec?.info || {};
+  const description =
+    (typeof info.description === "string" && info.description) || info.description?.content || "";
+
   return {
     id,
-    name: name || spec?.info?.title || spec?.info?.name || root.name || `Service ${index + 1}`,
+    name: name || info.title || info.name || root.name || `Service ${index + 1}`,
+    description: String(description).trim(),
+    version: typeof info.version === "string" ? info.version : "",
     format,
     formatLabel: Array.isArray(spec) ? "Custom JSON" : formatLabel(spec),
     color: color || DEFAULT_COLORS[index % DEFAULT_COLORS.length],

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import yaml from "js-yaml";
 import {
   ZoomIn, ZoomOut, RotateCcw, Search, Play, Share2,
@@ -92,6 +92,7 @@ const relativeServerOrigin = (parsedNodes, sourceUrl) => {
 
 const PostmanGraphViewer = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const paperRef = useRef(null);
@@ -574,11 +575,18 @@ const PostmanGraphViewer = () => {
   // Reading the URL is the one thing that cannot happen during render: it
   // also rewrites the address bar and then loads a whole specification.
   useEffect(() => {
+    // A document handed over from Contract Graph ("Open in API Explorer").
+    const handed = location.state?.openSpec;
+    if (handed && typeof handed === "object") {
+      navigate(location.pathname, { replace: true, state: null });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      handleVisualize(handed);
+      return;
+    }
     const shared = extractSharedSpec();
     if (shared) {
       // Clean URL without reloading
       window.history.replaceState({}, "", window.location.pathname);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleVisualize(shared);
       return;
     }

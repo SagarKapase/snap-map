@@ -10,6 +10,7 @@ import { useAuth } from "./components/auth/useAuth";
 const PostmanGraphViewer = lazy(() => import("./PostmanGraphViewer"));
 // The embed renders a static vector, so it never pulls in the workspace.
 const EmbedMap = lazy(() => import("./pages/EmbedMap"));
+const EmbedGraph = lazy(() => import("./pages/EmbedGraph"));
 // The multi-service map and the account pages are separate entry points.
 const ContractGraphPage = lazy(() => import("./pages/ContractGraphPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
@@ -48,6 +49,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/embed" element={<EmbedMap />} />
+          <Route path="/embed-graph" element={<EmbedGraph />} />
           {/* Kept so older links and bookmarks keep working */}
           <Route path="/app" element={<PostmanGraphViewer />} />
           <Route path="*" element={<Navigate to="/" replace />} />

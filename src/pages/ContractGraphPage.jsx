@@ -2,15 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Plus, Trash2, Upload, Globe, Download, FileJson, Waypoints, Boxes, CopyMinus, Tags, ListChecks,
-  AlertCircle, ChevronDown, Sparkles, X, Share2, Check, WandSparkles,
+  AlertCircle, ChevronDown, ChevronRight, Sparkles, X, Share2, Check, WandSparkles, Search, Table2,
+  Minus, Maximize2, BookOpen, ArrowRight, Scan, Link2, Code2, Image, FileCode2, Save,
 } from "lucide-react";
+import {
+  buildEstatePayload, estateShareUrl, estateEmbedSnippet, readSharedEstate, serviceMapSvg, svgToPng, downloadBlob, safeFilename,
+} from "../utils/serviceMapExport";
+import "../contractgraph.css";
 import AiPanel from "../components/ai/AiPanel";
 import { GRAPH_SUGGESTIONS, GRAPH_TOOLS, buildGraphSystemPrompt, createGraphToolRunner, describeGraphStep } from "../utils/ai/graphAssistant";
 import ProductSwitcher from "../components/shell/ProductSwitcher";
 import AccountMenu from "../components/shell/AccountMenu";
 import { useAuth } from "../components/auth/useAuth";
 import ServiceMap from "../components/contractgraph/ServiceMap";
-import { EntitiesView, DuplicatesView, ConceptsView, FindingsView, ServiceInspector } from "../components/contractgraph/Views";
+import { EntitiesView, DuplicatesView, ConceptsView, FindingsView, ServicesListView, OperationsTableView } from "../components/contractgraph/Views";
+import ServiceDetails from "../components/contractgraph/ServiceDetails";
+import { LAYOUTS } from "../utils/serviceLayout";
 import { buildContractGraph, impactOf, toMermaid, normalizeService } from "../utils/contractGraph";
 import { parseSpecText } from "../utils/readSpec";
 import { formatLabel } from "../utils/parsers";
@@ -74,10 +81,67 @@ const ContractGraphPage = () => {
   const [dragOver, setDragOver] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [copied, setCopied] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const shareRef = useRef(null);
+  // An estate opened from a share link is shown without being saved; the
+  // visitor decides whether it becomes one of their workspaces.
+  const [shared, setShared] = useState(() => readSharedEstate());
   // "Ask the estate": the thread outlives the drawer; a workspace switch clears it.
   const [showAssistant, setShowAssistant] = useState(false);
   const [assistantThread, setAssistantThread] = useState([]);
   const [aiHighlight, setAiHighlight] = useState(() => ({ ids: [], reason: "" }));
+  // Map toolbar: graph / list / table, layout, zoom, and the header search.
+  const [viewMode, setViewMode] = useState("graph");
+  const [layout, setLayout] = useState("force");
+  const [zoom, setZoom] = useState(1);
+  const [fitRequest, setFitRequest] = useState(0);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  // Node positions moved by hand, remembered per workspace and layout.
+  const arrangementKey = shared ? null : activeId ? `vizroute_cg_positions:${activeId}:${layout}` : null;
+  const [positionOverrides, setPositionOverrides] = useState({});
+  useEffect(() => {
+    if (shared) {
+      // The author's arrangement, keyed by name in the link, re-keyed to this view's ids.
+      const byName = shared.positions || {};
+      const next = {};
+      shared.services.forEach((s, i) => {
+        const pos = byName[s.name];
+        if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) next[`shared-${i}`] = { x: pos.x, y: pos.y };
+      });
+      setPositionOverrides(next);
+      return;
+    }
+    if (!arrangementKey) return;
+    try {
+      const raw = localStorage.getItem(arrangementKey);
+      const parsed = raw ? JSON.parse(raw) : {};
+      setPositionOverrides(parsed && typeof parsed === "object" ? parsed : {});
+    } catch {
+      setPositionOverrides({});
+    }
+  }, [arrangementKey, shared]);
+  const moveNode = useCallback((next) => {
+    setPositionOverrides(next);
+    if (!arrangementKey) return;
+    try {
+      localStorage.setItem(arrangementKey, JSON.stringify(next));
+    } catch {
+      /* storage full: the arrangement lasts for the session only */
+    }
+  }, [arrangementKey]);
+  const resetPositions = () => {
+    setPositionOverrides({});
+    if (arrangementKey) {
+      try {
+        localStorage.removeItem(arrangementKey);
+      } catch {
+        /* nothing to clear */
+      }
+    }
+    setLayoutMenuOpen(false);
+  };
+  const layoutMenuRef = useRef(null);
+  const [search, setSearch] = useState("");
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
   const mapRef = useRef(null);
@@ -98,9 +162,14 @@ const ContractGraphPage = () => {
 
   const active = workspaces.find((w) => w.id === activeId) || null;
 
-  // Load the specs of the active workspace.
+  // Load the specs of the active workspace — or show the shared estate.
   useEffect(() => {
     let cancelled = false;
+    if (shared) {
+      setServices(shared.services.map((s, i) => ({ id: `shared-${i}`, name: s.name || `Service ${i + 1}`, color: undefined, sourceUrl: s.sourceUrl || "", spec: s.spec })));
+      setLoading(false);
+      return undefined;
+    }
     if (!active) {
       setServices([]);
       return undefined;
@@ -114,10 +183,45 @@ const ContractGraphPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [active]);
+  }, [active, shared]);
 
   const graph = useMemo(() => buildContractGraph(services), [services]);
+  const hasServicesForResize = services.length > 0;
   const impacted = useMemo(() => (selectedId ? impactOf(graph, selectedId) : []), [graph, selectedId]);
+
+  /** Services that do not match the search, by name or by any operation. */
+  const dimmed = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    return new Set(
+      graph.services
+        .filter((s) => !s.name.toLowerCase().includes(q) && !s.operations.some((op) => `${op.method} ${op.path} ${op.name}`.toLowerCase().includes(q)))
+        .map((s) => s.id),
+    );
+  }, [graph, search]);
+
+  const detailsOpen = Boolean(selectedId) && graph.services.some((s) => s.id === selectedId);
+
+  /** Hand a service's document to the single-spec workspace. */
+  const openInExplorer = useCallback((id) => {
+    const svc = services.find((s) => s.id === id);
+    if (!svc?.spec) return;
+    navigate("/workspace", { state: { openSpec: svc.spec, name: svc.name } });
+  }, [services, navigate]);
+
+  const toggleFullscreen = () => {
+    const el = mapRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else el.requestFullscreen?.();
+  };
+
+  useEffect(() => {
+    if (!layoutMenuOpen) return undefined;
+    const onDown = (e) => layoutMenuRef.current && !layoutMenuRef.current.contains(e.target) && setLayoutMenuOpen(false);
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [layoutMenuOpen]);
 
   // The assistant's view of the graph, and what it may do to the page.
   const assistantActions = useMemo(
@@ -177,7 +281,7 @@ const ContractGraphPage = () => {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [tab]);
+  }, [tab, viewMode, hasServicesForResize]);
 
   // The workspace menu closes on an outside click or Escape, like every other menu.
   const wsMenuRef = useRef(null);
@@ -242,9 +346,21 @@ const ContractGraphPage = () => {
         notify("error", `${file.name}: not valid JSON or YAML.`);
         continue;
       }
-      if (spec.vizroute === "contract-graph-workspace") {
-        const { workspace, failures } = await importWorkspace(userId, spec);
+      if (spec.vizroute === "contract-graph-workspace" || spec.vizroute === "contract-graph-estate") {
+        const { workspace, failures } = await importWorkspace(userId, { ...spec, vizroute: "contract-graph-workspace" });
         failures.forEach((f) => notify("error", f));
+        if (spec.positions && workspace) {
+          const next = {};
+          workspace.services.forEach((s) => {
+            const pos = spec.positions[s.name];
+            if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) next[s.id] = pos;
+          });
+          try {
+            localStorage.setItem(`vizroute_cg_positions:${workspace.id}:${layout}`, JSON.stringify(next));
+          } catch {
+            /* optional */
+          }
+        }
         refresh();
         setActiveId(workspace.id);
         notify("ok", `Imported workspace "${workspace.name}" with ${workspace.services.length} services.`);
@@ -353,15 +469,122 @@ const ContractGraphPage = () => {
     setWsMenuOpen(false);
   };
 
+  /** The estate as a link or a file carries: specs plus the arrangement, positions keyed by name. */
+  const estatePayload = useCallback(async () => {
+    const positionsByName = {};
+    graph.services.forEach((s) => {
+      const p = positionOverrides[s.id];
+      if (p) positionsByName[s.name] = { x: Math.round(p.x), y: Math.round(p.y) };
+    });
+    if (shared) return { ...buildEstatePayload({ name: shared.name, services: services, positionsByName }) };
+    if (!active) return null;
+    const file = await exportWorkspace(active);
+    return { ...file, vizroute: "contract-graph-workspace", positions: positionsByName };
+  }, [graph, positionOverrides, shared, services, active]);
+
   const exportJson = async () => {
-    if (!active) return;
-    downloadJson(`${active.name.replace(/[^a-z0-9_-]+/gi, "_")}.contract-graph.json`, await exportWorkspace(active));
+    const payload = await estatePayload();
+    if (!payload) return;
+    downloadJson(`${safeFilename(payload.name, "estate")}.contract-graph.json`, payload);
+    setShareOpen(false);
   };
+
+  const flash = (what) => {
+    setCopied(what);
+    setTimeout(() => setCopied(""), 1800);
+  };
+
+  const copyShareLink = async () => {
+    const payload = await estatePayload();
+    if (!payload) return;
+    const share = estateShareUrl(payload);
+    if (!share.ok) {
+      notify("error", `This estate is ${(share.bytes / 1024).toFixed(0)} KB — too large for a link. Download the file instead; it opens with "Import workspace file".`);
+      return;
+    }
+    await navigator.clipboard?.writeText(share.url);
+    flash("link");
+  };
+
+  const copyEmbed = async () => {
+    const payload = await estatePayload();
+    if (!payload) return;
+    const embed = estateEmbedSnippet(payload);
+    if (!embed.ok) {
+      notify("error", "This estate is too large for an embed link. Share the file instead.");
+      return;
+    }
+    await navigator.clipboard?.writeText(embed.snippet);
+    flash("embed");
+  };
+
+  const pictureTitle = () => `${shared?.name || active?.name || "Service map"} — service map`;
+  const liveSvg = () => mapRef.current?.querySelector("svg.cg-canvas");
+
+  const downloadSvg = () => {
+    const out = serviceMapSvg(liveSvg(), { title: pictureTitle() });
+    if (!out) {
+      notify("error", "Open the Graph view to export a picture of the map.");
+      return;
+    }
+    downloadBlob(new Blob([out.svg], { type: "image/svg+xml;charset=utf-8" }), `${safeFilename(shared?.name || active?.name)}.svg`);
+    setShareOpen(false);
+  };
+
+  const downloadPng = async () => {
+    const out = serviceMapSvg(liveSvg(), { title: pictureTitle() });
+    if (!out) {
+      notify("error", "Open the Graph view to export a picture of the map.");
+      return;
+    }
+    try {
+      const { blob } = await svgToPng(out);
+      downloadBlob(blob, `${safeFilename(shared?.name || active?.name)}.png`);
+    } catch (e) {
+      notify("error", e.message);
+    }
+    setShareOpen(false);
+  };
+
+  /** Keep a shared estate: it becomes a workspace of the visitor's own, arrangement included. */
+  const saveShared = async () => {
+    if (!shared) return;
+    const { workspace, failures } = await importWorkspace(userId, { vizroute: "contract-graph-workspace", name: shared.name, services: shared.services });
+    failures.forEach((f) => notify("error", f));
+    if (shared.positions && workspace) {
+      const next = {};
+      workspace.services.forEach((s) => {
+        const pos = shared.positions[s.name];
+        if (pos) next[s.id] = pos;
+      });
+      try {
+        localStorage.setItem(`vizroute_cg_positions:${workspace.id}:${layout}`, JSON.stringify(next));
+      } catch {
+        /* the arrangement is optional */
+      }
+    }
+    navigate("/graph", { replace: true });
+    setShared(null);
+    refresh();
+    if (workspace) setActiveId(workspace.id);
+    notify("ok", `Saved "${shared.name}" to your workspaces.`);
+  };
+
+  useEffect(() => {
+    if (!shareOpen) return undefined;
+    const onDown = (e) => shareRef.current && !shareRef.current.contains(e.target) && setShareOpen(false);
+    const onKey = (e) => e.key === "Escape" && setShareOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [shareOpen]);
 
   const copyMermaid = () => {
     navigator.clipboard?.writeText(toMermaid(graph));
-    setCopied("mermaid");
-    setTimeout(() => setCopied(""), 1500);
+    flash("mermaid");
   };
 
   const onDrop = (e) => {
@@ -372,27 +595,39 @@ const ContractGraphPage = () => {
 
   const hasServices = services.length > 0;
 
-  return (
-    <div className="flex h-screen flex-col bg-vz-bg text-vz-text" onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
-      {/* ── Top bar ── */}
-      <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-vz-line px-4">
-        <ProductSwitcher compact />
-        <span className="hidden text-vz-dim sm:inline">/</span>
+  const TAB_META = {
+    map: { title: "Service Map", sub: "Visualize how your services, operations and entities are connected" },
+    entities: { title: "Entities", sub: "Entities exposed by more than one service, and where their shapes disagree" },
+    duplicates: { title: "Duplicates", sub: "Endpoints that duplicate or nearly duplicate each other across services" },
+    concepts: { title: "Concepts", sub: "Fields that mean the same thing under different names" },
+    findings: { title: "Findings", sub: "Everything the graph noticed, by severity" },
+  };
+  const meta = TAB_META[tab] || TAB_META.map;
 
+  return (
+    <div className="cg" style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+      {/* ── Header ── */}
+      <header className="cg-header">
+        <ProductSwitcher compact />
+        {shared ? (
+          <span className="cg-pill" title="Opened from a share link — not saved yet">
+            <Link2 size={12} /> Shared · {shared.name}
+          </span>
+        ) : (
         <div className="relative" ref={wsMenuRef}>
-          <button type="button" onClick={() => setWsMenuOpen((v) => !v)} className="vz-t flex h-9 max-w-[260px] items-center gap-2 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[13px] text-vz-text hover:border-vz-accent/40" aria-haspopup="menu" aria-expanded={wsMenuOpen}>
+          <button type="button" onClick={() => setWsMenuOpen((v) => !v)} className="cg-btn" style={{ maxWidth: 240 }} aria-haspopup="menu" aria-expanded={wsMenuOpen}>
             <span className="truncate">{active ? active.name : "No workspace"}</span>
-            <ChevronDown size={13} className="flex-shrink-0 text-vz-dim" />
+            <ChevronDown size={13} />
           </button>
           {wsMenuOpen && (
-            <div className="absolute left-0 z-30 mt-1 w-72 rounded-xl border border-vz-line bg-vz-panel p-1.5 shadow-2xl" role="menu">
+            <div className="absolute left-0 z-30 mt-1 w-72 rounded-xl border p-1.5 shadow-2xl" style={{ background: "var(--cg-panel-2)", borderColor: "var(--cg-border)" }} role="menu">
               {workspaces.map((w) => (
                 <button key={w.id} type="button" role="menuitem" onClick={() => { setActiveId(w.id); setWsMenuOpen(false); setSelectedId(null); }} className={`vz-t flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] ${w.id === activeId ? "bg-vz-accent/12 text-[#e6c4ff]" : "text-vz-soft hover:bg-white/5 hover:text-vz-text"}`}>
                   <span className="truncate">{w.name}</span>
-                  <span className="ml-2 flex-shrink-0 text-[11px] text-vz-dim">{w.services.length}</span>
+                  <span className="ml-2 flex-shrink-0 text-[11px]" style={{ color: "var(--cg-dim)" }}>{w.services.length}</span>
                 </button>
               ))}
-              <div className="my-1 border-t border-vz-line-soft" />
+              <div className="my-1 border-t" style={{ borderColor: "var(--cg-border)" }} />
               <button type="button" role="menuitem" onClick={newWorkspace} className="vz-t flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] text-vz-soft hover:bg-white/5 hover:text-vz-text"><Plus size={13} /> New workspace</button>
               {active && (
                 <>
@@ -404,24 +639,67 @@ const ContractGraphPage = () => {
             </div>
           )}
         </div>
+        )}
 
-        <div className="ml-auto flex items-center gap-2">
+        {hasServices && (
+          <nav className="cg-nav hidden lg:flex" aria-label="Views">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const count = t.count ? t.count(graph) : null;
+              const alert = t.alert ? t.alert(graph) : false;
+              return (
+                <button key={t.id} type="button" className={`cg-nav-item ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+                  <Icon size={14} /> {t.label}
+                  {count !== null && count > 0 && <span className="cg-nav-count">{count}</span>}
+                  {alert && <span className="cg-nav-alert" />}
+                </button>
+              );
+            })}
+          </nav>
+        )}
+
+        <div className="ml-auto flex items-center gap-3">
           {hasServices && (
             <>
-              <button
-                type="button"
-                onClick={() => setShowAssistant((v) => !v)}
-                title="Ask the estate — AI assistant over these services"
-                className={`vz-t flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12.5px] font-medium ${showAssistant ? "border-vz-accent/40 bg-vz-accent/12 text-[#e6c4ff]" : "border-vz-line bg-vz-panel-2 text-vz-soft hover:text-vz-text"}`}
-              >
-                <WandSparkles size={13} className="text-vz-accent-2" /><span className="hidden md:inline">Ask AI</span>
+              <label className="relative hidden md:block">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--cg-dim)" }} />
+                <input className="cg-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search services, operations…" aria-label="Search services and operations" />
+              </label>
+              <button type="button" onClick={() => setShowAssistant((v) => !v)} title="Ask the estate — AI assistant over these services" className={`cg-btn ${showAssistant ? "active" : ""}`}>
+                <WandSparkles size={14} /><span className="hidden xl:inline">Ask AI</span>
               </button>
-              <button type="button" onClick={copyMermaid} title="Copy the map as a Mermaid diagram" className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[12.5px] text-vz-soft hover:text-vz-text">
-                {copied === "mermaid" ? <Check size={13} className="text-vz-green" /> : <Share2 size={13} />}<span className="hidden md:inline">Mermaid</span>
-              </button>
-              <button type="button" onClick={exportJson} title="Download the workspace with every spec" className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[12.5px] text-vz-soft hover:text-vz-text">
-                <Download size={13} /><span className="hidden md:inline">Export</span>
-              </button>
+              {shared && (
+                <button type="button" onClick={saveShared} className="cg-btn primary"><Save size={14} /> Save to my workspaces</button>
+              )}
+              <div className="relative" ref={shareRef}>
+                <button type="button" onClick={() => setShareOpen((v) => !v)} className={`cg-btn ${shareOpen ? "active" : ""}`} aria-haspopup="menu" aria-expanded={shareOpen}>
+                  <Share2 size={14} /><span className="hidden xl:inline">Share</span>
+                </button>
+                {shareOpen && (
+                  <div role="menu" className="absolute right-0 z-30 mt-1 w-64 rounded-xl border p-1.5 shadow-2xl" style={{ background: "var(--cg-panel-2)", borderColor: "var(--cg-border)" }}>
+                    {[
+                      { id: "link", icon: Link2, label: copied === "link" ? "Link copied" : "Copy share link", hint: "Opens this estate, arrangement included", run: copyShareLink },
+                      { id: "embed", icon: Code2, label: copied === "embed" ? "Embed copied" : "Copy embed code", hint: "An <iframe> of the map", run: copyEmbed },
+                      { id: "png", icon: Image, label: "Download PNG", hint: "2× bitmap of the map", run: downloadPng, mapOnly: true },
+                      { id: "svg", icon: FileCode2, label: "Download SVG", hint: "Vector, editable", run: downloadSvg, mapOnly: true },
+                      { id: "mermaid", icon: Share2, label: copied === "mermaid" ? "Mermaid copied" : "Copy as Mermaid", hint: "For wikis and READMEs", run: copyMermaid },
+                      { id: "file", icon: Download, label: "Download workspace file", hint: "Every spec; opens with Import", run: exportJson },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const disabled = item.mapOnly && !(tab === "map" && viewMode === "graph");
+                      return (
+                        <button key={item.id} type="button" role="menuitem" onClick={item.run} disabled={disabled} title={disabled ? "Open the Graph view first" : undefined} className="vz-t flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left text-vz-soft hover:bg-white/5 hover:text-vz-text disabled:opacity-40">
+                          <Icon size={14} className="mt-0.5 flex-shrink-0" style={{ color: copied === item.id ? "var(--cg-green)" : undefined }} />
+                          <span className="min-w-0">
+                            <span className="block text-[13px]">{item.label}</span>
+                            <span className="block text-[11px]" style={{ color: "var(--cg-dim)" }}>{item.hint}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </>
           )}
           <AccountMenu />
@@ -430,9 +708,9 @@ const ContractGraphPage = () => {
 
       {/* ── Notices ── */}
       {notices.length > 0 && (
-        <div className="flex-shrink-0 space-y-1 px-4 pt-2">
+        <div className="flex-shrink-0 space-y-1 px-4 pt-2" style={{ background: "var(--cg-panel)" }}>
           {notices.map((n) => (
-            <div key={n.id} className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[12.5px] ${n.kind === "error" ? "border-vz-red/25 bg-vz-red/[0.08] text-[#fda4af]" : "border-vz-green/25 bg-vz-green/[0.08] text-vz-green"}`} role={n.kind === "error" ? "alert" : "status"}>
+            <div key={n.id} className="flex items-start gap-2 rounded-lg border px-3 py-2 text-[12.5px]" style={n.kind === "error" ? { borderColor: "rgba(244,63,94,0.35)", background: "rgba(244,63,94,0.08)", color: "#fda4af" } : { borderColor: "rgba(52,211,153,0.35)", background: "rgba(52,211,153,0.08)", color: "#34d399" }} role={n.kind === "error" ? "alert" : "status"}>
               {n.kind === "error" ? <AlertCircle size={14} className="mt-0.5 flex-shrink-0" /> : <Check size={14} className="mt-0.5 flex-shrink-0" />}
               <span className="min-w-0 flex-1">{n.text}</span>
               <button type="button" onClick={() => dismiss(n.id)} className="vz-t opacity-60 hover:opacity-100" aria-label="Dismiss"><X size={13} /></button>
@@ -441,145 +719,182 @@ const ContractGraphPage = () => {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        {/* ── Services rail ── */}
-        <aside className="flex w-[280px] flex-shrink-0 flex-col border-r border-vz-line">
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-vz-dim">Services {active ? `· ${active.services.length}/${MAX_SERVICES}` : ""}</span>
-            <button type="button" onClick={() => setAddOpen((v) => !v)} className="vz-t flex items-center gap-1 rounded-md border border-vz-line bg-vz-panel-2 px-2 py-1 text-[11.5px] text-vz-soft hover:text-vz-text"><Plus size={12} /> Add</button>
+      <div className={`cg-app ${detailsOpen ? "with-details" : ""}`} style={showAssistant && hasServices ? { marginRight: 446 } : undefined}>
+        {/* ── Sidebar ── */}
+        <aside className="cg-sidebar">
+          <div className="cg-sidebar-title">
+            <span>Services{active ? ` · ${active.services.length} / ${MAX_SERVICES}` : ""}</span>
+            {!shared && <button type="button" className="cg-add" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}><Plus size={13} /> Add Service</button>}
           </div>
 
-          {(addOpen || !hasServices) && (
-            <div className="space-y-3 border-b border-vz-line-soft px-4 pb-4">
-              <button type="button" onClick={() => fileInputRef.current?.click()} className={`vz-t flex w-full flex-col items-center gap-1 rounded-xl border border-dashed px-3 py-4 text-[12px] ${dragOver ? "border-vz-accent bg-vz-accent/10 text-vz-text" : "border-vz-line text-vz-soft hover:border-vz-accent/50 hover:text-vz-text"}`}>
+          {!shared && (addOpen || !hasServices) && (
+            <div className="cg-add-panel">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className={`cg-drop ${dragOver ? "over" : ""}`}>
                 <Upload size={16} />
                 Drop spec files here, or click
-                <span className="text-[11px] text-vz-dim">OpenAPI, Swagger, Postman, WSDL · JSON or YAML · many at once</span>
+                <small>OpenAPI, Swagger, Postman, WSDL · JSON or YAML · many at once</small>
               </button>
               <input ref={fileInputRef} type="file" multiple accept=".json,.yaml,.yml,.wsdl,.xml,application/json" className="sr-only" aria-label="Add specification files" onChange={(e) => { addFiles(e.target.files || []); e.target.value = ""; }} />
               <input ref={importInputRef} type="file" accept=".json" className="sr-only" aria-label="Import workspace file" onChange={(e) => { addFiles(e.target.files || []); e.target.value = ""; }} />
-              <div className="flex gap-1.5">
-                <input value={urlText} onChange={(e) => setUrlText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFromUrl()} placeholder="https://…/openapi.json" aria-label="Specification URL" className="vz-mono vz-t h-8 min-w-0 flex-1 rounded-lg border border-vz-line bg-vz-bg px-2.5 text-[11.5px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50" />
-                <button type="button" onClick={addFromUrl} disabled={fetching} className="vz-t flex h-8 items-center gap-1 rounded-lg border border-vz-line bg-vz-panel-2 px-2.5 text-[11.5px] text-vz-soft hover:text-vz-text disabled:opacity-50"><Globe size={12} /> {fetching ? "…" : "Fetch"}</button>
+              <div className="mt-2 flex gap-1.5">
+                <input value={urlText} onChange={(e) => setUrlText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFromUrl()} placeholder="https://…/openapi.json" aria-label="Specification URL" className="cg-field mono" />
+                <button type="button" onClick={addFromUrl} disabled={fetching} className="cg-btn" style={{ height: 32 }}><Globe size={12} /> {fetching ? "…" : "Fetch"}</button>
               </div>
-              <details className="text-[12px]">
-                <summary className="cursor-pointer text-vz-soft hover:text-vz-text">Paste a specification</summary>
+              <details className="mt-2 text-[12px]">
+                <summary className="cursor-pointer" style={{ color: "var(--cg-soft)" }}>Paste a specification</summary>
                 <div className="mt-2 space-y-1.5">
-                  <input value={pasteName} onChange={(e) => setPasteName(e.target.value)} placeholder="Service name (optional)" aria-label="Service name" className="vz-t h-8 w-full rounded-lg border border-vz-line bg-vz-bg px-2.5 text-[12px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50" />
-                  <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="{ openapi: … } or a Postman collection" aria-label="Specification text" rows={5} className="vz-mono vz-t w-full resize-y rounded-lg border border-vz-line bg-vz-bg px-2.5 py-2 text-[11.5px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50" />
-                  <button type="button" onClick={addPasted} disabled={!pasteText.trim()} className="vz-t flex h-8 items-center gap-1 rounded-lg border border-vz-line bg-vz-panel-2 px-2.5 text-[11.5px] text-vz-soft hover:text-vz-text disabled:opacity-50"><FileJson size={12} /> Add pasted spec</button>
+                  <input value={pasteName} onChange={(e) => setPasteName(e.target.value)} placeholder="Service name (optional)" aria-label="Service name" className="cg-field" />
+                  <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="{ openapi: … } or a Postman collection" aria-label="Specification text" rows={5} className="cg-field mono" />
+                  <button type="button" onClick={addPasted} disabled={!pasteText.trim()} className="cg-btn" style={{ height: 32 }}><FileJson size={12} /> Add pasted spec</button>
                 </div>
               </details>
               {!hasServices && (
-                <button type="button" onClick={loadSample} className="vz-t flex w-full items-center justify-center gap-1.5 rounded-lg bg-vz-accent/12 px-3 py-2 text-[12px] font-semibold text-[#e6c4ff] hover:bg-vz-accent/20"><Sparkles size={13} /> Load a sample estate</button>
+                <button type="button" onClick={loadSample} className="cg-btn primary mt-2 w-full justify-center"><Sparkles size={13} /> Load a sample estate</button>
               )}
             </div>
           )}
 
-          <ul className="vz-scroll min-h-0 flex-1 overflow-auto px-2 py-2">
-            {loading && <li className="px-2 py-3 text-[12px] text-vz-dim">Loading…</li>}
-            {!loading && active?.services.map((s) => {
+          <div className="cg-services">
+            {loading && <div className="cg-service-meta" style={{ padding: "8px 10px" }}>Loading…</div>}
+            {!loading && (shared ? services : active?.services || []).map((s) => {
               const built = graph.services.find((g) => g.id === s.id);
               const failed = graph.errors.find((e) => e.id === s.id);
+              const hidden = dimmed?.has(s.id);
               return (
-                <li key={s.id} className={`group flex items-center gap-1 rounded-lg ${selectedId === s.id ? "bg-vz-accent/12" : "hover:bg-white/[0.04]"}`}>
-                  <button type="button" onClick={() => { setSelectedId(s.id); if (tab !== "map") setTab("map"); }} className="vz-t flex min-w-0 flex-1 items-center gap-2.5 px-2 py-2 text-left">
-                    <span className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: s.color }} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-vz-text">{s.name}</span>
-                      <span className="block truncate text-[11px] text-vz-dim">
-                        {failed ? <span className="text-[#fda4af]">{failed.message}</span> : built ? `${built.formatLabel} · ${built.operations.length} ops · ${built.entities.length} ${built.entities.length === 1 ? "entity" : "entities"}` : s.format}
-                      </span>
+                <button key={s.id} type="button" className={`cg-service ${selectedId === s.id ? "active" : ""} ${hidden ? "hidden" : ""}`} onClick={() => { setSelectedId((cur) => (cur === s.id ? null : s.id)); if (tab !== "map") setTab("map"); }}>
+                  <span className="cg-dot" style={{ background: built?.color || s.color }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="cg-service-name truncate block">{s.name}</span>
+                    <span className={`cg-service-meta ${failed ? "error" : ""}`}>
+                      {failed ? failed.message : built ? (built.isCollection ? `${built.operations.length} requests · consumer` : `${built.operations.length} ops · ${built.entities.length} ${built.entities.length === 1 ? "entity" : "entities"}`) : s.format}
                     </span>
-                  </button>
-                  <button type="button" aria-label={`Remove ${s.name}`} onClick={() => remove(s.id)} className="vz-t mr-1 rounded-md p-1 text-vz-dim opacity-0 hover:bg-vz-red/10 hover:text-vz-red focus:opacity-100 group-hover:opacity-100"><Trash2 size={12} /></button>
-                </li>
+                  </span>
+                  <ChevronRight size={18} className="cg-chevron" />
+                </button>
               );
             })}
-          </ul>
+          </div>
 
-          {isLocal && user && (
-            <p className="border-t border-vz-line-soft px-4 py-2 text-[11px] leading-relaxed text-vz-dim">Workspaces are stored in this browser for {user.email}.</p>
-          )}
+          <Link to="/home" className="cg-help">
+            <BookOpen size={18} style={{ color: "var(--cg-purple-2)", flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>
+              <strong>Need help?</strong>
+              <span>View docs and examples</span>
+            </span>
+            <ArrowRight size={14} style={{ color: "var(--cg-muted)" }} />
+          </Link>
+          {isLocal && user && <p className="mt-2 text-[11px]" style={{ color: "var(--cg-dim)" }}>Workspaces are stored in this browser for {user.email}.</p>}
         </aside>
 
         {/* ── Main ── */}
-        <main className={`flex min-w-0 flex-1 flex-col ${showAssistant && hasServices ? "lg:mr-[446px]" : ""}`}>
+        <main className="cg-main">
           {hasServices ? (
             <>
-              <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-vz-line px-4 text-[12px] text-vz-dim">
-                <div className="flex items-center">
-                  {TABS.map((t) => {
-                    const Icon = t.icon;
-                    const count = t.count ? t.count(graph) : null;
-                    const alert = t.alert ? t.alert(graph) : false;
-                    return (
-                      <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`vz-t relative flex items-center gap-1.5 px-3 py-3 text-[12.5px] ${tab === t.id ? "text-[#e6c4ff] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-vz-accent-2" : "text-vz-soft hover:text-vz-text"}`}>
-                        <Icon size={13} /> {t.label}
-                        {count !== null && count > 0 && <span className="tabular-nums text-vz-dim">{count}</span>}
-                        {alert && <span className="inline-block h-1.5 w-1.5 rounded-full bg-vz-warn" />}
-                      </button>
-                    );
-                  })}
+              <div className="cg-main-header">
+                <div className="cg-title">
+                  <h1>{meta.title}</h1>
+                  <p>{meta.sub}</p>
                 </div>
-                <div className="ml-auto flex flex-wrap gap-x-3 py-2 tabular-nums">
-                  <span>{graph.stats.services} services</span>
-                  <span>{graph.stats.operations} operations</span>
-                  <span>{graph.stats.entities} entities</span>
-                  <span>{graph.stats.edges} relationships</span>
-                </div>
-              </div>
-
-              <div className="flex min-h-0 flex-1">
-                <div className="vz-scroll min-w-0 flex-1 overflow-auto">
-                  {tab === "map" && (
-                    <div className="flex h-full flex-col">
-                      {aiHighlight.ids.length > 0 && (
-                        <div className="flex flex-shrink-0 items-center gap-2 border-b border-vz-line-soft bg-vz-accent/[0.06] px-4 py-1.5 text-[12px] text-vz-soft">
-                          <WandSparkles size={12} className="text-vz-accent-2" />
-                          <span className="min-w-0 flex-1 truncate">{aiHighlight.reason || "Highlighted by the assistant"} · {aiHighlight.ids.length} service{aiHighlight.ids.length === 1 ? "" : "s"}</span>
-                          <button type="button" onClick={() => setAiHighlight({ ids: [], reason: "" })} className="vz-t text-vz-dim hover:text-vz-text" aria-label="Clear highlight"><X size={12} /></button>
-                        </div>
-                      )}
-                      <div ref={mapRef} className="vz-canvas-grid min-h-[360px] flex-1" style={{ backgroundSize: "21px 21px" }}>
-                        <ServiceMap graph={graph} selectedId={selectedId} onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))} impacted={impacted} highlighted={aiHighlight.ids} width={mapSize.w} height={mapSize.h} />
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-vz-line-soft px-4 py-2 text-[11px] text-vz-dim">
-                        <span><span className="mr-1.5 inline-block h-0.5 w-5 bg-vz-soft align-middle" />calls</span>
-                        <span><span className="mr-1.5 inline-block w-5 border-t border-dashed border-vz-soft align-middle" />references an entity it owns</span>
-                        <span><span className="mr-1.5 inline-block w-5 border-t border-dotted border-vz-soft align-middle" />shares an entity</span>
-                        <span><span className="mr-1.5 inline-block h-3 w-3 rounded-full border-2 border-dashed border-vz-soft align-middle" />consumer collection</span>
-                        <span><span className="mr-1.5 inline-block h-3 w-3 rounded-full border-2 border-dashed border-vz-warn align-middle" />depends on the selected service</span>
-                        <span className="ml-auto">Number in a circle = operations. Hover an edge for its evidence.</span>
-                      </div>
+                {tab === "map" && (
+                  <div className="cg-toolbar">
+                    <div className="cg-segment" role="radiogroup" aria-label="View">
+                      {[["graph", Waypoints, "Graph"], ["list", ListChecks, "List"], ["table", Table2, "Table"]].map(([id, Icon, label]) => (
+                        <button key={id} type="button" role="radio" aria-checked={viewMode === id} className={`cg-btn ${viewMode === id ? "active" : ""}`} onClick={() => setViewMode(id)}>
+                          <Icon size={13} /> {label}
+                        </button>
+                      ))}
                     </div>
-                  )}
-                  {tab === "entities" && <div className="p-4"><EntitiesView graph={graph} /></div>}
-                  {tab === "duplicates" && <div className="p-4"><DuplicatesView graph={graph} /></div>}
-                  {tab === "concepts" && <div className="p-4"><ConceptsView graph={graph} /></div>}
-                  {tab === "findings" && <div className="p-4"><FindingsView graph={graph} /></div>}
-                </div>
-                {selectedId && graph.services.some((s) => s.id === selectedId) && (
-                  <aside className="w-[320px] flex-shrink-0 border-l border-vz-line">
-                    <ServiceInspector graph={graph} serviceId={selectedId} impacted={impacted} onClose={() => setSelectedId(null)} />
-                  </aside>
+                    {viewMode === "graph" && (
+                      <>
+                        <div className="relative" ref={layoutMenuRef}>
+                          <button type="button" className="cg-btn" onClick={() => setLayoutMenuOpen((v) => !v)} aria-haspopup="menu" aria-expanded={layoutMenuOpen}>
+                            Layouts <ChevronDown size={13} />
+                          </button>
+                          {layoutMenuOpen && (
+                            <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border p-1" style={{ background: "var(--cg-panel-2)", borderColor: "var(--cg-border)" }} role="menu">
+                              {LAYOUTS.map((l) => (
+                                <button key={l.id} type="button" role="menuitem" onClick={() => { setLayout(l.id); setLayoutMenuOpen(false); }} className={`vz-t flex w-full items-center justify-between rounded-md px-3 py-1.5 text-left text-[13px] ${layout === l.id ? "bg-vz-accent/12 text-[#e6c4ff]" : "text-vz-soft hover:bg-white/5 hover:text-vz-text"}`}>
+                                  {l.label}{layout === l.id && <Check size={12} />}
+                                </button>
+                              ))}
+                              <div className="my-1 border-t" style={{ borderColor: "var(--cg-border)" }} />
+                              <button type="button" role="menuitem" onClick={resetPositions} disabled={!Object.keys(positionOverrides).length} className="vz-t flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] text-vz-soft hover:bg-white/5 hover:text-vz-text disabled:opacity-40">
+                                Reset positions
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="cg-zoom" role="group" aria-label="Zoom">
+                          <button type="button" className="cg-btn" onClick={() => setZoom((z) => Math.max(0.3, Math.round((z - 0.1) * 10) / 10))} aria-label="Zoom out"><Minus size={13} /></button>
+                          <button type="button" className="cg-btn" onClick={() => setZoom(1)} title="Reset zoom">{Math.round(zoom * 100)}%</button>
+                          <button type="button" className="cg-btn" onClick={() => setZoom((z) => Math.min(2, Math.round((z + 0.1) * 10) / 10))} aria-label="Zoom in"><Plus size={13} /></button>
+                        </div>
+                        <button type="button" className="cg-btn" onClick={() => setFitRequest((n) => n + 1)} title="Bring every service into view"><Scan size={13} /> Fit</button>
+                        <button type="button" className="cg-btn icon" onClick={toggleFullscreen} aria-label="Full screen"><Maximize2 size={14} /></button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
+
+              {tab === "map" && viewMode === "graph" && (
+                <div ref={mapRef} className="flex min-h-0 flex-1 flex-col">
+                  <ServiceMap
+                    graph={graph}
+                    selectedId={selectedId}
+                    onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+                    impacted={impacted}
+                    highlighted={aiHighlight.ids}
+                    highlightReason={aiHighlight.reason}
+                    onClearHighlight={() => setAiHighlight({ ids: [], reason: "" })}
+                    dimmed={dimmed}
+                    layout={layout}
+                    zoom={zoom}
+                    width={mapSize.w}
+                    height={mapSize.h}
+                    overrides={positionOverrides}
+                    onOverridesChange={moveNode}
+                    onZoomChange={setZoom}
+                    fitRequest={fitRequest}
+                  />
+                </div>
+              )}
+              {tab === "map" && viewMode === "list" && <div className="cg-graph flex flex-col" style={{ backgroundImage: "none" }}><ServicesListView graph={graph} selectedId={selectedId} onSelect={(id) => setSelectedId(id)} /></div>}
+              {tab === "map" && viewMode === "table" && <div className="cg-graph flex flex-col" style={{ backgroundImage: "none" }}><OperationsTableView graph={graph} onSelect={(id) => setSelectedId(id)} filter={search} /></div>}
+              {tab === "entities" && <div className="cg-scroll pr-1"><EntitiesView graph={graph} /></div>}
+              {tab === "duplicates" && <div className="cg-scroll pr-1"><DuplicatesView graph={graph} /></div>}
+              {tab === "concepts" && <div className="cg-scroll pr-1"><ConceptsView graph={graph} /></div>}
+              {tab === "findings" && <div className="cg-scroll pr-1"><FindingsView graph={graph} /></div>}
             </>
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-              <span className="grid h-14 w-14 place-items-center rounded-2xl border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2"><Waypoints size={26} /></span>
+            <div className="cg-empty">
+              <span className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: "rgba(168,85,247,0.12)", color: "#e6c4ff" }}><Waypoints size={26} /></span>
               <h1 className="mt-5 text-[22px] font-bold" style={{ textWrap: "balance" }}>See your whole API estate on one map</h1>
-              <p className="mt-2 max-w-[52ch] text-[13.5px] leading-relaxed text-vz-soft">
+              <p className="mt-2 max-w-[52ch] text-[13.5px] leading-relaxed" style={{ color: "var(--cg-muted)" }}>
                 Add the contracts your teams already have — OpenAPI, Swagger, Postman collections, WSDL — and Contract Graph finds what only shows up between them: entities with more than one shape, duplicated endpoints, one concept under three names, and which services depend on which. Nothing leaves your browser.
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-2">
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="vz-t flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-4 text-[13px] font-bold text-[#160a1d] hover:opacity-90"><Upload size={14} /> Add spec files</button>
-                <button type="button" onClick={loadSample} className="vz-t flex h-10 items-center gap-2 rounded-lg border border-vz-line bg-vz-panel-2 px-4 text-[13px] text-vz-soft hover:text-vz-text"><Sparkles size={14} /> Try the sample estate</button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="cg-btn primary"><Upload size={14} /> Add spec files</button>
+                <button type="button" onClick={loadSample} className="cg-btn"><Sparkles size={14} /> Try the sample estate</button>
               </div>
             </div>
           )}
         </main>
+
+        {/* ── Details ── */}
+        {detailsOpen && (
+          <ServiceDetails
+            graph={graph}
+            serviceId={selectedId}
+            impacted={impacted}
+            onClose={() => setSelectedId(null)}
+            onOpenInExplorer={openInExplorer}
+            onDelete={shared ? null : (id) => {
+              const svc = active?.services.find((x) => x.id === id);
+              if (svc && window.confirm(`Remove "${svc.name}" from this map?`)) remove(id);
+            }}
+          />
+        )}
       </div>
 
       {showAssistant && hasServices && (
