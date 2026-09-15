@@ -50,6 +50,8 @@ const ServiceMap = ({
   onOverridesChange,
   onZoomChange,
   fitRequest = 0, // bump to fit every node into view
+  selectedEdge = null, // "from|to|kind" of the edge whose evidence is open
+  onSelectEdge,
 }) => {
   const [hovered, setHovered] = useState(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -266,7 +268,9 @@ const ServiceMap = ({
             const source = serviceOf(edge.from);
             const target = serviceOf(edge.to);
             const color = source?.color || "#a855f7";
-            const dim = (active && edge.from !== active && edge.to !== active) || (dimmed && (dimmed.has(edge.from) || dimmed.has(edge.to)));
+            const edgeKey = `${edge.from}|${edge.to}|${edge.kind}`;
+            const isSelectedEdge = selectedEdge === edgeKey;
+            const dim = !isSelectedEdge && ((selectedEdge && !active) || (active && edge.from !== active && edge.to !== active) || (dimmed && (dimmed.has(edge.from) || dimmed.has(edge.to))));
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const d = Math.max(Math.hypot(dx, dy), 1);
@@ -283,15 +287,26 @@ const ServiceMap = ({
             const labelW = style.label.length * 6.4 + 16;
             const tip = `${source?.name} ${style.label} ${target?.name}\n${edge.evidence.slice(0, 4).join("\n")}${edge.evidence.length > 4 ? `\n… ${edge.evidence.length - 4} more` : ""}`;
             return (
-              <g key={`${edge.from}-${edge.to}-${edge.kind}`} style={{ color }} opacity={dim ? 0.12 : 0.85}>
-                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth={style.width} strokeDasharray={style.dash} markerEnd={edge.kind === "shares" ? undefined : "url(#cg-arrow)"} />
-                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth="14">
+              <g
+                key={edgeKey}
+                style={{ color, cursor: "pointer" }}
+                opacity={dim ? 0.12 : isSelectedEdge ? 1 : 0.85}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onSelectEdge?.(isSelectedEdge ? null : edge); }}
+                role="button"
+                aria-label={`${source?.name} ${style.label} ${target?.name}`}
+                tabIndex={0}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelectEdge?.(isSelectedEdge ? null : edge)}
+              >
+                {isSelectedEdge && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ffffff" strokeWidth={style.width + 5} opacity="0.35" strokeLinecap="round" />}
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth={isSelectedEdge ? style.width + 1 : style.width} strokeDasharray={style.dash} markerEnd={edge.kind === "shares" ? undefined : "url(#cg-arrow)"} />
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth="16">
                   <title>{tip}</title>
                 </line>
                 {showLabels && (
                   <g transform={`translate(${mx - labelW / 2} ${my - 11})`}>
-                    <rect width={labelW} height="22" rx="6" fill="#0f141d" stroke="currentColor" strokeWidth="1" />
-                    <text x={labelW / 2} y="15" textAnchor="middle" fontSize="11" fill="currentColor" style={{ pointerEvents: "none" }}>
+                    <rect width={labelW} height="22" rx="6" fill={isSelectedEdge ? "currentColor" : "#0f141d"} stroke="currentColor" strokeWidth="1" />
+                    <text x={labelW / 2} y="15" textAnchor="middle" fontSize="11" fill={isSelectedEdge ? "#0b0710" : "currentColor"} fontWeight={isSelectedEdge ? "700" : "400"} style={{ pointerEvents: "none" }}>
                       {style.label}
                     </text>
                     <title>{tip}</title>

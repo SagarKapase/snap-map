@@ -69,3 +69,31 @@ describe("workspaces", () => {
     await expect(importWorkspace("u2", { some: "thing" })).rejects.toThrow(/not a Contract Graph workspace/);
   });
 });
+
+describe("replacing a service", () => {
+  it("keeps id, name and colour and swaps the document", async () => {
+    const { replaceService } = await import("../contractWorkspace");
+    const ws = createWorkspace("u1", "Estate");
+    const a = await addService("u1", ws.id, { name: "Orders", spec: spec("Orders v1"), sourceUrl: "https://x.io/v1.json" });
+    const before = getWorkspace("u1", ws.id).services[0];
+    await replaceService("u1", ws.id, a.id, { spec: spec("Orders v2"), sourceUrl: "https://x.io/v2.json", format: "OpenAPI 3.0.0" });
+    const after = getWorkspace("u1", ws.id).services[0];
+    expect(after.id).toBe(before.id);
+    expect(after.name).toBe("Orders");
+    expect(after.color).toBe(before.color);
+    expect(after.sourceUrl).toBe("https://x.io/v2.json");
+    expect(after.replacedAt).toBeTruthy();
+    const loaded = await loadServices(getWorkspace("u1", ws.id));
+    expect(loaded[0].spec.info.title).toBe("Orders v2");
+    expect(getWorkspace("u1", ws.id).services).toHaveLength(1);
+  });
+  it("refuses junk and unknown services", async () => {
+    const { replaceService } = await import("../contractWorkspace");
+    const ws = createWorkspace("u1", "Estate");
+    const a = await addService("u1", ws.id, { name: "A", spec: spec("A") });
+    await expect(replaceService("u1", ws.id, a.id, { spec: null })).rejects.toThrow(/not a specification/);
+    await expect(replaceService("u1", ws.id, "svc_nope", { spec: spec("B") })).rejects.toThrow(/no longer exists/);
+    const loaded = await loadServices(getWorkspace("u1", ws.id));
+    expect(loaded[0].spec.info.title).toBe("A");
+  });
+});
