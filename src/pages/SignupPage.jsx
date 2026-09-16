@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { MailCheck } from "lucide-react";
+import { MailCheck, Mail, UserRound, ArrowRight } from "lucide-react";
 import { useAuth } from "../components/auth/useAuth";
-import { AuthShell, Field, FormError, PasswordInput, SubmitButton } from "../components/auth/AuthShell";
-import { inputClass } from "../components/auth/authStyles";
+import { AuthShell, Field, FormError, Input, LocalNotice, PasswordInput, SubmitButton } from "../components/auth/AuthShell";
 import { validateSignUp } from "../utils/auth";
 
 const nextFrom = (search) => {
@@ -61,74 +60,85 @@ const SignupPage = () => {
 
   return (
     <AuthShell
-      isLocal={isLocal}
-      title="Map your whole API estate, not one spec at a time"
+      title={
+        <>
+          Map your whole
+          <br />
+          API estate, not
+          <br />
+          <span className="auth-grad">one spec at a time.</span>
+        </>
+      }
       lede="An account keeps your Contract Graph workspaces — the services, the shared entities, the duplicated endpoints and the naming you have reviewed — so the map is still there tomorrow."
+      alternate={{ label: "Sign in", to: `/login${location.search}` }}
       footer={
         <>
           Already have an account?{" "}
-          <Link to={`/login${location.search}`} className="font-semibold text-vz-accent-2 hover:underline">
+          <Link to={`/login${location.search}`} className="auth-link">
             Sign in
           </Link>
         </>
       }
     >
       {pending ? (
-        <div className="text-center" role="status">
-          <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-vz-green/30 bg-vz-green/10 text-vz-green">
+        <div className="text-center" role="status" style={{ marginTop: 22 }}>
+          <span className="auth-mail">
             <MailCheck size={22} />
           </span>
-          <h2 className="mt-4 text-[20px] font-bold text-vz-text">Check your email</h2>
-          <p className="mt-2 text-[13.5px] leading-relaxed text-vz-soft">
-            A confirmation link was sent to <span className="font-semibold text-vz-text">{pending}</span>. Open it, then sign in.
+          <h2 className="auth-h2" style={{ marginTop: 16, fontSize: 24 }}>Check your email</h2>
+          <p className="auth-muted" style={{ marginTop: 8, fontSize: 13.5, lineHeight: 1.6 }}>
+            A confirmation link was sent to <span className="auth-text" style={{ fontWeight: 600 }}>{pending}</span>. Open it, then sign in.
           </p>
         </div>
       ) : (
         <>
-          <h2 className="text-[20px] font-bold text-vz-text">Create your account</h2>
-          <form onSubmit={submit} noValidate className="mt-5 space-y-4">
+          <h2 className="auth-h2">Create your account</h2>
+          <p className="auth-sub">Your workspaces, kept for next time</p>
+          {isLocal && <LocalNotice />}
+          <form onSubmit={submit} noValidate className="space-y-4">
             <FormError message={formError} />
             <Field id="signup-name" label="Name" error={errors.name}>
-              <input
+              <Input
                 id="signup-name"
+                icon={UserRound}
                 type="text"
                 value={form.name}
                 onChange={set("name")}
                 autoComplete="name"
                 autoFocus
                 placeholder="Ada Lovelace"
-                aria-invalid={Boolean(errors.name) || undefined}
-                aria-describedby={errors.name ? "signup-name-error" : undefined}
-                className={inputClass(Boolean(errors.name))}
+                invalid={Boolean(errors.name)}
               />
             </Field>
             <Field id="signup-email" label="Email" error={errors.email}>
-              <input
+              <Input
                 id="signup-email"
+                icon={Mail}
                 type="email"
                 value={form.email}
                 onChange={set("email")}
                 autoComplete="email"
                 placeholder="you@company.com"
-                aria-invalid={Boolean(errors.email) || undefined}
-                aria-describedby={errors.email ? "signup-email-error" : undefined}
-                className={inputClass(Boolean(errors.email))}
+                invalid={Boolean(errors.email)}
               />
             </Field>
             <Field id="signup-password" label="Password" error={errors.password}>
-              <PasswordInput id="signup-password" value={form.password} onChange={set("password")} invalid={Boolean(errors.password)} autoComplete="new-password" />
+              <PasswordInput id="signup-password" value={form.password} onChange={set("password")} invalid={Boolean(errors.password)} autoComplete="new-password" placeholder="Choose a password" />
               <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px]" aria-label="Password requirements">
                 {checks.map((c) => (
-                  <li key={c.label} className={c.ok ? "text-vz-green" : "text-vz-dim"}>
+                  <li key={c.label} className={c.ok ? "auth-ok" : "auth-dim"}>
                     {c.ok ? "✓" : "○"} {c.label}
                   </li>
                 ))}
               </ul>
             </Field>
             <Field id="signup-confirm" label="Confirm password" error={errors.confirm}>
-              <PasswordInput id="signup-confirm" value={form.confirm} onChange={set("confirm")} invalid={Boolean(errors.confirm)} autoComplete="new-password" />
+              <PasswordInput id="signup-confirm" value={form.confirm} onChange={set("confirm")} invalid={Boolean(errors.confirm)} autoComplete="new-password" placeholder="Type it again" />
             </Field>
-            <SubmitButton busy={busy}>{busy ? "Creating account…" : "Create account"}</SubmitButton>
+            <SubmitButton busy={busy}>
+              {busy ? "Creating account…" : "Create account"}
+              {!busy && <ArrowRight size={16} aria-hidden="true" />}
+            </SubmitButton>
           </form>
         </>
       )}

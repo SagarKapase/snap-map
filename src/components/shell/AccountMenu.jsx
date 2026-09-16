@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LogIn, LogOut, Home, UserRound } from "lucide-react";
+import { LogIn, LogOut, Home, UserRound, ChevronDown } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 
 const initials = (name, email) => {
@@ -15,7 +15,7 @@ const initials = (name, email) => {
  * for a visitor, an avatar menu for an account. Signing out returns to the
  * landing page so nothing account-scoped is left on screen.
  */
-const AccountMenu = () => {
+const AccountMenu = ({ showName = false }) => {
   const { user, signOut, isLocal } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -61,9 +61,17 @@ const AccountMenu = () => {
         aria-expanded={open}
         aria-label="Account menu"
         title={user.email}
-        className={`vz-t grid h-9 w-9 place-items-center rounded-full border text-[11.5px] font-bold ${open ? "border-vz-accent/50 bg-vz-accent/20 text-[#e6c4ff]" : "border-vz-line bg-vz-panel text-vz-soft hover:border-vz-accent/40 hover:text-vz-text"}`}
+        className={`vz-t flex h-9 items-center gap-2 rounded-full border text-[11.5px] font-bold ${showName ? "pl-1 pr-2.5" : "w-9 justify-center"} ${open ? "border-vz-accent/50 bg-vz-accent/20 text-[#e6c4ff]" : "border-vz-line bg-vz-panel text-vz-soft hover:border-vz-accent/40 hover:text-vz-text"}`}
       >
-        {initials(user.name, user.email)}
+        <span className={`grid h-7 w-7 place-items-center rounded-full ${showName ? "bg-gradient-to-br from-[#a855f7] to-[#60a5fa] text-white" : ""}`}>
+          {initials(user.name, user.email)}
+        </span>
+        {showName && (
+          <>
+            <span className="hidden max-w-[140px] truncate text-[12.5px] font-semibold sm:inline">{(user.name || user.email || "").split(" ")[0]}</span>
+            <ChevronDown size={13} className={`hidden text-vz-dim transition-transform duration-150 sm:inline ${open ? "rotate-180" : ""}`} />
+          </>
+        )}
       </button>
       {open && (
         <div role="menu" className="absolute right-0 top-full z-[60] mt-2 w-64 overflow-hidden rounded-xl border border-vz-line bg-vz-panel shadow-2xl shadow-black/60">

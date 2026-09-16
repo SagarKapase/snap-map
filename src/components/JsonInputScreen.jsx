@@ -19,14 +19,18 @@ import {
   Network,
   ClipboardPaste,
   ArrowRight,
+  Trash2,
 } from "lucide-react";
-import { SAMPLES_META, HTTP_METHODS } from "../utils/constants";
-import { OpenApiIcon, PostmanIcon, JsonIcon } from "./icons/BrandIcons";
+import { HTTP_METHODS } from "../utils/constants";
+import ImportHero from "./import/ImportHero";
+import SupportedFormats from "./import/SupportedFormats";
+import SampleSpecifications from "./import/SampleSpecifications";
+import "../importscreen.css";
 
 const SOURCES = [
-  { id: "editor", icon: Braces, label: "Paste", short: "Paste" },
-  { id: "upload", icon: Upload, label: "Upload", short: "Upload" },
-  { id: "url", icon: Globe, label: "Remote URL", short: "URL" },
+  { id: "editor", icon: Braces, label: "Paste" },
+  { id: "upload", icon: Upload, label: "Upload" },
+  { id: "url", icon: Globe, label: "Remote URL" },
 ];
 
 const PUBLIC_EXAMPLES = [
@@ -34,13 +38,20 @@ const PUBLIC_EXAMPLES = [
   { label: "Petstore 2.0", url: "https://petstore.swagger.io/v2/swagger.json" },
 ];
 
-const SAMPLE_ICONS = { postman: PostmanIcon, openapi: OpenApiIcon, custom: JsonIcon };
+// What the file picker and the drop zone accept; HAR is JSON underneath.
+const FILE_EXTENSIONS = [".json", ".yaml", ".yml", ".har"];
 
 // Beyond this many characters the editor is bypassed entirely.
 const EDITOR_LIMIT = 600_000;
 // The gutter never renders more numbers than this, however long the file is.
 const MAX_GUTTER_LINES = 5_000;
 
+/**
+ * The import screen: one editor with three ways in (paste, file, URL), the
+ * formats it reads beside it, and the samples and recent imports below.
+ * All parsing happens here in the browser; `onVisualize` receives the
+ * parsed document.
+ */
 const JsonInputScreen = ({
   onVisualize,
   onLoadSample,
@@ -49,6 +60,9 @@ const JsonInputScreen = ({
   onOpenAutoImport,
   onOpenBreaking,
   onOpenMultiService,
+  recents = [],
+  onOpenRecent,
+  query = "",
 }) => {
   // A 6.4 MB spec is 205,525 lines. Holding that in a controlled textarea
   // means React re-renders the whole value on every keystroke, the gutter
@@ -71,6 +85,10 @@ const JsonInputScreen = ({
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
   const lineNumRef = useRef(null);
+  const editorRef = useRef(null);
+  // Drag events fire for every child crossed; count them so the overlay
+  // does not flicker on the way to the drop.
+  const dragDepth = useRef(0);
 
   const tryParse = (text) => {
     // A pasted cURL command is not a document at all, but it is one of the two
@@ -102,8 +120,6 @@ const JsonInputScreen = ({
   };
 
   // Parsed once per change of the text, rather than once per derived value.
-  // The two memos below used to call tryParse independently, so every edit
-  // cost two full JSON.parse passes over the whole document.
   const parsedInput = useMemo(() => {
     if (bigSpec) return bigSpec.data;
     if (!jsonText.trim()) return null;
@@ -233,9 +249,8 @@ const JsonInputScreen = ({
   };
 
   const handleFileRead = (file) => {
-    const validExts = [".json", ".yaml", ".yml"];
-    if (!file || !validExts.some((ext) => file.name.toLowerCase().endsWith(ext))) {
-      setError("Upload a .json, .yaml, or .yml file");
+    if (!file || !FILE_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+      setError("Upload a .json, .yaml, .yml or .har file");
       return;
     }
     const reader = new FileReader();
@@ -251,8 +266,20 @@ const JsonInputScreen = ({
     reader.readAsText(file);
   };
 
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDragOver(false);
+  };
+
   const handleDrop = (e) => {
     e.preventDefault();
+    dragDepth.current = 0;
     setIsDragOver(false);
     handleFileRead(e.dataTransfer.files?.[0]);
   };
@@ -316,9 +343,15 @@ const JsonInputScreen = ({
     setTimeout(() => setIsCopied(false), 2000);
   };
 
+  // Ctrl/⌘ Enter builds the map — from the editor, or with nothing focused.
+  // Typing in the top-bar search or any other field must not trigger it.
   useEffect(() => {
     const h = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && (bigSpec || jsonText.trim())) {
+      if (!((e.ctrlKey || e.metaKey) && e.key === "Enter")) return;
+      const focus = document.activeElement;
+      const inEditor = editorRef.current?.contains(focus);
+      if (!inEditor && focus && focus !== document.body) return;
+      if (bigSpec || jsonText.trim()) {
         e.preventDefault();
         handleVisualize();
       }
@@ -338,211 +371,155 @@ const JsonInputScreen = ({
   );
   const charCount = bigSpec ? bigSpec.chars : jsonText.length;
   const isValid = Boolean(parsedInput);
+  const hasText = Boolean(bigSpec) || Boolean(jsonText.trim());
+
+  // The footer reports what the parser knows right now — parsing is
+  // synchronous, so there is no "detecting" state to invent.
+  const status = error
+    ? { kind: "error", text: error }
+    : isFetching
+      ? { kind: "busy", text: "Fetching the URL…" }
+      : isFormatting
+        ? { kind: "busy", text: "Formatting…" }
+        : isValid
+          ? { kind: "valid", text: "Valid specification" }
+          : hasText
+            ? { kind: "idle", text: "Not a specification yet — keep typing, or paste a whole document" }
+            : { kind: "idle", text: "Ready for input" };
 
   const tools = [
     { label: "Collections", icon: FolderOpen, run: onOpenCollections },
+    { label: "Auto-import from URL", icon: Wifi, run: onOpenAutoImport },
     { label: "API diff", icon: GitCompareArrows, run: onOpenDiff },
-    { label: "Auto-import", icon: Wifi, run: onOpenAutoImport },
     { label: "Breaking changes", icon: ShieldAlert, run: onOpenBreaking },
-    { label: "Multi-service", icon: Network, run: onOpenMultiService },
+    { label: "Contract Graph", icon: Network, run: onOpenMultiService },
   ].filter((tool) => Boolean(tool.run));
 
   return (
-    <div className="vz-scroll relative flex-1 overflow-auto bg-vz-bg">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-[420px]"
-        style={{
-          background:
-            "radial-gradient(circle at 50% 0%, rgba(168,85,247,0.07), transparent 60%)",
-        }}
-      />
+    <div className="imp">
+      <ImportHero />
 
-      <div className="relative mx-auto w-full max-w-[1080px] px-5 py-10 sm:px-8 lg:py-14">
-        <h1 className="text-[clamp(1.6rem,2.4vw,2rem)] font-bold tracking-[-0.02em] text-vz-text">
-          Import a specification
-        </h1>
-        <p className="mt-2 max-w-[620px] text-[14px] leading-[1.65] text-vz-soft">
-          Paste it, drop a file, or fetch a URL. Vizroute detects OpenAPI,
-          Swagger, Postman collections and plain JSON or YAML, then builds the
-          map.
-        </p>
-
-        {/* ── Source panel ─────────────────────────── */}
-        <div
-          className={`vz-t mt-7 overflow-hidden rounded-[14px] border bg-vz-panel ${
-            isDragOver ? "border-vz-accent/60 bg-vz-accent/[0.04]" : "border-vz-line"
-          }`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
-          onDragLeave={() => setIsDragOver(false)}
+      <div className="imp-grid">
+        {/* ── Editor ── */}
+        <section
+          ref={editorRef}
+          className={`imp-editor${isDragOver ? " is-dragging" : ""}`}
+          aria-label="Specification editor"
+          onDragEnter={handleDragEnter}
+          onDragOver={(e) => e.preventDefault()}
+          onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* Toolbar */}
-          <div className="flex h-[46px] items-center gap-2 border-b border-vz-line-soft px-2.5">
-            <div
-              className="flex items-center gap-1 rounded-[9px] border border-vz-line-soft bg-vz-bg p-1"
-              role="tablist"
-              aria-label="Specification source"
-            >
+          <div className="imp-toolbar">
+            <div className="imp-tabs" role="tablist" aria-label="Specification source">
               {SOURCES.map((source) => (
                 <button
                   key={source.id}
                   type="button"
                   role="tab"
+                  id={`imp-tab-${source.id}`}
                   aria-selected={activeTab === source.id}
+                  aria-controls={`imp-pane-${source.id}`}
+                  tabIndex={activeTab === source.id ? 0 : -1}
+                  title={source.label}
                   onClick={() => setActiveTab(source.id)}
-                  className={`vz-t flex items-center gap-1.5 whitespace-nowrap rounded-[7px] px-2.5 py-[6px] text-[12px] ${
-                    activeTab === source.id
-                      ? "bg-vz-accent/18 text-vz-text"
-                      : "text-vz-soft hover:text-vz-text"
-                  }`}
+                  onKeyDown={(e) => {
+                    // Arrow keys move between tabs, as a tablist should.
+                    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+                    e.preventDefault();
+                    const i = SOURCES.findIndex((s) => s.id === activeTab);
+                    const next = SOURCES[(i + (e.key === "ArrowRight" ? 1 : SOURCES.length - 1)) % SOURCES.length];
+                    setActiveTab(next.id);
+                    document.getElementById(`imp-tab-${next.id}`)?.focus();
+                  }}
+                  className="imp-tab"
                 >
-                  <source.icon size={13} aria-hidden="true" />
-                  <span className="sm:hidden">{source.short}</span>
-                  <span className="hidden sm:inline">{source.label}</span>
+                  <source.icon size={14} aria-hidden="true" />
+                  <span>{source.label}</span>
                 </button>
               ))}
             </div>
 
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleFormat}
-                disabled={!jsonText.trim()}
-                className="vz-t flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] text-vz-soft hover:bg-white/5 hover:text-vz-text disabled:opacity-35"
-              >
-                <RefreshCw size={13} className={isFormatting ? "animate-spin" : ""} />
-                <span className="hidden sm:inline">Format</span>
+            <div className="imp-tools">
+              <button type="button" className="imp-tool" onClick={handleFormat} disabled={!jsonText.trim()} title="Re-indent as JSON" aria-label="Format">
+                <RefreshCw size={13} className={isFormatting ? "animate-spin" : ""} aria-hidden="true" />
+                <span>Format</span>
               </button>
-              <button
-                type="button"
-                onClick={handleCopyContent}
-                disabled={!jsonText.trim()}
-                className="vz-t flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] text-vz-soft hover:bg-white/5 hover:text-vz-text disabled:opacity-35"
-              >
-                {isCopied ? (
-                  <Check size={13} className="text-vz-green" />
-                ) : (
-                  <Copy size={13} />
-                )}
-                <span className="hidden sm:inline">{isCopied ? "Copied" : "Copy"}</span>
+              <button type="button" className="imp-tool" onClick={handleCopyContent} disabled={!jsonText.trim()} title="Copy the text" aria-label={isCopied ? "Copied" : "Copy"}>
+                {isCopied ? <Check size={13} style={{ color: "var(--success)" }} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+                <span>{isCopied ? "Copied" : "Copy"}</span>
               </button>
-              <span className="vz-mono ml-1 hidden text-[11px] tabular-nums text-vz-dim md:inline">
+              <button type="button" className="imp-tool" onClick={clearInput} disabled={!hasText} title="Clear the editor" aria-label="Clear">
+                <Trash2 size={13} aria-hidden="true" />
+                <span>Clear</span>
+              </button>
+              <span className="imp-count vz-mono" aria-label={`${lineCount} lines, ${charCount} characters`}>
                 {lineCount}L · {charCount}C
               </span>
             </div>
           </div>
 
-          {/* Body */}
-          <div className="relative h-[clamp(300px,46vh,460px)]">
+          <div className="imp-body">
+            {isDragOver && (
+              <div className="imp-drop" aria-live="polite">Drop your specification here</div>
+            )}
+
             {activeTab === "editor" && bigSpec ? (
-              <div className="flex h-full items-center justify-center p-6">
-                <div className="w-full max-w-[520px] rounded-xl border border-vz-line bg-vz-panel-2 p-6 text-center">
-                  <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl border border-vz-line bg-vz-panel text-vz-accent-2">
+              <div className="imp-big" id="imp-pane-editor" role="tabpanel" aria-labelledby="imp-tab-editor">
+                <div className="imp-big-card">
+                  <span className="imp-empty-icon" style={{ margin: "0 auto 14px", borderStyle: "solid" }}>
                     <FileJson size={20} />
                   </span>
-                  <p className="text-[14px] font-semibold text-vz-text">
-                    {bigSpec.name}
-                  </p>
-                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-vz-soft">
-                    {(bigSpec.chars / 1_048_576).toFixed(1)} MB parsed and ready. The
-                    text editor is skipped for files this large — it would have to
-                    re-render megabytes on every keystroke.
+                  <p style={{ fontSize: 14, fontWeight: 600 }}>{bigSpec.name}</p>
+                  <p className="imp-note" style={{ marginTop: 6 }}>
+                    {(bigSpec.chars / 1_048_576).toFixed(1)} MB parsed and ready. The text editor is skipped for files this large — it would have to re-render megabytes on every keystroke.
                   </p>
                   {quickStats && (
-                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <div className="imp-stats">
                       {quickStats.map((stat) => (
-                        <span
-                          key={stat.label}
-                          className="rounded-md border border-vz-line-soft bg-vz-bg px-2.5 py-1 text-[11.5px] text-vz-soft"
-                        >
-                          <strong className="tabular-nums text-vz-text">
-                            {stat.value.toLocaleString()}
-                          </strong>{" "}
-                          {stat.label}
+                        <span key={stat.label} className="imp-stat">
+                          <strong>{stat.value.toLocaleString()}</strong> {stat.label}
                         </span>
                       ))}
                     </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={clearInput}
-                    className="vz-t mt-5 inline-flex items-center gap-1.5 rounded-lg border border-vz-line px-3 py-1.5 text-[12.5px] text-vz-soft hover:text-vz-text"
-                  >
+                  <button type="button" onClick={clearInput} className="imp-btn" style={{ marginTop: 16 }}>
                     <X size={12} /> Choose a different file
                   </button>
                 </div>
               </div>
             ) : activeTab === "editor" ? (
-              <div className="flex h-full">
-                <div
-                  ref={lineNumRef}
-                  aria-hidden="true"
-                  className="hidden w-11 flex-shrink-0 select-none overflow-hidden border-r border-vz-line-soft bg-black/20 py-4 sm:block"
-                >
-                  {Array.from(
-                    { length: Math.min(Math.max(lineCount, 24), MAX_GUTTER_LINES) },
-                    (_, i) => (
-                      <div
-                        key={i}
-                        className="vz-mono pr-2.5 text-right text-[11px] leading-[1.7] text-vz-line"
-                      >
-                        {i + 1}
-                      </div>
-                    ),
-                  )}
+              <div style={{ display: "flex", height: "100%" }} id="imp-pane-editor" role="tabpanel" aria-labelledby="imp-tab-editor" className={loadedFileName && jsonText.trim() ? "has-chip" : undefined}>
+                <div ref={lineNumRef} aria-hidden="true" className="imp-gutter vz-mono">
+                  {Array.from({ length: Math.min(Math.max(lineCount, 24), MAX_GUTTER_LINES) }, (_, i) => (
+                    <div key={i}>{i + 1}</div>
+                  ))}
                 </div>
 
-                <div className="relative min-w-0 flex-1">
+                <div style={{ position: "relative", minWidth: 0, flex: 1 }}>
                   {loadedFileName && jsonText.trim() && (
-                    <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg border border-vz-accent/25 bg-vz-accent/10 px-2 py-1 text-[11px] text-vz-soft">
-                      <FileJson size={11} className="text-vz-accent-2" />
-                      {loadedFileName}
-                      <button
-                        type="button"
-                        onClick={() => setLoadedFileName("")}
-                        aria-label="Clear file name"
-                        className="vz-t text-vz-dim hover:text-vz-text"
-                      >
+                    <div className="imp-filechip" title={loadedFileName}>
+                      <FileJson size={11} style={{ color: "var(--primary-hover)", flexShrink: 0 }} />
+                      <span>{loadedFileName}</span>
+                      <button type="button" onClick={() => setLoadedFileName("")} aria-label="Clear file name" className="hm-icon-btn" style={{ width: 18, height: 18 }}>
                         <X size={10} />
                       </button>
                     </div>
                   )}
 
-                  {!jsonText.trim() && (
-                    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6 text-center">
-                      <div className="mb-4 grid h-12 w-12 place-items-center rounded-xl border border-vz-line bg-vz-panel-2 text-vz-dim">
-                        <Braces size={20} />
-                      </div>
-                      <p className="text-[13px] font-medium text-vz-soft">
-                        Paste a specification, or drop a file anywhere here
-                      </p>
-                      <p className="mt-1 text-[12px] text-vz-dim">
-                        OpenAPI · Swagger · Postman · HAR · cURL · JSON or YAML
-                      </p>
-                      <div className="pointer-events-auto mt-5 flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handlePasteClipboard}
-                          className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[12px] text-vz-soft hover:text-vz-text"
-                        >
+                  {!jsonText.trim() && !isDragOver && (
+                    <div className="imp-empty">
+                      <div className="imp-empty-icon"><Braces size={20} /></div>
+                      <h3>Paste a specification, or drop a file anywhere here</h3>
+                      <p>OpenAPI · Swagger · Postman · HAR · cURL · JSON · YAML</p>
+                      <div className="imp-empty-actions">
+                        <button type="button" className="imp-btn" onClick={handlePasteClipboard}>
                           <ClipboardPaste size={13} /> Paste from clipboard
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab("upload")}
-                          className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[12px] text-vz-soft hover:text-vz-text"
-                        >
+                        <button type="button" className="imp-btn" onClick={() => setActiveTab("upload")}>
                           <Upload size={13} /> Upload a file
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab("url")}
-                          className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel-2 px-3 text-[12px] text-vz-soft hover:text-vz-text"
-                        >
+                        <button type="button" className="imp-btn" onClick={() => setActiveTab("url")}>
                           <Globe size={13} /> Remote URL
                         </button>
                       </div>
@@ -561,248 +538,118 @@ const JsonInputScreen = ({
                     onScroll={handleTextareaScroll}
                     spellCheck={false}
                     aria-label="API specification"
-                    className="vz-mono vz-scroll h-full w-full resize-none bg-transparent px-4 py-4 text-[12.5px] text-vz-text focus:outline-none"
-                    style={{ lineHeight: "1.7", caretColor: "#a855f7" }}
+                    className="imp-textarea vz-mono vz-scroll"
                   />
                 </div>
               </div>
             ) : null}
 
             {activeTab === "upload" && (
-              <div className="flex h-full items-center justify-center p-6">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`vz-t flex h-full w-full max-w-[520px] flex-col items-center justify-center rounded-xl border-2 border-dashed ${
-                    isDragOver
-                      ? "border-vz-accent/60 bg-vz-accent/[0.05]"
-                      : "border-vz-line bg-white/[0.015] hover:border-[#2c3548]"
-                  }`}
-                >
-                  <span className="mb-4 grid h-12 w-12 place-items-center rounded-xl border border-vz-line bg-vz-panel-2 text-vz-dim">
-                    <Upload size={20} />
-                  </span>
-                  <span className="text-[13px] font-medium text-vz-soft">
-                    {isDragOver ? "Release to upload" : "Drop a specification file"}
-                  </span>
-                  <span className="mt-1 text-[12px] text-vz-dim">
-                    or click to browse
-                  </span>
-                  <span className="mt-4 flex gap-1.5">
-                    {[".json", ".yaml", ".yml"].map((ext) => (
-                      <span
-                        key={ext}
-                        className="vz-mono rounded border border-vz-line bg-vz-panel-2 px-1.5 py-0.5 text-[11px] text-vz-dim"
-                      >
-                        {ext}
-                      </span>
-                    ))}
+              <div className="imp-pane" id="imp-pane-upload" role="tabpanel" aria-labelledby="imp-tab-upload">
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="imp-upload">
+                  <span className="imp-empty-icon"><Upload size={20} /></span>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{isDragOver ? "Release to upload" : "Drop a specification file"}</span>
+                  <span style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>or click to browse</span>
+                  <span className="imp-ext vz-mono">
+                    {FILE_EXTENSIONS.map((ext) => <span key={ext}>{ext}</span>)}
                   </span>
                 </button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".json,.yaml,.yml,.har"
+                  accept={FILE_EXTENSIONS.join(",")}
                   className="hidden"
-                  onChange={(e) => handleFileRead(e.target.files?.[0])}
+                  aria-label="Specification file"
+                  onChange={(e) => { handleFileRead(e.target.files?.[0]); e.target.value = ""; }}
                 />
               </div>
             )}
 
             {activeTab === "url" && (
-              <div className="vz-scroll flex h-full items-start justify-center overflow-auto p-6 pt-8">
-                <div className="w-full max-w-[560px]">
-                  <label
-                    htmlFor="spec-url"
-                    className="mb-2 block text-[12px] font-medium text-vz-soft"
-                  >
-                    Specification URL
-                  </label>
-                  <div className="flex gap-2">
+              <div className="imp-pane vz-scroll" id="imp-pane-url" role="tabpanel" aria-labelledby="imp-tab-url">
+                <div className="imp-pane-inner">
+                  <label htmlFor="spec-url" className="imp-label">Specification URL</label>
+                  <div style={{ display: "flex", gap: 8 }}>
                     <input
                       id="spec-url"
                       type="url"
                       value={urlInput}
-                      onChange={(e) => {
-                        setUrlInput(e.target.value);
-                        setUrlError("");
-                      }}
+                      onChange={(e) => { setUrlInput(e.target.value); setUrlError(""); }}
                       onKeyDown={(e) => e.key === "Enter" && handleUrlFetch()}
                       placeholder="https://petstore3.swagger.io/api/v3/openapi.json"
-                      className={`vz-mono vz-t h-10 min-w-0 flex-1 rounded-lg border bg-vz-bg px-3 text-[12.5px] text-vz-text placeholder:text-vz-dim focus:border-vz-accent/50 ${
-                        urlError ? "border-vz-red/50" : "border-vz-line"
-                      }`}
+                      className={`imp-input vz-mono${urlError ? " is-invalid" : ""}`}
                     />
-                    <button
-                      type="button"
-                      onClick={handleUrlFetch}
-                      disabled={isFetching}
-                      className="vz-t flex h-10 flex-shrink-0 items-center gap-2 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-4 text-[13px] font-semibold text-[#160a1d] hover:opacity-90 disabled:opacity-60"
-                    >
-                      {isFetching ? (
-                        <RefreshCw size={14} className="animate-spin" />
-                      ) : (
-                        <Send size={14} />
-                      )}
+                    <button type="button" onClick={handleUrlFetch} disabled={isFetching} className="imp-primary" style={{ height: 38, padding: "0 14px" }}>
+                      {isFetching ? <RefreshCw size={14} className="animate-spin" aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}
                       {isFetching ? "Fetching" : "Fetch"}
                     </button>
                   </div>
 
                   {urlError && (
-                    <p className="mt-2.5 flex items-start gap-2 rounded-lg border border-vz-red/20 bg-vz-red/[0.07] px-3 py-2 text-[12px] text-[#fda4af]">
-                      <AlertCircle size={13} className="mt-px flex-shrink-0" />
+                    <p className="imp-alert" role="alert">
+                      <AlertCircle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
                       {urlError}
                     </p>
                   )}
 
-                  <p className="mt-5 mb-2 text-[11px] font-semibold uppercase tracking-wider text-vz-dim">
-                    Public examples
-                  </p>
-                  <div className="space-y-1.5">
+                  <p className="imp-label" style={{ marginTop: 18 }}>Public examples</p>
+                  <div className="imp-examples">
                     {PUBLIC_EXAMPLES.map((example) => (
-                      <button
-                        key={example.url}
-                        type="button"
-                        onClick={() => setUrlInput(example.url)}
-                        className="vz-t flex w-full items-center justify-between gap-3 rounded-lg border border-vz-line-soft bg-vz-panel-2 px-3 py-2 text-left hover:border-vz-line"
-                      >
-                        <span className="text-[12px] text-vz-soft">
-                          {example.label}
-                        </span>
-                        <span className="vz-mono truncate text-[11px] text-vz-dim">
-                          {example.url}
-                        </span>
+                      <button key={example.url} type="button" onClick={() => setUrlInput(example.url)} className="imp-example">
+                        <span>{example.label}</span>
+                        <code>{example.url}</code>
                       </button>
                     ))}
                   </div>
 
-                  <p className="mt-4 text-[11px] leading-relaxed text-vz-dim">
-                    The request runs from your browser, so the host must send
-                    CORS headers. Otherwise download the file and upload it.
-                  </p>
+                  <p className="imp-note">The request runs from your browser, so the host must send CORS headers. Otherwise download the file and upload it.</p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Footer */}
-          <div className="flex min-h-[52px] flex-wrap items-center gap-x-4 gap-y-2 border-t border-vz-line-soft bg-vz-panel-2/60 px-3.5 py-2.5">
-            <span className="flex items-center gap-2 text-[12px]">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  error ? "bg-vz-red" : isValid ? "bg-vz-green" : "bg-vz-dim"
-                }`}
-              />
-              <span className={error ? "text-[#fda4af]" : "text-vz-soft"}>
-                {error || (isValid ? "Valid specification" : "Waiting for input")}
-              </span>
+          <div className="imp-footer">
+            <span className={`imp-status is-${status.kind}`} role="status" aria-live="polite">
+              <span className="imp-dot" aria-hidden="true" />
+              {status.text}
             </span>
-
-            {!error && detectedInputFormat && (
-              <span className="text-[12px] font-medium text-vz-accent-2">
-                {detectedInputFormat}
-              </span>
-            )}
-
+            {!error && detectedInputFormat && <span className="imp-format">{detectedInputFormat}</span>}
             {!error && quickStats && (
-              <span className="hidden items-center gap-3 text-[12px] text-vz-dim sm:flex">
+              <span className="imp-quick">
                 {quickStats.map((stat) => (
-                  <span key={stat.label}>
-                    <span className="tabular-nums text-vz-soft">{stat.value}</span>{" "}
-                    {stat.label}
-                  </span>
+                  <span key={stat.label}><strong>{stat.value}</strong> {stat.label}</span>
                 ))}
               </span>
             )}
-
-            <div className="ml-auto flex items-center gap-3">
-              <span className="hidden items-center gap-1 sm:flex">
-                {["Ctrl", "Enter"].map((key) => (
-                  <kbd
-                    key={key}
-                    className="vz-mono rounded border border-vz-line bg-vz-elev px-1.5 py-0.5 text-[10px] text-vz-dim"
-                  >
-                    {key}
-                  </kbd>
-                ))}
-              </span>
-              <button
-                type="button"
-                onClick={handleVisualize}
-                disabled={!isValid}
-                className="vz-t flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-5 text-[13px] font-bold text-[#160a1d] hover:opacity-90 disabled:cursor-not-allowed disabled:border disabled:border-vz-line disabled:bg-none disabled:bg-vz-panel-2 disabled:text-vz-dim"
-              >
-                Build map
-                <ArrowRight size={15} aria-hidden="true" />
+            <div className="imp-build">
+              <span className="imp-keys" aria-hidden="true"><kbd>Ctrl</kbd><kbd>Enter</kbd></span>
+              <button type="button" onClick={handleVisualize} disabled={!isValid} className="imp-primary" aria-keyshortcuts="Control+Enter">
+                Build map <ArrowRight size={15} aria-hidden="true" />
               </button>
             </div>
           </div>
-        </div>
-
-        {/* ── Samples ──────────────────────────────── */}
-        <section className="mt-10">
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-vz-dim">
-            Start from a sample
-          </h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {SAMPLES_META.map(({ key, label, desc }) => {
-              const Icon = SAMPLE_ICONS[key] || JsonIcon;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => onLoadSample(key)}
-                  className="vz-t group flex items-center gap-3 rounded-[12px] border border-vz-line bg-vz-panel p-3.5 text-left hover:border-[#2c3548] hover:bg-vz-panel-2"
-                >
-                  <span className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-[10px] border border-vz-line bg-vz-panel-2 text-vz-accent-2">
-                    <Icon size={15} aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-medium text-vz-text">
-                      {label}
-                    </span>
-                    <span className="block truncate text-[12px] text-vz-dim">
-                      {desc}
-                    </span>
-                  </span>
-                  <ArrowRight
-                    size={14}
-                    aria-hidden="true"
-                    className="ml-auto flex-shrink-0 text-vz-dim opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                  />
-                </button>
-              );
-            })}
-          </div>
         </section>
 
-        {/* ── Other tools ──────────────────────────── */}
-        {tools.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-vz-dim">
-              Without a spec loaded
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {tools.map((tool) => (
-                <button
-                  key={tool.label}
-                  type="button"
-                  onClick={tool.run}
-                  className="vz-t flex h-9 items-center gap-2 rounded-lg border border-vz-line bg-vz-panel px-3 text-[12.5px] text-vz-soft hover:border-[#2c3548] hover:text-vz-text"
-                >
-                  <tool.icon size={14} aria-hidden="true" className="text-vz-dim" />
-                  {tool.label}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <p className="mt-10 text-[12px] text-vz-dim">
-          Specifications are parsed in this browser — there is no backend and
-          nothing is uploaded.
-        </p>
+        {/* ── Side panel ── */}
+        <aside className="imp-side">
+          <SupportedFormats />
+          {tools.length > 0 && (
+            <section className="imp-panel" aria-labelledby="imp-tools">
+              <h3 id="imp-tools">Without a spec loaded</h3>
+              <div className="imp-toollist">
+                {tools.map((tool) => (
+                  <button key={tool.label} type="button" onClick={tool.run}>
+                    <tool.icon size={14} aria-hidden="true" />
+                    {tool.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
       </div>
+
+      <SampleSpecifications onLoadSample={onLoadSample} recents={recents} onOpenRecent={onOpenRecent} query={query} />
     </div>
   );
 };

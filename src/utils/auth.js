@@ -11,8 +11,9 @@
  *    an account that cannot be used from another machine must never look
  *    like one that can.
  *
- * The session is a small object in localStorage; consumers subscribe to
- * changes rather than reading storage themselves.
+ * The session is a small object in localStorage — or in sessionStorage when
+ * the person asked not to stay signed in, so it ends with the browser tab.
+ * Consumers subscribe to changes rather than reading storage themselves.
  */
 
 const SESSION_KEY = "vizroute_session";
@@ -27,19 +28,27 @@ const storage = () => {
   }
 };
 
-const readJson = (key, fallback) => {
+const tabStorage = () => {
   try {
-    const raw = storage()?.getItem(key);
+    return typeof sessionStorage !== "undefined" ? sessionStorage : null;
+  } catch {
+    return null;
+  }
+};
+
+const readJson = (key, fallback, store = storage()) => {
+  try {
+    const raw = store?.getItem(key);
     return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-const writeJson = (key, value) => {
+const writeJson = (key, value, store = storage()) => {
   try {
-    if (value === null) storage()?.removeItem(key);
-    else storage()?.setItem(key, JSON.stringify(value));
+    if (value === null) store?.removeItem(key);
+    else store?.setItem(key, JSON.stringify(value));
   } catch {
     /* storage full or blocked; the session then lives in memory only */
   }
@@ -47,11 +56,13 @@ const writeJson = (key, value) => {
 
 let memorySession = null;
 
-export const getSession = () => memorySession || readJson(SESSION_KEY, null);
+export const getSession = () => memorySession || readJson(SESSION_KEY, null) || readJson(SESSION_KEY, null, tabStorage());
 
-const setSession = (session) => {
+/** `remember: false` keeps the session for this tab only. Signing out clears both places. */
+const setSession = (session, { remember = true } = {}) => {
   memorySession = session;
-  writeJson(SESSION_KEY, session);
+  writeJson(SESSION_KEY, remember ? session : null);
+  writeJson(SESSION_KEY, remember ? null : session, tabStorage());
   listeners.forEach((fn) => fn(session));
 };
 
@@ -148,7 +159,7 @@ const localProvider = {
     setSession(session);
     return session;
   },
-  async signIn({ email, password }) {
+  async signIn({ email, password, remember = true }) {
     const errors = validateSignIn({ email, password });
     const firstField = Object.keys(errors)[0];
     if (firstField) throw new AuthError(errors[firstField], firstField);
@@ -164,7 +175,7 @@ const localProvider = {
     const hash = await hashPassword(password, account.salt);
     if (!timingSafeEqual(hash, account.hash)) throw failure;
     const session = { userId: account.id, email: key, name: account.name, provider: "local", createdAt: new Date().toISOString() };
-    setSession(session);
+    setSession(session, { remember });
     return session;
   },
   async signOut() {
@@ -235,7 +246,7 @@ const supabaseProvider = (url, anonKey) => {
       setSession(session);
       return session;
     },
-    async signIn({ email, password }) {
+    async signIn({ email, password, remember = true }) {
       const errors = validateSignIn({ email, password });
       const firstField = Object.keys(errors)[0];
       if (firstField) throw new AuthError(errors[firstField], firstField);
@@ -247,7 +258,7 @@ const supabaseProvider = (url, anonKey) => {
         throw e;
       }
       const session = toSession(data);
-      setSession(session);
+      setSession(session, { remember });
       return session;
     },
     async signOut() {
