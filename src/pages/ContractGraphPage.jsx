@@ -16,13 +16,13 @@ import AccountMenu from "../components/shell/AccountMenu";
 import { useAuth } from "../components/auth/useAuth";
 import ServiceMap from "../components/contractgraph/ServiceMap";
 import { EntitiesView, DuplicatesView, ConceptsView, FindingsView, ServicesListView, OperationsTableView } from "../components/contractgraph/Views";
-import ServiceDetails from "../components/contractgraph/ServiceDetails";
+import ServiceDetails, { EdgeDetails } from "../components/contractgraph/ServiceDetails";
 import { LAYOUTS } from "../utils/serviceLayout";
 import { buildContractGraph, impactOf, toMermaid, normalizeService } from "../utils/contractGraph";
 import { parseSpecText } from "../utils/readSpec";
 import { formatLabel } from "../utils/parsers";
 import {
-  listWorkspaces, createWorkspace, deleteWorkspace, renameWorkspace, addService, removeService,
+  listWorkspaces, createWorkspace, deleteWorkspace, renameWorkspace, addService, removeService, replaceService,
   loadServices, exportWorkspace, importWorkspace, MAX_SERVICES,
 } from "../utils/contractWorkspace";
 import { SAMPLE_ESTATE } from "../utils/contractSamples";
@@ -72,6 +72,10 @@ const ContractGraphPage = () => {
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("map");
   const [selectedId, setSelectedId] = useState(null);
+  // A selected relationship shows its evidence in place of the service panel.
+  const [selectedEdge, setSelectedEdge] = useState(null);
+  const replaceInputRef = useRef(null);
+  const replaceTargetRef = useRef(null);
   const [notices, setNotices] = useState([]); // {kind, text}
   const [addOpen, setAddOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
@@ -200,7 +204,13 @@ const ContractGraphPage = () => {
     );
   }, [graph, search]);
 
-  const detailsOpen = Boolean(selectedId) && graph.services.some((s) => s.id === selectedId);
+  const edgeOpen = Boolean(selectedEdge) && graph.edges.some((e) => `${e.from}|${e.to}|${e.kind}` === selectedEdge);
+  const detailsOpen = edgeOpen || (Boolean(selectedId) && graph.services.some((s) => s.id === selectedId));
+  const currentEdge = edgeOpen ? graph.edges.find((e) => `${e.from}|${e.to}|${e.kind}` === selectedEdge) : null;
+  const pickService = (id) => {
+    setSelectedEdge(null);
+    setSelectedId(id);
+  };
 
   /** Hand a service's document to the single-spec workspace. */
   const openInExplorer = useCallback((id) => {
@@ -440,6 +450,66 @@ const ContractGraphPage = () => {
     await removeService(userId, active.id, serviceId);
     if (selectedId === serviceId) setSelectedId(null);
     refresh();
+  };
+
+  /** Put a newer document under an existing service; colour and position stay. */
+  const replaceWith = async (serviceId, spec, sourceUrl) => {
+    if (!active) return;
+    const svc = active.services.find((s) => s.id === serviceId);
+    if (!svc) return;
+    try {
+      const probe = normalizeService({ id: "probe", name: svc.name, spec });
+      if (!probe.operations.length && !probe.entities.length) {
+        throw new Error("no operations or schemas were found in it — is it an API specification?");
+      }
+      const before = graph.services.find((s) => s.id === serviceId);
+      await replaceService(userId, active.id, serviceId, { spec, sourceUrl, format: Array.isArray(spec) ? "Custom JSON" : formatLabel(spec) });
+      refresh();
+      const delta = before ? ` ${before.operations.length} → ${probe.operations.length} operations, ${before.entities.length} → ${probe.entities.length} entities.` : "";
+      notify("ok", `Replaced ${svc.name}.${delta}`);
+    } catch (e) {
+      notify("error", `${svc.name}: ${e.message}`);
+    }
+  };
+
+  const chooseReplacement = (serviceId) => {
+    replaceTargetRef.current = serviceId;
+    replaceInputRef.current?.click();
+  };
+
+  const onReplacementFile = async (fileList) => {
+    const file = fileList?.[0];
+    const target = replaceTargetRef.current;
+    replaceTargetRef.current = null;
+    if (!file || !target) return;
+    const text = await readFileText(file).catch((e) => {
+      notify("error", e.message);
+      return null;
+    });
+    if (text === null) return;
+    const spec = parseSpecText(text);
+    if (!spec || typeof spec !== "object") {
+      notify("error", `${file.name}: not valid JSON or YAML.`);
+      return;
+    }
+    await replaceWith(target, spec, "");
+  };
+
+  const refetch = async (serviceId) => {
+    const svc = active?.services.find((s) => s.id === serviceId);
+    if (!svc?.sourceUrl) return;
+    setFetching(true);
+    try {
+      const res = await fetch(svc.sourceUrl);
+      if (!res.ok) throw new Error(`The server answered ${res.status}.`);
+      const spec = parseSpecText(await res.text());
+      if (!spec || typeof spec !== "object") throw new Error("The response is not JSON or YAML.");
+      await replaceWith(serviceId, spec, svc.sourceUrl);
+    } catch (e) {
+      notify("error", `${svc.name}: ${/Failed to fetch|NetworkError/.test(e.message) ? "the browser could not fetch that URL (blocked by CORS, or offline)." : e.message}`);
+    } finally {
+      setFetching(false);
+    }
   };
 
   const newWorkspace = () => {
@@ -722,6 +792,8 @@ const ContractGraphPage = () => {
       <div className={`cg-app ${detailsOpen ? "with-details" : ""}`} style={showAssistant && hasServices ? { marginRight: 446 } : undefined}>
         {/* ── Sidebar ── */}
         <aside className="cg-sidebar">
+          {/* Always mounted: "Replace spec…" in the details panel opens it whether or not the add panel is showing. */}
+          {!shared && <input ref={replaceInputRef} type="file" accept=".json,.yaml,.yml,.wsdl,.xml,application/json" className="sr-only" aria-label="Replacement specification file" onChange={(e) => { onReplacementFile(e.target.files); e.target.value = ""; }} />}
           <div className="cg-sidebar-title">
             <span>Services{active ? ` · ${active.services.length} / ${MAX_SERVICES}` : ""}</span>
             {!shared && <button type="button" className="cg-add" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}><Plus size={13} /> Add Service</button>}
@@ -842,7 +914,9 @@ const ContractGraphPage = () => {
                   <ServiceMap
                     graph={graph}
                     selectedId={selectedId}
-                    onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+                    onSelect={(id) => { setSelectedEdge(null); setSelectedId((cur) => (cur === id ? null : id)); }}
+                    selectedEdge={edgeOpen ? selectedEdge : null}
+                    onSelectEdge={(edge) => { if (!edge) { setSelectedEdge(null); return; } setSelectedId(null); setSelectedEdge(`${edge.from}|${edge.to}|${edge.kind}`); }}
                     impacted={impacted}
                     highlighted={aiHighlight.ids}
                     highlightReason={aiHighlight.reason}
@@ -882,13 +956,18 @@ const ContractGraphPage = () => {
         </main>
 
         {/* ── Details ── */}
-        {detailsOpen && (
+        {detailsOpen && currentEdge && (
+          <EdgeDetails graph={graph} edge={currentEdge} onClose={() => setSelectedEdge(null)} onSelectService={pickService} />
+        )}
+        {detailsOpen && !currentEdge && (
           <ServiceDetails
             graph={graph}
             serviceId={selectedId}
             impacted={impacted}
             onClose={() => setSelectedId(null)}
             onOpenInExplorer={openInExplorer}
+            onReplace={shared ? null : chooseReplacement}
+            onRefetch={shared ? null : refetch}
             onDelete={shared ? null : (id) => {
               const svc = active?.services.find((x) => x.id === id);
               if (svc && window.confirm(`Remove "${svc.name}" from this map?`)) remove(id);

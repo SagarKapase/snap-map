@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Server, Copy, Check, Settings2, Boxes, Play, Trash2 } from "lucide-react";
+import { X, Server, Copy, Check, Settings2, Boxes, Play, Trash2, RefreshCw, Globe } from "lucide-react";
 import { methodColor } from "../../utils/constants";
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -23,7 +23,7 @@ const TABS = ["Overview", "Operations", "Entities", "Relationships"];
  * document declares or what the graph computed; "depends on" means the
  * services this one calls or references, "used by" the reverse.
  */
-const ServiceDetails = ({ graph, serviceId, impacted = [], onClose, onOpenInExplorer, onDelete }) => {
+const ServiceDetails = ({ graph, serviceId, impacted = [], onClose, onOpenInExplorer, onDelete, onReplace, onRefetch }) => {
   const [tab, setTab] = useState("Overview");
   const [copied, setCopied] = useState(false);
   const s = graph.services.find((x) => x.id === serviceId);
@@ -123,6 +123,18 @@ const ServiceDetails = ({ graph, serviceId, impacted = [], onClose, onOpenInExpl
             <button type="button" className="cg-action primary" onClick={() => onOpenInExplorer?.(s.id)}>
               <Play size={14} /> Open in API Explorer
             </button>
+            {onReplace && (
+              <div style={{ display: "grid", gridTemplateColumns: s.sourceUrl && onRefetch ? "1fr 1fr" : "1fr", gap: 8 }}>
+                <button type="button" className="cg-action" style={{ marginTop: 12, color: "var(--cg-soft)", background: "var(--cg-panel-2)", border: "1px solid var(--cg-border)" }} onClick={() => onReplace(s.id)}>
+                  <RefreshCw size={14} /> Replace spec…
+                </button>
+                {s.sourceUrl && onRefetch && (
+                  <button type="button" className="cg-action" style={{ marginTop: 12, color: "var(--cg-soft)", background: "var(--cg-panel-2)", border: "1px solid var(--cg-border)" }} onClick={() => onRefetch(s.id)} title={s.sourceUrl}>
+                    <Globe size={14} /> Re-fetch URL
+                  </button>
+                )}
+              </div>
+            )}
             {onDelete && (
               <button type="button" className="cg-action danger" onClick={() => onDelete(s.id)}>
                 <Trash2 size={14} /> Remove from map
@@ -201,6 +213,65 @@ const ServiceDetails = ({ graph, serviceId, impacted = [], onClose, onOpenInExpl
             )}
           </>
         )}
+      </div>
+    </aside>
+  );
+};
+
+/**
+ * The panel for one relationship: what kind it is, how sure the engine is,
+ * and every piece of evidence it was built from.
+ */
+export const EdgeDetails = ({ graph, edge, onClose, onSelectService }) => {
+  if (!edge) return null;
+  const from = graph.services.find((s) => s.id === edge.from);
+  const to = graph.services.find((s) => s.id === edge.to);
+  const verb = edge.kind === "calls" ? "calls" : edge.kind === "references" ? "references an entity owned by" : "shares an entity with";
+  const explain = {
+    calls: "A request in the first service matches an operation the second declares — on its server, or by path shape when the host is a variable.",
+    references: "A field named like <entity>Id, <entity>Ref or <entity>Key in the first service points at a resource the second service owns.",
+    shares: "Both services expose an entity of the same name. The Entities tab shows whether their shapes agree.",
+  }[edge.kind];
+  return (
+    <aside className="cg-details" aria-label="Relationship details">
+      <div className="cg-details-head" style={{ paddingBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="cg-details-title">
+              <h2 style={{ fontSize: 15, whiteSpace: "normal" }}>
+                <span style={{ color: from?.color }}>{from?.name}</span> <span style={{ color: "var(--cg-muted)", fontWeight: 400 }}>{verb}</span> <span style={{ color: to?.color }}>{to?.name}</span>
+              </h2>
+            </div>
+            <div className="cg-details-sub">{edge.kind} · confidence {Math.round(edge.confidence * 100)}% · {plural(edge.evidence.length, "piece of evidence", "pieces of evidence")}</div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close details" className="cg-btn icon" style={{ height: 30, width: 30, marginTop: -2 }}>
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+      <div className="cg-details-body" style={{ paddingTop: 0 }}>
+        <div className="cg-card">
+          <div className="cg-card-title">How this was found</div>
+          <div className="cg-desc">{explain}</div>
+        </div>
+        <div className="cg-card">
+          <div className="cg-card-title">Evidence <span className="count">({edge.evidence.length})</span></div>
+          <ul className="cg-desc" style={{ paddingLeft: 18, margin: 0 }}>
+            {edge.evidence.map((t) => <li key={t} style={{ marginBottom: 6 }}>{t}</li>)}
+          </ul>
+        </div>
+        <div className="cg-metrics">
+          <button type="button" className="cg-metric" onClick={() => onSelectService?.(edge.from)}>
+            <span><Dot color={from?.color} /> From</span>
+            <strong style={{ fontSize: 14 }}>{from?.name}</strong>
+            <em>Open service →</em>
+          </button>
+          <button type="button" className="cg-metric" onClick={() => onSelectService?.(edge.to)}>
+            <span><Dot color={to?.color} /> To</span>
+            <strong style={{ fontSize: 14 }}>{to?.name}</strong>
+            <em>Open service →</em>
+          </button>
+        </div>
       </div>
     </aside>
   );

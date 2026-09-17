@@ -130,6 +130,36 @@ const addServiceNow = async (userId, workspaceId, { name, spec, sourceUrl = "", 
   return service;
 };
 
+/**
+ * Swap a service's document for a newer one. The service keeps its id,
+ * name and colour — so its position on the map and every link to it
+ * survive — and only the payload, format and size change.
+ */
+export const replaceService = (userId, workspaceId, serviceId, input) => serialized(() => replaceServiceNow(userId, workspaceId, serviceId, input));
+
+const replaceServiceNow = async (userId, workspaceId, serviceId, { spec, sourceUrl, format = "" }) => {
+  if (!spec || typeof spec !== "object") throw new Error("That file is not a specification the map can read.");
+  const list = read(userId);
+  const workspace = list.find((w) => w.id === workspaceId);
+  const service = workspace?.services.find((s) => s.id === serviceId);
+  if (!service) throw new Error("This service no longer exists.");
+  const stored = await putPayload(payloadKey(workspaceId, serviceId), spec);
+  if (!stored) throw new Error("The browser refused to store this specification (storage may be full).");
+  service.format = format || service.format;
+  if (sourceUrl !== undefined) service.sourceUrl = sourceUrl;
+  service.replacedAt = now();
+  service.bytes = (() => {
+    try {
+      return JSON.stringify(spec).length;
+    } catch {
+      return 0;
+    }
+  })();
+  workspace.updatedAt = now();
+  write(userId, list);
+  return service;
+};
+
 export const renameService = (userId, workspaceId, serviceId, name) => {
   const list = read(userId);
   const workspace = list.find((w) => w.id === workspaceId);
