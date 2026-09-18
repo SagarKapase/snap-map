@@ -1,27 +1,31 @@
-import { Sparkles, ShieldCheck, Network, Upload, Braces, FileJson, Send, Terminal } from "lucide-react";
+import { Sparkles, ShieldCheck, Network, Upload, Braces, FileJson, Send, Terminal, MoveDownLeft } from "lucide-react";
 
-// Formats the parser reads, drawn flowing into the import hub. Decoration.
+// Formats the parser reads, drawn as tiles feeding the import hub. Decoration.
 const CHIPS = [
-  { label: "OpenAPI", icon: Braces, style: { left: 0, top: 12 } },
-  { label: "Swagger", icon: FileJson, style: { left: 18, bottom: 10 } },
-  { label: "Postman", icon: Send, style: { right: 0, top: 6 } },
-  { label: "cURL", icon: Terminal, style: { right: 22, bottom: 8 } },
+  { label: "OpenAPI", icon: Braces, style: { left: 14, top: 26, transform: "rotate(-6deg)" } },
+  { label: "cURL", icon: Terminal, style: { left: 30, top: 108, transform: "rotate(5deg)" } },
+  { label: "Swagger", icon: FileJson, style: { left: 236, top: 14, transform: "rotate(5deg)" } },
+  { label: "Postman", icon: Send, style: { left: 250, top: 104, transform: "rotate(-5deg)" } },
 ];
 
-// Chip centres → hub, in the 360×130 box.
+// Tile centres → hub, in the 360×144 drawing box.
 const LINES = [
-  [44, 27], [62, 105], [318, 21], [306, 107],
+  [62, 52], [72, 134], [286, 40], [296, 130],
 ];
 
 const ImportArt = () => (
   <div className="imp-art" aria-hidden="true">
-    <svg viewBox="0 0 360 130" preserveAspectRatio="none">
-      {LINES.map(([x, y]) => <line key={`${x}${y}`} x1={x} y1={y} x2="180" y2="65" />)}
+    <svg viewBox="0 0 360 144">
+      {LINES.map(([x, y]) => <line key={`${x}${y}`} x1={x} y1={y} x2="180" y2="72" />)}
     </svg>
     {CHIPS.map(({ label, icon: Icon, style }) => (
-      <span key={label} className="imp-chip" style={style}><Icon size={12} /> {label}</span>
+      <span key={label} className="imp-chip" style={style}><Icon size={13} /> {label}</span>
     ))}
-    <span className="imp-hub"><Upload size={20} /></span>
+    <span className="imp-hub"><Upload size={24} /></span>
+    <span className="imp-note-hand">
+      Turn your API specs into a visual map
+      <MoveDownLeft size={22} strokeWidth={1.5} />
+    </span>
   </div>
 );
 

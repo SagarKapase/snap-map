@@ -632,22 +632,21 @@ const JsonInputScreen = ({
 
         {/* ── Side panel ── */}
         <aside className="imp-side">
-          <SupportedFormats />
-          {tools.length > 0 && (
-            <section className="imp-panel" aria-labelledby="imp-tools">
-              <h3 id="imp-tools">Without a spec loaded</h3>
-              <div className="imp-toollist">
-                {tools.map((tool) => (
-                  <button key={tool.label} type="button" onClick={tool.run}>
-                    <tool.icon size={14} aria-hidden="true" />
-                    {tool.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
+          <SupportedFormats onViewSamples={() => document.getElementById("imp-samples")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
         </aside>
       </div>
+
+      {tools.length > 0 && (
+        <nav className="imp-toolstrip" aria-label="Tools that work without a specification">
+          <span className="imp-toolstrip-label">Without a spec loaded</span>
+          {tools.map((tool) => (
+            <button key={tool.label} type="button" className="imp-btn" onClick={tool.run}>
+              <tool.icon size={13} aria-hidden="true" />
+              {tool.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       <SampleSpecifications onLoadSample={onLoadSample} recents={recents} onOpenRecent={onOpenRecent} query={query} />
     </div>

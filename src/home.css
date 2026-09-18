@@ -1009,58 +1009,89 @@
   }
 }
 
+/* ── Icon rail: tablets, or the collapse toggle on desktop. The shell sets
+   .is-rail from a media query or the stored preference. ── */
+
+.hm.is-rail {
+  --sidebar-w: 64px;
+}
+
+.hm.is-rail > .hm-sidebar {
+  padding-inline: 10px;
+  align-items: stretch;
+}
+
+.hm.is-rail > .hm-sidebar .hm-brand span,
+.hm.is-rail > .hm-sidebar .hm-nav-label,
+.hm.is-rail > .hm-sidebar .hm-nav-text,
+.hm.is-rail > .hm-sidebar .hm-nav-count,
+.hm.is-rail > .hm-sidebar .hm-nav-empty,
+.hm.is-rail > .hm-sidebar .hm-side-cta,
+.hm.is-rail > .hm-sidebar .hm-account > :not(.hm-avatar) {
+  display: none;
+}
+
+.hm.is-rail > .hm-sidebar .hm-brand-row {
+  flex-direction: column;
+  gap: 10px;
+  padding-inline: 0;
+}
+
+.hm.is-rail > .hm-sidebar .hm-brand {
+  justify-content: center;
+  padding-inline: 0;
+  margin-bottom: 0;
+}
+
+.hm.is-rail > .hm-sidebar .hm-nav {
+  gap: 6px;
+}
+
+.hm.is-rail > .hm-sidebar .hm-nav-group + .hm-nav-group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.hm.is-rail > .hm-sidebar .hm-nav-item {
+  justify-content: center;
+  padding: 0;
+  height: 40px;
+}
+
+.hm.is-rail > .hm-sidebar .hm-nav-item.is-active::before {
+  left: -10px;
+}
+
+.hm.is-rail > .hm-sidebar .hm-account {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 6px;
+}
+
+.hm-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 26px;
+}
+
+.hm-brand-row .hm-brand {
+  margin-bottom: 0;
+}
+
+.hm-collapse {
+  display: none;
+}
+
+@media (min-width: 1200px) {
+  .hm-collapse {
+    display: grid;
+  }
+}
+
 @media (max-width: 1199px) {
-  /* Tablet: icon rail */
-  .hm {
-    --sidebar-w: 64px;
-  }
-
-  .hm-sidebar:not(.is-drawer) {
-    padding-inline: 10px;
-    align-items: stretch;
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-brand span,
-  .hm-sidebar:not(.is-drawer) .hm-nav-label,
-  .hm-sidebar:not(.is-drawer) .hm-nav-text,
-  .hm-sidebar:not(.is-drawer) .hm-nav-count,
-  .hm-sidebar:not(.is-drawer) .hm-nav-empty,
-  .hm-sidebar:not(.is-drawer) .hm-side-cta,
-  .hm-sidebar:not(.is-drawer) .hm-account > :not(.hm-avatar) {
-    display: none;
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-brand {
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-nav {
-    gap: 6px;
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-nav-group + .hm-nav-group {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border-soft);
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-nav-item {
-    justify-content: center;
-    padding: 0;
-    height: 40px;
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-nav-item.is-active::before {
-    left: -10px;
-  }
-
-  .hm-sidebar:not(.is-drawer) .hm-account {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    padding: 6px;
-  }
-
   .hm-hero-art {
     width: 300px;
     right: 16px;
