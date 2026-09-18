@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { ArrowRight, Mail } from "lucide-react";
 import { useAuth } from "../components/auth/useAuth";
-import { AuthShell, Field, FormError, PasswordInput, SubmitButton } from "../components/auth/AuthShell";
-import { inputClass } from "../components/auth/authStyles";
+import { AuthShell, Field, FormError, Input, LocalNotice, PasswordInput, SubmitButton } from "../components/auth/AuthShell";
 import { validateSignIn } from "../utils/auth";
 
 /** Where to go after signing in: the `next` query parameter, else the graph. */
@@ -17,6 +17,8 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({ email: "", password: "" });
+  // Off means the session ends with the browser tab.
+  const [remember, setRemember] = useState(true);
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -36,7 +38,7 @@ const LoginPage = () => {
     if (Object.keys(found).length) return;
     setBusy(true);
     try {
-      await signIn(form);
+      await signIn({ ...form, remember });
       navigate(nextFrom(location.search), { replace: true });
     } catch (err) {
       if (err?.field) setErrors({ [err.field]: err.message });
@@ -48,42 +50,60 @@ const LoginPage = () => {
 
   return (
     <AuthShell
-      isLocal={isLocal}
-      title="Sign in to your API estate"
-      lede="Pick up the workspaces you mapped last time: every service, every finding, every concept you confirmed."
+      title={
+        <>
+          Your entire
+          <br />
+          API estate,
+          <br />
+          <span className="auth-grad">clearly mapped.</span>
+        </>
+      }
+      lede="Pick up the workspaces you mapped last time — every service, every finding, every concept you confirmed."
+      alternate={{ label: "Create an account", to: `/signup${location.search}` }}
       footer={
         <>
           New here?{" "}
-          <Link to={`/signup${location.search}`} className="font-semibold text-vz-accent-2 hover:underline">
+          <Link to={`/signup${location.search}`} className="auth-link">
             Create an account
           </Link>
         </>
       }
     >
-      <h2 className="text-[20px] font-bold text-vz-text">Sign in</h2>
-      <form onSubmit={submit} noValidate className="mt-5 space-y-4">
+      <h2 className="auth-h2">Welcome back</h2>
+      <p className="auth-sub">Sign in to continue to your API estate</p>
+      {isLocal && <LocalNotice />}
+      <form onSubmit={submit} noValidate className="space-y-4">
         <FormError message={formError} />
         <Field id="login-email" label="Email" error={errors.email}>
-          <input
+          <Input
             id="login-email"
+            icon={Mail}
             type="email"
             value={form.email}
             onChange={set("email")}
             autoComplete="email"
             autoFocus
             placeholder="you@company.com"
-            aria-invalid={Boolean(errors.email) || undefined}
-            aria-describedby={errors.email ? "login-email-error" : undefined}
-            className={inputClass(Boolean(errors.email))}
+            invalid={Boolean(errors.email)}
           />
         </Field>
         <Field id="login-password" label="Password" error={errors.password}>
           <PasswordInput id="login-password" value={form.password} onChange={set("password")} invalid={Boolean(errors.password)} autoComplete="current-password" />
         </Field>
-        <SubmitButton busy={busy}>{busy ? "Signing in…" : "Sign in"}</SubmitButton>
+        <div className="auth-options">
+          <label className="auth-check">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            <span>Keep me signed in</span>
+          </label>
+        </div>
+        <SubmitButton busy={busy}>
+          {busy ? "Signing in…" : "Sign in"}
+          {!busy && <ArrowRight size={16} aria-hidden="true" />}
+        </SubmitButton>
       </form>
-      <p className="mt-4 text-center text-[12px] text-vz-dim">
-        <Link to="/home" className="hover:text-vz-text">Continue without an account</Link>
+      <p className="auth-guest">
+        <Link to="/home">Continue without an account</Link>
       </p>
     </AuthShell>
   );

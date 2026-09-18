@@ -93,6 +93,14 @@ export const loadRecentData = async (entry) => {
   return getPayload(payloadKey(entry.id));
 };
 
+/** Forget one recent entry and the spec stored behind it. */
+export const removeRecent = (id) => {
+  const list = getRecents().filter((r) => r.id !== id);
+  persist(list);
+  deletePayload(payloadKey(id)).catch(() => {});
+  return list;
+};
+
 export const clearRecents = () => {
   const list = getRecents();
   try {

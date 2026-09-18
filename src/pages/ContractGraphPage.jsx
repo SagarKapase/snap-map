@@ -433,6 +433,18 @@ const ContractGraphPage = () => {
     notify("ok", "Loaded the sample estate. It is a made-up set of services for trying the map.");
   };
 
+  // Home links to the sample estate; the parameter is consumed once. The
+  // ref guards against the effect running twice under StrictMode, which
+  // would build two copies of the estate.
+  const sampleConsumedRef = useRef(false);
+  useEffect(() => {
+    if (sampleConsumedRef.current || new URLSearchParams(location.search).get("sample") !== "estate") return;
+    sampleConsumedRef.current = true;
+    navigate(location.pathname, { replace: true });
+    loadSample();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // A spec handed over from the single-spec workspace ("Add to Contract Graph").
   useEffect(() => {
     const handoff = location.state?.addSpec;
@@ -804,7 +816,7 @@ const ContractGraphPage = () => {
               <button type="button" onClick={() => fileInputRef.current?.click()} className={`cg-drop ${dragOver ? "over" : ""}`}>
                 <Upload size={16} />
                 Drop spec files here, or click
-                <small>OpenAPI, Swagger, Postman, WSDL · JSON or YAML · many at once</small>
+                <small>OpenAPI, Swagger, Postman · JSON or YAML · many at once</small>
               </button>
               <input ref={fileInputRef} type="file" multiple accept=".json,.yaml,.yml,.wsdl,.xml,application/json" className="sr-only" aria-label="Add specification files" onChange={(e) => { addFiles(e.target.files || []); e.target.value = ""; }} />
               <input ref={importInputRef} type="file" accept=".json" className="sr-only" aria-label="Import workspace file" onChange={(e) => { addFiles(e.target.files || []); e.target.value = ""; }} />
@@ -945,7 +957,7 @@ const ContractGraphPage = () => {
               <span className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: "rgba(168,85,247,0.12)", color: "#e6c4ff" }}><Waypoints size={26} /></span>
               <h1 className="mt-5 text-[22px] font-bold" style={{ textWrap: "balance" }}>See your whole API estate on one map</h1>
               <p className="mt-2 max-w-[52ch] text-[13.5px] leading-relaxed" style={{ color: "var(--cg-muted)" }}>
-                Add the contracts your teams already have — OpenAPI, Swagger, Postman collections, WSDL — and Contract Graph finds what only shows up between them: entities with more than one shape, duplicated endpoints, one concept under three names, and which services depend on which. Nothing leaves your browser.
+                Add the contracts your teams already have — OpenAPI, Swagger, Postman collections — and Contract Graph finds what only shows up between them: entities with more than one shape, duplicated endpoints, one concept under three names, and which services depend on which. Nothing leaves your browser.
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-2">
                 <button type="button" onClick={() => fileInputRef.current?.click()} className="cg-btn primary"><Upload size={14} /> Add spec files</button>

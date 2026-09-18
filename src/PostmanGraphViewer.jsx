@@ -23,7 +23,7 @@ import {
 import { auditSpec } from "./utils/audit";
 import { addRecent, clearRecents, getRecents, loadRecentData } from "./utils/recents";
 import { getSession } from "./utils/auth";
-import BrandMark from "./components/BrandMark";
+import AppShell from "./components/shell/AppShell";
 import ConnectionLines from "./components/ConnectionLines";
 import GraphCard from "./components/GraphCard";
 import Minimap from "./components/Minimap";
@@ -100,6 +100,8 @@ const PostmanGraphViewer = () => {
   const searchInputRef = useRef(null);
 
   const [view, setView] = useState("input");
+  // The import screen's top-bar search narrows its samples and recents.
+  const [importQuery, setImportQuery] = useState("");
   const [returnView, setReturnView] = useState("input");
   const [collection, setCollection] = useState(null);
   const [nodes, setNodes] = useState([]);
@@ -1505,51 +1507,40 @@ const PostmanGraphViewer = () => {
   }
 
   // ─── Import screen and the full-page tools ────────────────────
-  return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-vz-bg text-vz-text">
-      <header className="relative z-50 flex h-[60px] flex-shrink-0 items-center justify-between gap-4 border-b border-vz-line-soft bg-vz-bg px-4 sm:px-5">
+  // The same shell as Home. Collections lives in the side panel of the
+  // import screen; the source link and "back to map" sit in the top bar.
+  const importActions = (
+    <>
+      <a
+        href="https://github.com/SagarKapase/snap-map"
+        target="_blank"
+        rel="noreferrer noopener"
+        title="Vizroute on GitHub"
+        aria-label="Vizroute on GitHub"
+        className="hm-icon-btn"
+      >
+        <Github size={16} />
+      </a>
+      {nodes.length > 0 && (
         <button
           type="button"
-          onClick={() => navigate("/")}
-          title="Back to the Vizroute home page"
-          className="vz-t flex items-center gap-2 rounded-lg px-1 py-0.5 hover:opacity-80"
+          onClick={() => setView("graph")}
+          className="hm-btn-primary"
+          style={{ marginTop: 0, height: 34, padding: "0 12px" }}
         >
-          <BrandMark size={24} />
-          <span className="text-[17px] font-bold tracking-tight text-vz-text">
-            Vizroute
-          </span>
+          <Waypoints size={14} /> Back to map
         </button>
+      )}
+    </>
+  );
 
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowCollections(true)}
-            className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel px-3 text-[13px] text-vz-soft hover:text-vz-text"
-          >
-            <FolderOpen size={14} />
-            <span className="hidden sm:inline">Collections</span>
-          </button>
-          <a
-            href="https://github.com/SagarKapase/snap-map"
-            target="_blank"
-            rel="noreferrer noopener"
-            className="vz-t flex h-9 items-center gap-1.5 rounded-lg border border-vz-line bg-vz-panel px-3 text-[13px] text-vz-soft hover:text-vz-text"
-          >
-            <Github size={14} />
-            <span className="hidden sm:inline">GitHub</span>
-          </a>
-          {nodes.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setView("graph")}
-              className="vz-t flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#a855f7] to-[#c760ff] px-3.5 text-[13px] font-semibold text-[#160a1d] hover:opacity-90"
-            >
-              <Waypoints size={14} /> Back to map
-            </button>
-          )}
-        </div>
-      </header>
-
+  return (
+    <AppShell
+      query={importQuery}
+      onQueryChange={view === "input" ? setImportQuery : undefined}
+      searchPlaceholder="Search samples and recent APIs"
+      topActions={importActions}
+    >
       {view === "input" ? (
         <JsonInputScreen
           onVisualize={handleVisualize}
@@ -1559,6 +1550,9 @@ const PostmanGraphViewer = () => {
           onOpenAutoImport={() => setShowAutoImport(true)}
           onOpenBreaking={() => openFullView("breaking")}
           onOpenMultiService={openContractGraph}
+          recents={recents}
+          onOpenRecent={handleOpenRecent}
+          query={importQuery}
         />
       ) : view === "diff" ? (
         <DiffView onBack={() => setView(returnView)} />
@@ -1567,7 +1561,7 @@ const PostmanGraphViewer = () => {
       )}
 
       {modals}
-    </div>
+    </AppShell>
   );
 };
 

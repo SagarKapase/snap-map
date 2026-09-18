@@ -10,12 +10,22 @@ globalThis.localStorage = {
   clear: () => memory.clear(),
 };
 
+// sessionStorage is where a session goes when "keep me signed in" is off.
+const tabMemory = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => (tabMemory.has(k) ? tabMemory.get(k) : null),
+  setItem: (k, v) => tabMemory.set(k, String(v)),
+  removeItem: (k) => tabMemory.delete(k),
+  clear: () => tabMemory.clear(),
+};
+
 const good = { name: "Ada", email: "ada@example.com", password: "correct1horse" };
 
 // Unit tests never reach a network: the local provider is forced, and
 // vite.config.js blanks the Supabase keys for the test environment as well.
 beforeEach(() => {
   memory.clear();
+  tabMemory.clear();
   _setAuthProviderForTests("local");
 });
 
@@ -109,6 +119,29 @@ describe("local provider", () => {
     stored["ada@example.com"].hash = stored["ada@example.com"].hash.slice(0, 10);
     memory.set("vizroute_local_accounts", JSON.stringify(stored));
     await expect(signIn({ email: good.email, password: good.password })).rejects.toThrow(/incorrect/);
+  });
+});
+
+describe("keep me signed in", () => {
+  it("keeps the session in localStorage by default", async () => {
+    await signUp(good);
+    await signOut();
+    await signIn({ email: good.email, password: good.password });
+    expect(memory.has("vizroute_session")).toBe(true);
+    expect(tabMemory.has("vizroute_session")).toBe(false);
+  });
+  it("keeps the session for the tab only when asked not to remember", async () => {
+    await signUp(good);
+    await signOut();
+    await signIn({ email: good.email, password: good.password, remember: false });
+    expect(memory.has("vizroute_session")).toBe(false);
+    expect(tabMemory.has("vizroute_session")).toBe(true);
+    // a fresh read (no memory copy) still finds it
+    _setAuthProviderForTests("local");
+    expect(getSession()?.email).toBe(good.email);
+    await signOut();
+    expect(tabMemory.has("vizroute_session")).toBe(false);
+    expect(getSession()).toBeNull();
   });
 });
 
