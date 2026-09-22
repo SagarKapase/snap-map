@@ -31,6 +31,10 @@ the working plan; the product reasoning behind it is in
 
 The single-spec workspace hands its document to the map through
 "Add to Contract Graph" (command palette and the import screen's tools).
+A `.wsdl` dropped, pasted or fetched here is read by the SOAP Migration
+Workbench engine (`src/utils/soap/`, see `soap-migration-workbench.md`) and
+added as the OpenAPI document it proposes, so a SOAP service sits on the
+same map as the REST services.
 
 ## Rules the engine applies
 

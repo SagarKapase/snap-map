@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
-import { Braces, Send, Code2, Network, ArrowRight } from "lucide-react";
+import { Braces, Send, Code2, Network, ArrowRight, ArrowRightLeft } from "lucide-react";
 import { SAMPLE_DATA } from "../../utils/constants";
 import { SAMPLE_ESTATE } from "../../utils/contractSamples";
+import { SAMPLE_PROGRAMME } from "../../utils/soap/samples";
+import { SOAP_WORKBENCH } from "../../features";
 
 /**
  * The documents that ship with the product, each a real link: the three
@@ -14,7 +16,8 @@ const SAMPLES = [
   { to: "/workspace?demo=postman", icon: Send, accent: "#fb923c", title: SAMPLE_DATA.postman.info.name, text: "Postman collection · single spec" },
   { to: "/workspace?demo=custom", icon: Code2, accent: "#60a5fa", title: SAMPLE_DATA.custom.name, text: "Custom JSON · single spec" },
   { to: "/graph?sample=estate", icon: Network, accent: "#a855f7", title: SAMPLE_ESTATE.name, text: `${SAMPLE_ESTATE.services.length} services · Contract Graph estate` },
-];
+  { to: "/soap?sample=bank", icon: ArrowRightLeft, accent: "#22d3ee", title: SAMPLE_PROGRAMME.name, text: `${SAMPLE_PROGRAMME.services.length} WSDLs · SOAP Migration Workbench`, enabled: SOAP_WORKBENCH },
+].filter((s) => s.enabled !== false);
 
 const SampleCards = () => (
   <section aria-labelledby="hm-samples">

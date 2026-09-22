@@ -693,3 +693,37 @@ export const bodyToNode = (body) => {
   if (body.mode === "binary") return { ...base, bodyMode: "file", fileSrc: body.file?.name || "" };
   return { ...base, bodyMode: "none" };
 };
+
+/**
+ * Why a fetch() said "Failed to fetch". The browser hides the reason, but
+ * a no-cors probe tells the two common cases apart: it rejects when nothing
+ * is listening at the origin, and resolves (opaquely) when a server is there
+ * but refuses cross-origin requests. `probe` is injectable for the tests.
+ */
+export const explainFetchFailure = async (url, probe = (origin) => fetch(origin, { mode: "no-cors", cache: "no-store" })) => {
+  let origin = "";
+  let local = false;
+  try {
+    const u = new URL(url);
+    origin = u.origin;
+    local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname);
+  } catch {
+    return { reachable: null, text: "Network error — the URL could not be requested." };
+  }
+  let reachable;
+  try {
+    await probe(`${origin}/`);
+    reachable = true;
+  } catch {
+    reachable = false;
+  }
+  if (!reachable) {
+    return {
+      reachable,
+      text: local
+        ? `Nothing is listening at ${origin}. Start the server first — for a generated SOAP adapter that is \`node adapter.mjs\` / \`dotnet run\` in its folder — then send again.`
+        : `Nothing answered at ${origin}: the host is down, unreachable from this network, or the name does not resolve.`,
+    };
+  }
+  return { reachable, text: `${origin} answered but does not allow cross-origin requests from the browser (no Access-Control-Allow-Origin). Use the cURL below from a terminal, or enable CORS on the server.` };
+};

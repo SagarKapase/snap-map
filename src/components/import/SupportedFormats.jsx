@@ -1,4 +1,5 @@
 import { Braces, Send, Terminal, Globe, Code2, ArrowRight } from "lucide-react";
+import { SOAP_WORKBENCH } from "../../features";
 
 /**
  * What the import parser accepts — each line matches the code, not the
@@ -30,7 +31,7 @@ const SupportedFormats = ({ onViewSamples }) => (
         </li>
       ))}
     </ul>
-    <p className="imp-fmt-note">Parsed in this browser — nothing is uploaded. WSDL, GraphQL and gRPC are not read yet.</p>
+    <p className="imp-fmt-note">Parsed in this browser — nothing is uploaded. WSDL is read as a proposed REST design{SOAP_WORKBENCH ? " (see the SOAP Workbench)" : ""}; GraphQL and gRPC are not read yet.</p>
     {onViewSamples && (
       <div className="imp-example-block">
         <h3>Need an example?</h3>
