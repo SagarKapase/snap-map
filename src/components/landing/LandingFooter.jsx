@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BrandMark from "../BrandMark";
+import { POSTS } from "../../utils/blog";
 
 // Only destinations that exist are listed.
 const COLUMNS = [
@@ -17,11 +18,18 @@ const COLUMNS = [
       { label: "Use cases", href: "#use-cases" },
     ],
   },
-];
+  {
+    heading: "Writing",
+    links: [
+      { label: "Blog", to: "/blog" },
+      ...POSTS.slice(0, 2).map((post) => ({ label: post.title, to: `/blog/${post.slug}` })),
+    ],
+  },
+].filter((column) => column.links.length > 0);
 
 const LandingFooter = () => (
   <footer className="border-t border-vz-line-soft">
-    <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.6fr_repeat(2,1fr)]">
+    <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.6fr_repeat(3,1fr)]">
       <div>
         <Link
           to="/"

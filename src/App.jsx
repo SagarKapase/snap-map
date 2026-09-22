@@ -2,6 +2,8 @@ import "./App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import LandingPage from "./pages/LandingPage";
+import BlogIndexPage from "./pages/BlogIndexPage";
+import BlogPostPage from "./pages/BlogPostPage";
 import { AuthProvider } from "./components/auth/AuthContext";
 import AccountGate from "./components/auth/AccountGate";
 import { useAuth } from "./components/auth/useAuth";
@@ -48,6 +50,8 @@ function App() {
         <Routes>
           <Route path="/" element={<RootGate />} />
           <Route path="/landing" element={<LandingPage />} />
+          <Route path="/blog" element={<BlogIndexPage />} />
+          <Route path="/blog/:slug" element={<BlogPostPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
           <Route path="/home" element={<HomePage />} />
           {/* Contract Graph keeps an estate, so it needs somewhere to keep it: an account. */}

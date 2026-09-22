@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { useAuth } from "../auth/useAuth";
 import AccountMenu from "../shell/AccountMenu";
+import { POSTS } from "../../utils/blog";
 
 // Only routes and sections that actually exist are linked.
 const LINKS = [
@@ -43,6 +44,13 @@ const LandingNav = () => {
               Contract Graph
             </Link>
           </li>
+          {POSTS.length > 0 && (
+            <li>
+              <Link to="/blog" className="vz-t text-[13px] text-vz-soft hover:text-vz-text">
+                Blog
+              </Link>
+            </li>
+          )}
         </ul>
       </div>
 
