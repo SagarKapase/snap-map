@@ -1,10 +1,8 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Github } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { useAuth } from "../auth/useAuth";
 import AccountMenu from "../shell/AccountMenu";
-
-export const GITHUB_URL = "https://github.com/SagarKapase/snap-map";
 
 // Only routes and sections that actually exist are linked.
 const LINKS = [
@@ -44,17 +42,6 @@ const LandingNav = () => {
             <Link to="/graph" className="vz-t text-[13px] text-vz-soft hover:text-vz-text">
               Contract Graph
             </Link>
-          </li>
-          <li>
-            <a
-              href={GITHUB_URL}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="vz-t flex items-center gap-1.5 text-[13px] text-vz-soft hover:text-vz-text"
-            >
-              <Github size={14} aria-hidden="true" />
-              GitHub
-            </a>
           </li>
         </ul>
       </div>

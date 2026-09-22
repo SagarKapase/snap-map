@@ -1,4 +1,4 @@
-import { Compass, GitCompareArrows, TerminalSquare, BookOpen } from "lucide-react";
+import { Compass, GitCompareArrows, TerminalSquare, BookOpen, Network } from "lucide-react";
 
 // Each case names the feature in the app that serves it.
 const CASES = [
@@ -26,6 +26,13 @@ const CASES = [
     body: "Export the map as an image, generate documentation from the spec, or send a colleague a link that opens the same view.",
     tools: "Export · Doc generator · Share link",
   },
+  {
+    icon: Network,
+    title: "Holding an estate together",
+    body: "Put every service's contract on one map and find the entity with three shapes, the endpoint that exists twice, and the concept nobody named the same way — before a rename breaks the team next door.",
+    tools: "Contract Graph · Entities · Duplicates · Concepts · Findings",
+    wide: true,
+  },
 ];
 
 const UseCases = () => (
@@ -45,7 +52,7 @@ const UseCases = () => (
       {CASES.map((useCase) => (
         <article
           key={useCase.title}
-          className="lift-card overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel/60 p-6"
+          className={`lift-card overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel/60 p-6${useCase.wide ? " md:col-span-2" : ""}`}
         >
           <div className="flex items-start gap-4">
             <span className="grid h-[38px] w-[38px] flex-shrink-0 place-items-center rounded-[10px] border border-vz-line bg-vz-panel-2 text-vz-accent-2">

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createWorkspace, addService, removeService, listWorkspaces, getWorkspace, loadServices, importWorkspace, exportWorkspace, MAX_SERVICES } from "../contractWorkspace";
+import { createWorkspace, addService, removeService, listWorkspaces, getWorkspace, loadServices, importWorkspace, exportWorkspace, claimAnonymousWorkspaces, MAX_SERVICES } from "../contractWorkspace";
 
 // localStorage for the metadata; the payload store falls back to it too
 // when IndexedDB is absent, which it is under Node.
@@ -14,6 +14,30 @@ globalThis.localStorage = {
 const spec = (title) => ({ openapi: "3.0.0", info: { title }, paths: { "/a": { get: {} } } });
 
 beforeEach(() => memory.clear());
+
+describe("claiming what was mapped before signing in", () => {
+  it("moves the anonymous bucket into the account, specifications and all", async () => {
+    const ws = createWorkspace(null, "Before signing in");
+    await addService(null, ws.id, { name: "Orders", spec: spec("Orders") });
+    createWorkspace("u1", "Already mine");
+
+    const claimed = claimAnonymousWorkspaces("u1");
+    expect(claimed.map((w) => w.name)).toEqual(["Before signing in"]);
+    expect(listWorkspaces("u1").map((w) => w.name).sort()).toEqual(["Already mine", "Before signing in"]);
+    expect(listWorkspaces(null)).toEqual([]);
+    // The payload is keyed by workspace, not by user, so it came along.
+    const loaded = await loadServices(getWorkspace("u1", ws.id));
+    expect(loaded[0].spec.info.title).toBe("Orders");
+  });
+
+  it("does nothing when there is nothing to claim, or nobody to claim it", () => {
+    expect(claimAnonymousWorkspaces("u1")).toEqual([]);
+    createWorkspace(null, "Anonymous");
+    expect(claimAnonymousWorkspaces(null)).toEqual([]);
+    expect(claimAnonymousWorkspaces("")).toEqual([]);
+    expect(listWorkspaces(null).map((w) => w.name)).toEqual(["Anonymous"]);
+  });
+});
 
 describe("workspaces", () => {
   it("keeps every service when adds overlap", async () => {

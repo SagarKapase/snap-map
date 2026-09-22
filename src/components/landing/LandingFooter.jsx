@@ -1,7 +1,5 @@
 import { Link } from "react-router-dom";
-import { Github } from "lucide-react";
 import BrandMark from "../BrandMark";
-import { GITHUB_URL } from "./LandingNav";
 
 // Only destinations that exist are listed.
 const COLUMNS = [
@@ -19,15 +17,11 @@ const COLUMNS = [
       { label: "Use cases", href: "#use-cases" },
     ],
   },
-  {
-    heading: "Project",
-    links: [{ label: "GitHub", href: GITHUB_URL, external: true }],
-  },
 ];
 
 const LandingFooter = () => (
   <footer className="border-t border-vz-line-soft">
-    <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.6fr_repeat(3,1fr)]">
+    <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.6fr_repeat(2,1fr)]">
       <div>
         <Link
           to="/"
@@ -65,7 +59,6 @@ const LandingFooter = () => (
                       : {})}
                     className="vz-t inline-flex items-center gap-1.5 text-[13px] text-vz-soft hover:text-vz-text"
                   >
-                    {link.external && <Github size={13} aria-hidden="true" />}
                     {link.label}
                   </a>
                 )}

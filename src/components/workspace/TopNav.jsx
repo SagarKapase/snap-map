@@ -4,7 +4,7 @@ import {
   Settings,
   Sparkles,
   History as HistoryIcon,
-  Github,
+  Globe,
   BookOpen,
   FolderOpen,
   LayoutGrid,
@@ -60,7 +60,7 @@ const TopNav = ({
   onOpenPalette,
   onOpenCollections,
   onOpenDocs,
-  onOpenGithubImport,
+  onOpenUrlImport,
   onOpenWorkspaceManager,
   onOpenEnvManager,
   onResetView,
@@ -180,8 +180,8 @@ const TopNav = ({
           <NavButton icon={BookOpen} onClick={onOpenDocs}>
             Docs
           </NavButton>
-          <NavButton icon={Github} onClick={onOpenGithubImport}>
-            GitHub
+          <NavButton icon={Globe} onClick={onOpenUrlImport}>
+            Import URL
           </NavButton>
         </nav>
       </div>

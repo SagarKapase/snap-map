@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import LandingPage from "./pages/LandingPage";
 import { AuthProvider } from "./components/auth/AuthContext";
+import AccountGate from "./components/auth/AccountGate";
 import { useAuth } from "./components/auth/useAuth";
 
 // The landing page is the entry route, so it ships in the main chunk.
@@ -49,7 +50,23 @@ function App() {
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
           <Route path="/home" element={<HomePage />} />
-          <Route path="/graph" element={<ContractGraphPage />} />
+          {/* Contract Graph keeps an estate, so it needs somewhere to keep it: an account. */}
+          <Route
+            path="/graph"
+            element={(
+              <AccountGate
+                feature="Contract Graph"
+                reason="Contract Graph maps every API you have against each other and keeps that estate for next time. An account is what it belongs to."
+                points={[
+                  "Workspaces that are yours, kept between visits and browsers",
+                  "Shared entities, duplicate endpoints and dependencies across services",
+                  "Import and export a whole estate, and share a map with your team",
+                ]}
+              >
+                <ContractGraphPage />
+              </AccountGate>
+            )}
+          />
           {/* Off for now (src/features.js); the route answers again with VITE_SOAP_WORKBENCH=on. */}
           <Route path="/soap" element={SOAP_WORKBENCH ? <SoapWorkbenchPage /> : <Navigate to="/home" replace />} />
           <Route path="/login" element={<LoginPage />} />

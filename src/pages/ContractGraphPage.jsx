@@ -23,7 +23,7 @@ import { readSpecOrWsdl } from "../utils/readSpec";
 import { formatLabel } from "../utils/parsers";
 import {
   listWorkspaces, createWorkspace, deleteWorkspace, renameWorkspace, addService, removeService, replaceService,
-  loadServices, exportWorkspace, importWorkspace, MAX_SERVICES,
+  loadServices, exportWorkspace, importWorkspace, claimAnonymousWorkspaces, MAX_SERVICES,
 } from "../utils/contractWorkspace";
 import { SAMPLE_ESTATE } from "../utils/contractSamples";
 import { SOAP_WORKBENCH } from "../features";
@@ -310,6 +310,17 @@ const ContractGraphPage = () => {
 
   const notify = (kind, text) => setNotices((n) => [...n.slice(-4), { id: Date.now() + Math.random(), kind, text }]);
   const dismiss = (id) => setNotices((n) => n.filter((x) => x.id !== id));
+
+  // Contract Graph needs an account, so an estate mapped in this browser
+  // before signing in would have nowhere to live. It moves here instead.
+  useEffect(() => {
+    if (!userId) return;
+    const claimed = claimAnonymousWorkspaces(userId);
+    if (!claimed.length) return;
+    const list = refresh();
+    setActiveId((current) => current || list[0]?.id || null);
+    notify("ok", `Moved ${claimed.length} workspace${claimed.length === 1 ? "" : "s"} you mapped before signing in into your account.`);
+  }, [userId, refresh]);
 
   const ensureWorkspace = useCallback(() => {
     if (active) return active;

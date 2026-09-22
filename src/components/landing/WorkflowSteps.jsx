@@ -2,12 +2,12 @@ const STEPS = [
   {
     id: "01",
     title: "Import",
-    body: "Paste a spec, drop a file, pull a Postman collection, or fetch a remote URL.",
+    body: "Paste a spec, drop a file, hand over a cURL command or HAR, or fetch a URL.",
   },
   {
     id: "02",
     title: "Parse",
-    body: "Vizroute detects the format and reads its paths, tags, schemas and security.",
+    body: "The format is detected here in the browser: paths, tags, schemas, security.",
   },
   {
     id: "03",
@@ -17,7 +17,7 @@ const STEPS = [
   {
     id: "04",
     title: "Inspect",
-    body: "Search an endpoint, read what it expects, and send a request against it.",
+    body: "Read what an endpoint expects, send a request, audit and diff the spec.",
   },
 ];
 
@@ -33,8 +33,9 @@ const WorkflowSteps = () => (
       From specification to map in seconds.
     </h2>
     <p className="mt-4 max-w-[560px] text-[15px] leading-[1.72] text-vz-soft">
-      No account, no upload step, no build pipeline. Everything runs in the
-      browser tab you already have open.
+      The API Map asks for no account and uploads nothing — it runs in the tab
+      you already have open. Contract Graph keeps an estate across visits, so
+      that one signs you in first.
     </p>
 
     <ol className="approach mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-[14px] border border-vz-line bg-vz-line sm:grid-cols-2 lg:grid-cols-4">

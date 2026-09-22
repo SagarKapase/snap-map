@@ -1159,3 +1159,18 @@
     display: none;
   }
 }
+
+/* A product that needs an account carries a small lock while signed out. */
+.hm-nav-lock {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.hm-nav-item.is-active .hm-nav-lock {
+  color: var(--primary-hover);
+}
+
+.hm.is-rail .hm-nav-lock {
+  display: none;
+}

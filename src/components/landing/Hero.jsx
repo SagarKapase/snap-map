@@ -1,28 +1,28 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Play, Layers, Waypoints, Zap, Search } from "lucide-react";
+import { ArrowRight, Play, Layers, Waypoints, Zap, ShieldCheck } from "lucide-react";
 import WorkspacePreview from "./WorkspacePreview";
 
 // Each of these maps to something the app actually does.
 const MINI_FEATURES = [
   {
     icon: Layers,
-    title: "Multiple Formats",
-    body: "OpenAPI, Swagger, Postman, JSON, YAML.",
+    title: "Seven ways in",
+    body: "OpenAPI, Swagger, Postman, cURL, HAR, JSON/YAML, a URL.",
   },
   {
     icon: Waypoints,
-    title: "Interactive Graph",
-    body: "Five graph layouts to explore.",
+    title: "Five map layouts",
+    body: "Tree, flowchart, radial, mindmap, force.",
   },
   {
     icon: Zap,
-    title: "Built-in Playground",
-    body: "Send real requests in place.",
+    title: "Twenty-one tools",
+    body: "Playground, audit, diff, mock, docs, export.",
   },
   {
-    icon: Search,
-    title: "Smart Search",
-    body: "Jump to any endpoint with Ctrl K.",
+    icon: ShieldCheck,
+    title: "No account to start",
+    body: "Your spec is parsed and kept in this browser.",
   },
 ];
 
@@ -42,10 +42,10 @@ const Hero = () => (
       </h1>
 
       <p className="mt-6 max-w-[560px] text-[16px] leading-[1.72] text-vz-soft">
-        Paste, upload, or fetch an OpenAPI, Swagger, Postman, JSON or YAML
-        specification. Explore endpoints, relationships and dependencies
-        visually — without digging through hundreds of lines of API
-        documentation.
+        Paste, drop or fetch an OpenAPI, Swagger or Postman file — or a cURL
+        command, a HAR recording, plain JSON. Read the shape of the API on a
+        map, then send a real request, audit it, diff it against the last
+        version, and hand it on as docs, an image or a link.
       </p>
 
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">

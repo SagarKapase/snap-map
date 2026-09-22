@@ -3,6 +3,7 @@ import LandingNav from "../components/landing/LandingNav";
 import Hero from "../components/landing/Hero";
 import FormatStrip from "../components/landing/FormatStrip";
 import FeatureShowcase from "../components/landing/FeatureShowcase";
+import Products from "../components/landing/Products";
 import WorkflowSteps from "../components/landing/WorkflowSteps";
 import UseCases from "../components/landing/UseCases";
 import FinalCta from "../components/landing/FinalCta";
@@ -30,6 +31,7 @@ const LandingPage = () => {
         <Hero />
         <FormatStrip />
         <FeatureShowcase />
+        <Products />
         <WorkflowSteps />
         <UseCases />
         <FinalCta />

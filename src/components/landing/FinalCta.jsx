@@ -18,8 +18,9 @@ const FinalCta = () => (
           See your API differently.
         </h2>
         <p className="mx-auto mt-5 max-w-[520px] text-[15px] leading-[1.7] text-vz-soft">
-          Drop in a specification and get an interactive map of it. Nothing
-          leaves your browser.
+          Drop in a specification and get an interactive map of it. It is
+          parsed and kept in this browser — the only calls that leave are the
+          requests you choose to send.
         </p>
 
         <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
