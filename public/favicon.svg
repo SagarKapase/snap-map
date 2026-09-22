@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Vizroute">
+  <!--
+    The Vizroute mark, as the browser tab wears it: the same three rotated
+    bars and the same gradient as src/components/BrandMark.jsx, on the
+    product's own dark tile so the shape reads at 16px against a light or a
+    dark tab strip.
+
+    The transform fits the mark's *rotated* bounds (29.2 × 36.3 units,
+    centred at 16, 14.5) inside the tile with a 7-unit margin — the bars
+    reach past the 30 × 30 box they are drawn in, so scaling by the box
+    clips them.
+
+    This file is the source for every raster icon beside it; docs/brand.md
+    says how to re-export them.
+  -->
+  <defs>
+    <linearGradient id="vz-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#d477ff" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0b0f18" />
+  <g transform="translate(9.96 12.02) scale(1.378)">
+    <rect x="1" y="3" width="24" height="7" rx="3.5" fill="url(#vz-mark)" transform="rotate(38 13 6.5)" />
+    <rect x="4" y="11" width="24" height="7" rx="3.5" fill="url(#vz-mark)" opacity="0.8" transform="rotate(38 16 14.5)" />
+    <rect x="7" y="19" width="24" height="7" rx="3.5" fill="url(#vz-mark)" opacity="0.6" transform="rotate(38 19 22.5)" />
+  </g>
+</svg>
