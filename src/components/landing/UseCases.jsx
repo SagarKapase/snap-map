@@ -1,4 +1,5 @@
 import { Compass, GitCompareArrows, TerminalSquare, BookOpen, Network } from "lucide-react";
+import { useReveal } from "../../utils/motion";
 
 // Each case names the feature in the app that serves it.
 const CASES = [
@@ -35,11 +36,15 @@ const CASES = [
   },
 ];
 
-const UseCases = () => (
+const UseCases = () => {
+  const [ref] = useReveal();
+  const [cardsRef] = useReveal({ threshold: 0.12 });
+  return (
   <section
     id="use-cases"
     aria-labelledby="use-cases-heading"
-    className="approach-scene mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-20"
+    ref={ref}
+    className="reveal mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-20"
   >
     <h2
       id="use-cases-heading"
@@ -48,7 +53,7 @@ const UseCases = () => (
       Built for the moments you meet an API.
     </h2>
 
-    <div className="approach lift-scene mt-12 grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div ref={cardsRef} className="reveal-stagger lift-scene mt-12 grid grid-cols-1 gap-4 md:grid-cols-2">
       {CASES.map((useCase) => (
         <article
           key={useCase.title}
@@ -74,6 +79,7 @@ const UseCases = () => (
       ))}
     </div>
   </section>
-);
+  );
+};
 
 export default UseCases;

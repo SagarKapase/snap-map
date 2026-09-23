@@ -25,6 +25,17 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { parsePost, sortPosts } from "../src/utils/blogPost.js";
 import { renderHtml } from "../src/utils/markdown.js";
+import {
+  HOME_TITLE,
+  HOME_DESCRIPTION,
+  HOME_HEADLINE,
+  HOME_LEDE,
+  HOME_SECTIONS,
+  HOME_FORMATS,
+  appJsonLd,
+  faqJsonLd,
+} from "../src/content/home.js";
+import { FAQS } from "../src/content/faqs.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -163,6 +174,29 @@ write(
   }),
 );
 
+// ─── The landing page ──
+// The shell already carries the right tags; what it has no way to carry is
+// the copy. This writes the same words the components render, so a crawler
+// that never runs the bundle still reads the pitch, the formats and the
+// questions — and gets the product and FAQ data with them.
+write(
+  "",
+  page({
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    path: "/",
+    body: [
+      `<h1>${escape(HOME_HEADLINE)}</h1>`,
+      `<p>${escape(HOME_LEDE)}</p>`,
+      `<p>Reads ${HOME_FORMATS.map(escape).join(", ")}.</p>`,
+      ...HOME_SECTIONS.flatMap((section) => [`<h2>${escape(section.heading)}</h2>`, `<p>${escape(section.body)}</p>`]),
+      "<h2>Questions worth asking first.</h2>",
+      ...FAQS.flatMap((faq) => [`<h3>${escape(faq.q)}</h3>`, `<p>${escape(faq.a)}</p>`]),
+    ].join("\n"),
+    jsonLd: [appJsonLd(site), faqJsonLd(FAQS)],
+  }),
+);
+
 // ─── sitemap.xml and robots.txt ──
 const today = new Date().toISOString().slice(0, 10);
 const urls = [
@@ -207,7 +241,7 @@ Sitemap: ${site}/sitemap.xml
 `,
 );
 
-console.log(`SEO: ${posts.length} post page${posts.length === 1 ? "" : "s"}, the blog index, sitemap.xml and robots.txt written to ${dist} for ${site}`);
+console.log(`SEO: ${posts.length} post page${posts.length === 1 ? "" : "s"}, the blog index, the landing page, sitemap.xml and robots.txt written to ${dist} for ${site}`);
 if (!process.env.VITE_SITE_URL && !args.includes("--site")) {
   console.log("     (VITE_SITE_URL is unset, so canonical links use the default. Set it to the real domain before deploying.)");
 }

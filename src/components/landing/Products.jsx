@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Waypoints, Network, ArrowRight, Check, Lock } from "lucide-react";
+import { useReveal } from "../../utils/motion";
 
 /**
  * The two products, and the honest difference between them: the API Map
@@ -45,11 +46,15 @@ const PRODUCTS = [
   },
 ];
 
-const Products = () => (
+const Products = () => {
+  const [ref] = useReveal();
+  const [cardsRef] = useReveal({ threshold: 0.12 });
+  return (
   <section
+    ref={ref}
     id="products"
     aria-labelledby="products-heading"
-    className="approach-scene mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-20"
+    className="reveal mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-20"
   >
     <h2
       id="products-heading"
@@ -62,7 +67,7 @@ const Products = () => (
       how twelve services fit together, the same parser draws that too.
     </p>
 
-    <div className="approach lift-scene mt-12 grid grid-cols-1 gap-4 lg:grid-cols-2">
+    <div ref={cardsRef} className="reveal-stagger lift-scene mt-12 grid grid-cols-1 gap-4 lg:grid-cols-2">
       {PRODUCTS.map((product) => (
         <article
           key={product.id}
@@ -127,6 +132,7 @@ const Products = () => (
       ))}
     </div>
   </section>
-);
+  );
+};
 
 export default Products;

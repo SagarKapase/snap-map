@@ -39,23 +39,25 @@ const LandingFooter = () => (
           Vizroute
         </Link>
         <p className="mt-4 max-w-[320px] text-[13px] leading-[1.65] text-vz-dim">
-          Turn OpenAPI, Swagger, Postman, JSON and YAML specifications into
-          interactive API maps.
+          Turn OpenAPI, Swagger, Postman, cURL, HAR, JSON and YAML
+          specifications into interactive API maps.
         </p>
       </div>
 
       {COLUMNS.map((column) => (
         <nav key={column.heading} aria-label={column.heading}>
-          <h2 className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-vz-dim">
+          {/* A paragraph, not a heading: the nav already carries the label,
+              and the page outline belongs to the sections above. */}
+          <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-vz-dim">
             {column.heading}
-          </h2>
+          </p>
           <ul className="space-y-2.5">
             {column.links.map((link) => (
               <li key={link.label}>
                 {link.to ? (
                   <Link
                     to={link.to}
-                    className="vz-t text-[13px] text-vz-soft hover:text-vz-text"
+                    className="vz-t inline-flex min-h-[26px] items-center text-[13px] text-vz-soft hover:text-vz-text"
                   >
                     {link.label}
                   </Link>
@@ -65,7 +67,7 @@ const LandingFooter = () => (
                     {...(link.external
                       ? { target: "_blank", rel: "noreferrer noopener" }
                       : {})}
-                    className="vz-t inline-flex items-center gap-1.5 text-[13px] text-vz-soft hover:text-vz-text"
+                    className="vz-t inline-flex min-h-[26px] items-center gap-1.5 text-[13px] text-vz-soft hover:text-vz-text"
                   >
                     {link.label}
                   </a>

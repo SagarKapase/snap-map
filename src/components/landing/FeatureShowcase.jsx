@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { PreviewNode } from "./WorkspacePreview";
+import { useReveal, useSpotlight } from "../../utils/motion";
 
 const SPEC_SAMPLE = `openapi: 3.1.0
 info:
@@ -107,13 +108,41 @@ const GLANCE_NODES = [
   { label: "Invoices", count: 14, icon: FileText, x: 50, y: 86 },
 ];
 
-const FeatureShowcase = () => (
+/** One group of tools, with a light that follows the pointer across it. */
+const ToolGroup = ({ group }) => {
+  const spotlight = useSpotlight();
+  return (
+    <article
+      {...spotlight}
+      className={`lift-card flex h-full flex-col overflow-hidden rounded-[14px] border border-vz-line bg-gradient-to-b from-vz-panel to-[#0a0f18] p-6 ${spotlight.className || ""}`}
+    >
+      <span className="mb-5 grid h-[42px] w-[42px] place-items-center rounded-[11px] border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2">
+        <group.icon size={18} aria-hidden="true" />
+      </span>
+      <h3 className="mb-2 text-[16px] font-semibold text-vz-text">{group.title}</h3>
+      <p className="mb-5 text-[13px] leading-[1.6] text-vz-soft">{group.body}</p>
+      <ul className="space-y-2.5 border-t border-vz-line-soft pt-4">
+        {group.tools.map(([name, detail]) => (
+          <li key={name} className="min-w-0">
+            <span className="block text-[12.5px] font-semibold text-vz-text">{name}</span>
+            <span className="block text-[11.5px] leading-[1.5] text-vz-dim">{detail}</span>
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+};
+
+const FeatureShowcase = () => {
+  const [introRef] = useReveal();
+  const [toolsRef] = useReveal();
+  return (
   <section
     id="features"
     className="approach-scene mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-24"
   >
     {/* ── Spec → map ─────────────────────────────── */}
-    <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
+    <div ref={introRef} className="reveal grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
       {/* min-w-0 on both columns keeps the code panel from widening the page */}
       <div className="min-w-0">
         <h2 className="max-w-[520px] text-[clamp(1.9rem,2.6vw,2.6rem)] font-extrabold leading-[1.1] tracking-[-0.028em] text-vz-text">
@@ -140,7 +169,7 @@ const FeatureShowcase = () => (
         </ul>
       </div>
 
-      <div className="approach grid min-w-0 grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
+      <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
         <div className="relative min-w-0 overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel">
           <div className="flex items-center gap-2 border-b border-vz-line-soft px-3 py-2">
             <span className="text-[10px] uppercase tracking-wider text-vz-dim">
@@ -219,34 +248,9 @@ const FeatureShowcase = () => (
         just opened. Ctrl K opens any of them by name.
       </p>
 
-      <div className="approach lift-scene mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div ref={toolsRef} className="reveal-stagger lift-scene mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {GROUPS.map((group) => (
-          <article
-            key={group.title}
-            className="lift-card flex h-full flex-col overflow-hidden rounded-[14px] border border-vz-line bg-gradient-to-b from-vz-panel to-[#0a0f18] p-6"
-          >
-            <span className="mb-5 grid h-[42px] w-[42px] place-items-center rounded-[11px] border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2">
-              <group.icon size={18} aria-hidden="true" />
-            </span>
-            <h3 className="mb-2 text-[16px] font-semibold text-vz-text">
-              {group.title}
-            </h3>
-            <p className="mb-5 text-[13px] leading-[1.6] text-vz-soft">
-              {group.body}
-            </p>
-            <ul className="space-y-2.5 border-t border-vz-line-soft pt-4">
-              {group.tools.map(([name, detail]) => (
-                <li key={name} className="min-w-0">
-                  <span className="block text-[12.5px] font-semibold text-vz-text">
-                    {name}
-                  </span>
-                  <span className="block text-[11.5px] leading-[1.5] text-vz-dim">
-                    {detail}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </article>
+          <ToolGroup key={group.title} group={group} />
         ))}
       </div>
 
@@ -259,6 +263,7 @@ const FeatureShowcase = () => (
       </p>
     </div>
   </section>
-);
+  );
+};
 
 export default FeatureShowcase;

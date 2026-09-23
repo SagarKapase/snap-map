@@ -23,7 +23,7 @@ export const absoluteUrl = (path = "/") => {
 };
 
 /** Titles read "Page — Vizroute", except the home page which is the brand. */
-export const pageTitle = (title) => (title ? `${title} — ${SITE_NAME}` : `${SITE_NAME} — Turn APIs Into Interactive Maps`);
+export const pageTitle = (title) => (title ? `${title} — ${SITE_NAME}` : `${SITE_NAME} — Turn any API spec into an interactive map`);
 
 /** schema.org for one post, so a result can show the date and author. */
 export const articleJsonLd = (post) => ({

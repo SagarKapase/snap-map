@@ -1,8 +1,11 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Play } from "lucide-react";
+import { useReveal } from "../../utils/motion";
 
-const FinalCta = () => (
-  <section className="mx-auto max-w-[1500px] px-5 pb-20 pt-8 sm:px-8">
+const FinalCta = () => {
+  const [ref] = useReveal();
+  return (
+  <section ref={ref} className="reveal mx-auto max-w-[1500px] px-5 pb-20 pt-8 sm:px-8">
     <div className="relative overflow-hidden rounded-[18px] border border-vz-accent/22 bg-gradient-to-b from-[#10131f] to-[#0a0e16] px-6 py-16 text-center sm:px-12">
       <span
         aria-hidden="true"
@@ -26,10 +29,10 @@ const FinalCta = () => (
         <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link
             to="/workspace"
-            className="vz-t inline-flex h-[49px] items-center justify-center gap-3 rounded-[10px] bg-gradient-to-r from-[#a855f7] to-[#cb68ff] px-6 text-[14px] font-bold text-[#150a1b] shadow-[0_10px_30px_rgba(168,85,247,0.14)] hover:-translate-y-0.5 hover:shadow-[0_14px_38px_rgba(168,85,247,0.2)]"
+            className="lp-cta lp-cta-primary vz-t inline-flex h-[49px] items-center justify-center gap-3 rounded-[10px] bg-gradient-to-r from-[#a855f7] to-[#cb68ff] px-6 text-[14px] font-bold text-[#150a1b]"
           >
             Start Mapping
-            <ArrowRight size={16} aria-hidden="true" />
+            <ArrowRight size={16} className="lp-cta-arrow" aria-hidden="true" />
           </Link>
 
           <Link
@@ -43,6 +46,7 @@ const FinalCta = () => (
       </div>
     </div>
   </section>
-);
+  );
+};
 
 export default FinalCta;
