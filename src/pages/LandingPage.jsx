@@ -26,10 +26,16 @@ const LandingPage = () => {
   // resolves the fragment before React has rendered the section.
   useEffect(() => {
     const { hash } = window.location;
-    if (!hash) return;
-    const target = document.querySelector(hash);
-    // Instant for a deep link; in-page clicks still glide via CSS.
-    if (target) target.scrollIntoView({ block: "start", behavior: "instant" });
+    // A sign-in redirect also comes back with a fragment, and "#access_token=…"
+    // is not a selector — reading it as one would throw.
+    if (!hash || hash.includes("=")) return;
+    try {
+      const target = document.querySelector(hash);
+      // Instant for a deep link; in-page clicks still glide via CSS.
+      if (target) target.scrollIntoView({ block: "start", behavior: "instant" });
+    } catch {
+      /* a fragment that is not a selector is not ours to scroll to */
+    }
   }, []);
 
   return (

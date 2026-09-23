@@ -623,6 +623,96 @@
   transform: rotate(45deg);
 }
 
+/* ── Google and GitHub ──
+   Above the email form, because it is the shorter way in. Neutral panels
+   rather than brand colours: two saturated buttons would compete with the
+   one purple button that submits the form. */
+
+.auth-oauth {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.auth-oauth-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--auth-input);
+  border-radius: 11px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s var(--auth-ease),
+    background-color 0.18s ease;
+}
+
+.auth-oauth-btn:hover:not(:disabled) {
+  border-color: #b9c0d0;
+  background: #fbfbfe;
+  box-shadow: 0 6px 16px rgba(17, 24, 39, 0.07);
+  transform: translateY(-1px);
+}
+
+.auth-oauth-btn:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.auth-oauth-btn:focus-visible {
+  outline: 2px solid var(--auth-accent);
+  outline-offset: 2px;
+}
+
+.auth-oauth-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* GitHub's mark is monochrome, so it takes the button's own ink. */
+.auth-oauth-btn.is-github svg {
+  color: #18181b;
+}
+
+.auth-oauth-spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(17, 24, 39, 0.2);
+  border-top-color: #111827;
+  animation: authSpin 0.8s linear infinite;
+}
+
+/* A rule with a word in it, so the two ways in are clearly alternatives. */
+.auth-or {
+  position: relative;
+  margin: 18px 0 20px;
+  text-align: center;
+}
+
+.auth-or::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--auth-border);
+}
+
+.auth-or span {
+  position: relative;
+  padding: 0 12px;
+  background: var(--auth-card);
+  font-size: 12px;
+  color: var(--auth-dim);
+}
+
 .auth-submit {
   position: relative;
   overflow: hidden;

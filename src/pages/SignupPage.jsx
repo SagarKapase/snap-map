@@ -3,12 +3,10 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { MailCheck, Mail, UserRound, ArrowRight } from "lucide-react";
 import { useAuth } from "../components/auth/useAuth";
 import { AuthShell, Field, FormError, Input, LocalNotice, PasswordInput, SubmitButton } from "../components/auth/AuthShell";
-import { validateSignUp } from "../utils/auth";
+import OAuthButtons from "../components/auth/OAuthButtons";
+import { validateSignUp, safeNext } from "../utils/auth";
 
-const nextFrom = (search) => {
-  const next = new URLSearchParams(search).get("next") || "";
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/home";
-};
+const nextFrom = (search) => safeNext(new URLSearchParams(search).get("next"));
 
 /** Which of the sign-up rules the typed password already meets. */
 const passwordChecks = (password) => [
@@ -95,6 +93,8 @@ const SignupPage = () => {
           <h2 className="auth-h2">Create your account</h2>
           <p className="auth-sub">Your workspaces, kept for next time</p>
           {isLocal && <LocalNotice />}
+          {/* An account made this way needs no password, so it comes first. */}
+          <OAuthButtons next={nextFrom(location.search)} />
           <form onSubmit={submit} noValidate className="space-y-4">
             <FormError message={formError} />
             <Field id="signup-name" label="Name" error={errors.name}>

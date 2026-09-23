@@ -5,6 +5,8 @@
  *
  *  – Supabase, when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set.
  *    Talks to the GoTrue REST API directly, so there is no SDK to ship.
+ *    Google and GitHub sign-in go through the same service, as a redirect
+ *    out to the provider and back to the site root.
  *  – Local, otherwise: accounts live in this browser only, with the
  *    password hashed by PBKDF2 through WebCrypto. It exists so the product
  *    works end to end without a backend — and says so on the page, because
@@ -102,6 +104,16 @@ export const validateSignIn = ({ email = "", password = "" } = {}, strict = fals
   return errors;
 };
 
+/**
+ * Where to go after signing in. Only a path on this site: a full URL here
+ * would turn the `next` parameter into an open redirect, and it arrives
+ * from the address bar.
+ */
+export const safeNext = (path, fallback = "/home") => {
+  const value = String(path || "");
+  return value.startsWith("/") && !value.startsWith("//") ? value : fallback;
+};
+
 export class AuthError extends Error {
   constructor(message, field = null) {
     super(message);
@@ -177,6 +189,12 @@ const localProvider = {
     const session = { userId: account.id, email: key, name: account.name, provider: "local", createdAt: new Date().toISOString() };
     setSession(session, { remember });
     return session;
+  },
+  // Accounts here live in this browser, so there is nobody to redirect to.
+  // The buttons are not shown rather than shown and broken.
+  oauth: [],
+  async signInWithOAuth() {
+    throw new AuthError("Google and GitHub sign-in need a connected sign-in service. This deployment keeps accounts in your browser.");
   },
   async signOut() {
     setSession(null);
@@ -261,6 +279,56 @@ const supabaseProvider = (url, anonKey) => {
       setSession(session, { remember });
       return session;
     },
+    oauth: OAUTH_PROVIDERS.map((entry) => entry.id),
+    /**
+     * Leave for the provider. Where the person was going is kept for this
+     * tab, because the return address is the site root for everyone.
+     */
+    async signInWithOAuth({ provider, next = "/home", remember = true } = {}) {
+      if (!OAUTH_PROVIDERS.some((entry) => entry.id === provider)) {
+        throw new AuthError("That sign-in option is not available.");
+      }
+      if (typeof window === "undefined") throw new AuthError("Sign-in needs a browser.");
+      const url = buildAuthorizeUrl(base, provider, oauthRedirectUrl(window.location.origin));
+      // Ask first. A provider that is not switched on answers this with a
+      // 400 and a JSON body; without the check the person would be sent to
+      // that page and read it. A redirect comes back opaque, which is the
+      // answer we want, and following it is the browser's job, not ours.
+      try {
+        const check = await fetch(url, { redirect: "manual" });
+        if (check.status >= 400) {
+          const body = await check.json().catch(() => null);
+          throw new AuthError(oauthErrorMessage(body?.msg || body?.error_description || body?.error));
+        }
+      } catch (e) {
+        // A refusal is worth reporting; a network hiccup is not worth
+        // blocking a sign-in that might still work.
+        if (e instanceof AuthError) throw e;
+      }
+      writeJson(OAUTH_RETURN_KEY, { next: safeNext(next), remember }, tabStorage());
+      window.location.assign(url);
+      return { redirecting: true };
+    },
+    /** Turn the tokens from the return leg into a session. */
+    async completeOAuth({ accessToken, refreshToken, expiresAt }) {
+      const res = await fetch(`${base}/user`, {
+        headers: { apikey: anonKey, Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) throw new AuthError("The sign-in service would not confirm the account. Try again.");
+      const user = await res.json();
+      const meta = user?.user_metadata || {};
+      return {
+        userId: user?.id,
+        email: user?.email,
+        name: meta.full_name || meta.name || meta.user_name || user?.email || "",
+        provider: "supabase",
+        identity: user?.app_metadata?.provider || "oauth",
+        accessToken,
+        refreshToken,
+        expiresAt,
+        createdAt: new Date().toISOString(),
+      };
+    },
     async signOut() {
       const current = getSession();
       try {
@@ -271,6 +339,131 @@ const supabaseProvider = (url, anonKey) => {
       setSession(null);
     },
   };
+};
+
+// ─── Google and GitHub ───────────────────────
+//
+// The browser leaves the site, comes back to the root with tokens in the
+// URL fragment, and the session is built from them. The root is the return
+// address on purpose: it is the one path every static host serves without a
+// rewrite rule, and it is the sign-in service's own default, so nothing has
+// to be added to a redirect allow-list for this to work.
+
+/** The identity providers the account pages offer, in the order shown. */
+export const OAUTH_PROVIDERS = [
+  { id: "google", label: "Google" },
+  { id: "github", label: "GitHub" },
+];
+
+const OAUTH_RETURN_KEY = "vizroute_oauth_return";
+const OAUTH_ERROR_KEY = "vizroute_oauth_error";
+
+// A failed round trip is reported on the sign-in page, which is a fresh page
+// load away, so the message travels in this tab's storage rather than in
+// memory. It is read once and then gone — kept here as well so that reading
+// it twice in one page load (which React does in development) gives the same
+// answer both times instead of an empty second one.
+let consumedOAuthError = null;
+
+export const stashOAuthError = (message) => writeJson(OAUTH_ERROR_KEY, String(message || ""), tabStorage());
+
+export const takeOAuthError = () => {
+  if (consumedOAuthError !== null) return consumedOAuthError;
+  consumedOAuthError = readJson(OAUTH_ERROR_KEY, "", tabStorage()) || "";
+  writeJson(OAUTH_ERROR_KEY, null, tabStorage());
+  return consumedOAuthError;
+};
+
+/** For tests: forget that the message was already read. */
+export const _resetOAuthErrorForTests = () => {
+  consumedOAuthError = null;
+};
+
+/** The address the provider sends the browser back to. */
+export const oauthRedirectUrl = (origin) => `${String(origin || "").replace(/\/+$/, "")}/`;
+
+/** The URL that starts the round trip. Pure, so its shape can be tested. */
+export const buildAuthorizeUrl = (base, provider, redirectTo) =>
+  `${base}/authorize?${new URLSearchParams({ provider, redirect_to: redirectTo })}`;
+
+/** A provider's own wording is not for reading; these are. */
+const oauthErrorMessage = (raw) => {
+  const text = String(raw || "").replace(/\+/g, " ");
+  if (/unsupported provider|provider is not enabled|not enabled/i.test(text)) {
+    return "That sign-in option is not switched on for this site yet.";
+  }
+  if (/access.?denied|denied|cancel/i.test(text)) return "Sign-in was cancelled.";
+  if (/server_error|temporarily/i.test(text)) return "The sign-in service did not answer. Try again in a moment.";
+  return text || "Sign-in did not complete. Try again.";
+};
+
+/**
+ * What the sign-in service left in the address when it sent the browser
+ * back: tokens in the fragment when it worked, an error in either the
+ * fragment or the query when it did not, and nothing at all on an ordinary
+ * visit.
+ */
+export const readOAuthRedirect = ({ hash = "", search = "" } = {}) => {
+  const fragment = new URLSearchParams(String(hash).replace(/^#/, ""));
+  const query = new URLSearchParams(String(search).replace(/^\?/, ""));
+  const either = (key) => fragment.get(key) || query.get(key) || "";
+  const failure = either("error_description") || either("error");
+  if (failure) return { error: oauthErrorMessage(failure) };
+  const accessToken = fragment.get("access_token");
+  if (!accessToken) return null;
+  const expiresIn = Number(fragment.get("expires_in"));
+  return {
+    accessToken,
+    refreshToken: fragment.get("refresh_token") || null,
+    expiresAt: Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : null,
+  };
+};
+
+/** True when this page load is the return leg, so the app can wait rather than flash. */
+export const hasOAuthRedirect = (location = typeof window !== "undefined" ? window.location : null) =>
+  Boolean(location && readOAuthRedirect({ hash: location.hash, search: location.search }));
+
+/** Take the tokens out of the address bar without adding a history entry. */
+const scrubUrl = () => {
+  try {
+    if (typeof window === "undefined" || !window.history?.replaceState) return;
+    const { pathname, search } = window.location;
+    const clean = search
+      ? `${pathname}?${new URLSearchParams(
+          [...new URLSearchParams(search)].filter(([key]) => !["error", "error_code", "error_description"].includes(key)),
+        )}`.replace(/\?$/, "")
+      : pathname;
+    window.history.replaceState(null, "", clean);
+  } catch {
+    /* an address that cannot be rewritten is cosmetic, not fatal */
+  }
+};
+
+/**
+ * Finish a round trip that has just come back. Returns `null` on an ordinary
+ * page load, `{ error }` when the provider refused, and `{ session, next }`
+ * when there is now a session.
+ */
+export const completeOAuthRedirect = async (location = typeof window !== "undefined" ? window.location : null) => {
+  if (!location) return null;
+  const found = readOAuthRedirect({ hash: location.hash, search: location.search });
+  if (!found) return null;
+
+  const { next = "/home", remember = true } = readJson(OAUTH_RETURN_KEY, {}, tabStorage()) || {};
+  writeJson(OAUTH_RETURN_KEY, null, tabStorage());
+  scrubUrl();
+
+  if (found.error) return { error: found.error };
+
+  const active = getAuthProvider();
+  if (!active.completeOAuth) return { error: "This deployment has no sign-in service connected." };
+  try {
+    const session = await active.completeOAuth(found);
+    setSession(session, { remember });
+    return { session, next: safeNext(next) };
+  } catch (e) {
+    return { error: e?.message || "Could not finish signing in. Try again." };
+  }
 };
 
 // ─── Provider selection ──────────────────────
@@ -292,6 +485,11 @@ export const _setAuthProviderForTests = (next) => {
   memorySession = null;
 };
 
+/** The providers this deployment can actually offer; empty for local accounts. */
+export const oauthProviders = () =>
+  OAUTH_PROVIDERS.filter((entry) => (getAuthProvider().oauth || []).includes(entry.id));
+
+export const signInWithOAuth = (options) => getAuthProvider().signInWithOAuth(options);
 export const signUp = (fields) => getAuthProvider().signUp(fields);
 export const signIn = (fields) => getAuthProvider().signIn(fields);
 export const signOut = () => getAuthProvider().signOut();

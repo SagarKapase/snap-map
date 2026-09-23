@@ -3,17 +3,14 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Mail } from "lucide-react";
 import { useAuth } from "../components/auth/useAuth";
 import { AuthShell, Field, FormError, Input, LocalNotice, PasswordInput, SubmitButton } from "../components/auth/AuthShell";
-import { validateSignIn } from "../utils/auth";
+import OAuthButtons from "../components/auth/OAuthButtons";
+import { validateSignIn, safeNext } from "../utils/auth";
 
-/** Where to go after signing in: the `next` query parameter, else the graph. */
-const nextFrom = (search) => {
-  const next = new URLSearchParams(search).get("next") || "";
-  // Only same-site paths; a full URL here would be an open redirect.
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/home";
-};
+/** Where to go after signing in: the `next` query parameter, else the app. */
+const nextFrom = (search) => safeNext(new URLSearchParams(search).get("next"));
 
 const LoginPage = () => {
-  const { user, signIn, isLocal } = useAuth();
+  const { user, signIn, isLocal, oauthError, clearOauthError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({ email: "", password: "" });
@@ -29,6 +26,7 @@ const LoginPage = () => {
     setForm((f) => ({ ...f, [key]: e.target.value }));
     setErrors((prev) => ({ ...prev, [key]: undefined }));
     setFormError("");
+    clearOauthError();
   };
 
   const submit = async (e) => {
@@ -73,6 +71,9 @@ const LoginPage = () => {
       <h2 className="auth-h2">Welcome back</h2>
       <p className="auth-sub">Sign in to continue to your API estate</p>
       {isLocal && <LocalNotice />}
+      {/* A failed round trip comes back here, so its message shows above the form. */}
+      <FormError message={oauthError} />
+      <OAuthButtons next={nextFrom(location.search)} remember={remember} />
       <form onSubmit={submit} noValidate className="space-y-4">
         <FormError message={formError} />
         <Field id="login-email" label="Email" error={errors.email}>
