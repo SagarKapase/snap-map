@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "vite build && node scripts/seo.mjs",
     "lint": "eslint .",
-    "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bridge": "node server/bridge-host.mjs",
-    "seo": "node scripts/seo.mjs"
+    "verify": "npm run lint && npm run test && npm run build",
+    "preview": "vite preview",
+    "seo": "node scripts/seo.mjs",
+    "bridge": "node server/bridge-host.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
