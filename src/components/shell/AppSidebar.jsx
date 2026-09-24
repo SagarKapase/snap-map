@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Network, Plus, LogOut, LogIn, X } from "lucide-react";
+import { Network, Plus, LogOut, LogIn, X, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { PRODUCTS, productFor } from "./products";
 import { useAuth } from "../auth/useAuth";
@@ -21,7 +21,7 @@ const MAX_LISTED = 5;
  * `drawer` is the phone variant, rendered inside an overlay with a close
  * button; `onNavigate` lets the overlay close itself after a click.
  */
-const AppSidebar = ({ workspaces = [], drawer = false, onNavigate, onClose }) => {
+const AppSidebar = ({ workspaces = [], drawer = false, collapsed = false, onToggleCollapse, onNavigate, onClose }) => {
   const { pathname } = useLocation();
   const { user, signOut, isLocal } = useAuth();
   const current = productFor(pathname);
@@ -34,10 +34,24 @@ const AppSidebar = ({ workspaces = [], drawer = false, onNavigate, onClose }) =>
           <X size={16} />
         </button>
       )}
-      <Link to="/home" className="hm-brand" onClick={onNavigate}>
-        <BrandMark size={24} />
-        <span>Vizroute</span>
-      </Link>
+      <div className="hm-brand-row">
+        <Link to="/home" className="hm-brand" onClick={onNavigate}>
+          <BrandMark size={24} />
+          <span>Vizroute</span>
+        </Link>
+        {!drawer && onToggleCollapse && (
+          <button
+            type="button"
+            className="hm-icon-btn hm-collapse"
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-pressed={collapsed}
+            title={collapsed ? "Expand navigation" : "Collapse navigation"}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        )}
+      </div>
 
       <nav className="hm-nav-group">
         <div className="hm-nav-label">PRODUCTS</div>

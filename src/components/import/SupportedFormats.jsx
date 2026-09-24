@@ -1,4 +1,4 @@
-import { Braces, Send, Terminal, Globe, Code2 } from "lucide-react";
+import { Braces, Send, Terminal, Globe, Code2, ArrowRight } from "lucide-react";
 
 /**
  * What the import parser accepts — each line matches the code, not the
@@ -15,7 +15,8 @@ const FORMATS = [
   { icon: Code2, accent: "#38bdf8", title: "Plain JSON / YAML", text: "A simple list of endpoints, flat or grouped" },
 ];
 
-const SupportedFormats = () => (
+/** `onViewSamples` scrolls to the sample cards further down the page. */
+const SupportedFormats = ({ onViewSamples }) => (
   <section className="imp-panel" aria-labelledby="imp-formats">
     <h3 id="imp-formats">Supported formats</h3>
     <ul className="imp-formats">
@@ -30,6 +31,15 @@ const SupportedFormats = () => (
       ))}
     </ul>
     <p className="imp-fmt-note">Parsed in this browser — nothing is uploaded. WSDL, GraphQL and gRPC are not read yet.</p>
+    {onViewSamples && (
+      <div className="imp-example-block">
+        <h3>Need an example?</h3>
+        <p>Try one of the sample specifications to see Vizroute in action.</p>
+        <button type="button" className="imp-btn" onClick={onViewSamples}>
+          View sample specs <ArrowRight size={13} />
+        </button>
+      </div>
+    )}
   </section>
 );
 
