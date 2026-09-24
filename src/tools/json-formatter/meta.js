@@ -55,6 +55,6 @@ export default {
     label: "Open it as a map",
     when: "The pasted document is an OpenAPI, Swagger or Postman file.",
   },
-  related: ["json-diff", "json-path", "openapi-validator"],
+  related: ["json-diff", "jsonpath-tester", "json-size-profiler"],
   network: false,
 };

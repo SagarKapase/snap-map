@@ -13,6 +13,11 @@ import { toolBySlug } from "../tools/registry";
  */
 const TOOL_COMPONENTS = {
   "json-formatter": lazy(() => import("../tools/json-formatter/Tool")),
+  "json-diff": lazy(() => import("../tools/json-diff/Tool")),
+  "jsonpath-tester": lazy(() => import("../tools/jsonpath-tester/Tool")),
+  "json-flatten": lazy(() => import("../tools/json-flatten/Tool")),
+  "json-size-profiler": lazy(() => import("../tools/json-size-profiler/Tool")),
+  "ndjson-viewer": lazy(() => import("../tools/ndjson-viewer/Tool")),
 };
 
 const Loading = () => (

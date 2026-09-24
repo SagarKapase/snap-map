@@ -11,6 +11,11 @@
  * here, and add its loader to `src/pages/ToolPage.jsx`.
  */
 import jsonFormatter from "./json-formatter/meta.js";
+import jsonDiff from "./json-diff/meta.js";
+import jsonPathTester from "./jsonpath-tester/meta.js";
+import jsonFlatten from "./json-flatten/meta.js";
+import jsonSizeProfiler from "./json-size-profiler/meta.js";
+import ndjsonViewer from "./ndjson-viewer/meta.js";
 
 /** The groups the index page sorts by, in the order they are shown. */
 export const TOOL_CATEGORIES = [
@@ -23,7 +28,7 @@ export const TOOL_CATEGORIES = [
   { id: "format", label: "Formats", blurb: "Conversions between the formats APIs are written in." },
 ];
 
-export const TOOLS = [jsonFormatter];
+export const TOOLS = [jsonFormatter, jsonDiff, jsonPathTester, jsonFlatten, jsonSizeProfiler, ndjsonViewer];
 
 export const toolBySlug = (slug) => TOOLS.find((tool) => tool.slug === slug) || null;
 

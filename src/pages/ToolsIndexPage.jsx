@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Braces, GitCompare, KeyRound, Search, ShieldCheck, Wrench } from "lucide-react";
+import { Braces, GitCompare, KeyRound, ListTree, Rows3, Scale, SearchCode, Search, ShieldCheck, Wrench } from "lucide-react";
 import LandingNav from "../components/landing/LandingNav";
 import LandingFooter from "../components/landing/LandingFooter";
 import { populatedCategories, toolsInCategory, searchTools } from "../tools/registry";
@@ -8,7 +8,15 @@ import { useDocumentHead, SITE_URL } from "../utils/seo";
 import "../tools.css";
 
 /** Icons live here, not in the registry — that file has to stay readable by Node. */
-const ICONS = { braces: Braces, "key-round": KeyRound, "git-compare": GitCompare };
+const ICONS = {
+  braces: Braces,
+  "key-round": KeyRound,
+  "git-compare": GitCompare,
+  "search-code": SearchCode,
+  "list-tree": ListTree,
+  scale: Scale,
+  rows: Rows3,
+};
 
 /**
  * What is coming, named honestly. An index with one card on it looks broken;
@@ -17,8 +25,6 @@ const ICONS = { braces: Braces, "key-round": KeyRound, "git-compare": GitCompare
  * as it is built.
  */
 const COMING = [
-  "JSON diff",
-  "JSONPath tester",
   "JWT decoder & verifier",
   "CORS preflight simulator",
   "HMAC signature calculator",

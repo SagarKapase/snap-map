@@ -204,18 +204,25 @@ adds nothing to the main bundle — every part of it is a lazy chunk (registry
 **Goal:** volume on the highest-frequency queries, all reusing Phase 1's
 parser.
 
-- [ ] **JSON diff** — structural, key order ignored, array strategies
+- [x] **JSON diff** — structural, key order ignored, array strategies
       (index / key / set). Hook: "Diff two API versions instead."
-- [ ] **JSONPath / JMESPath tester** — live query, result highlighting, path
+- [x] **JSONPath / JMESPath tester** — live query, result highlighting, path
       autocomplete from the document. Hook: query a playground response.
-- [ ] **JSON flatten / unflatten** — dotted keys ↔ nested, CSV export.
-- [ ] **JSON size profiler** — which keys and arrays account for the bytes,
+- [x] **JSON flatten / unflatten** — dotted keys ↔ nested, CSV export.
+- [x] **JSON size profiler** — which keys and arrays account for the bytes,
       with a gzip estimate. Hook: payload audit for an API.
-- [ ] **NDJSON / JSON Lines viewer** — stream a large file, filter, sample.
+- [x] **NDJSON / JSON Lines viewer** — stream a large file, filter, sample.
 
-**Note:** jq is deliberately dropped from the JSONPath tool. A real jq needs
-a WASM build; JSONPath and JMESPath are a few hundred lines each. The page
-says so rather than pretending.
+**Note:** jq and JMESPath are both dropped from the JSONPath tool, and the
+page says so. Each is a separate language rather than a dialect of this one.
+
+**Done.** Five pages, 398–466 words of prerendered copy each. The diff works
+on syntax trees rather than values, so two ids beyond the precision of a
+double still compare as the different numbers they are, and a type change is
+reported as one — "number → string" is usually the whole story. The NDJSON
+filter runs a path over the file as though it were one array, which is one
+pass instead of one query per line. The size profiler measures gzip with the
+browser's own compressor rather than estimating it.
 
 ---
 
