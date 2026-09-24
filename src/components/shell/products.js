@@ -1,4 +1,4 @@
-import { Home, Waypoints, Network, ArrowRightLeft } from "lucide-react";
+import { Home, Waypoints, Network, ArrowRightLeft, Wrench } from "lucide-react";
 import { SOAP_WORKBENCH } from "../../features";
 
 /**
@@ -10,6 +10,7 @@ const ALL_PRODUCTS = [
   { id: "home", label: "Home", to: "/home", icon: Home, hint: "Recent APIs, workspaces and tools" },
   { id: "map", label: "API Map", to: "/workspace", icon: Waypoints, hint: "One specification: map, playground, audit, tools" },
   { id: "graph", label: "Contract Graph", to: "/graph", icon: Network, hint: "Many services: shared entities, duplicates, dependencies", requiresAccount: true },
+  { id: "tools", label: "Explore Tools", to: "/tools", icon: Wrench, hint: "Free standalone tools: JSON, tokens, HTTP, specs" },
   { id: "soap", label: "SOAP Workbench", to: "/soap", icon: ArrowRightLeft, hint: "WSDL to a REST design, OpenAPI, adapters and parity tests", enabled: SOAP_WORKBENCH },
 ];
 

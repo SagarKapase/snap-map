@@ -10,6 +10,9 @@
  *     article already in the HTML, its own title, description, canonical
  *     link, social cards and BlogPosting data;
  *   – the blog index and the landing page get their own tags too;
+ *   – every Explore Tool gets `dist/tools/<slug>/index.html` with what the
+ *     tool is for, its questions, and SoftwareApplication and FAQPage data —
+ *     these pages exist to be found, so this step is the point of them;
  *   – `sitemap.xml` and `robots.txt` are written from the same post list.
  *
  * The page still boots the app, which replaces the static article with the
@@ -36,6 +39,7 @@ import {
   faqJsonLd,
 } from "../src/content/home.js";
 import { FAQS } from "../src/content/faqs.js";
+import { TOOLS, populatedCategories, toolsInCategory } from "../src/tools/registry.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -197,12 +201,94 @@ write(
   }),
 );
 
+// ─── A page per tool ──
+// Explore Tools are entry pages: somebody searches for what one of them
+// does, and this is what they find. The writing comes from the tool's own
+// metadata, so the page and the search result can never disagree.
+TOOLS.forEach((tool) => {
+  write(
+    `tools/${tool.slug}`,
+    page({
+      title: tool.seoTitle,
+      description: tool.description,
+      path: `/tools/${tool.slug}`,
+      body: [
+        `<h1>${escape(tool.title)}</h1>`,
+        `<p>${escape(tool.description)}</p>`,
+        ...tool.intro.map((paragraph) => `<p>${escape(paragraph)}</p>`),
+        "<h2>Questions</h2>",
+        ...tool.faqs.flatMap((faq) => [`<h3>${escape(faq.q)}</h3>`, `<p>${escape(faq.a)}</p>`]),
+        `<p><a href="/tools">All developer tools</a></p>`,
+      ].join("\n"),
+      jsonLd: [
+        {
+          "@context": "https://schema.org",
+          "@type": "SoftwareApplication",
+          name: tool.title,
+          applicationCategory: "DeveloperApplication",
+          operatingSystem: "Any modern browser",
+          url: `${site}/tools/${tool.slug}`,
+          description: tool.description,
+          offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: tool.faqs.map((faq) => ({
+            "@type": "Question",
+            name: faq.q,
+            acceptedAnswer: { "@type": "Answer", text: faq.a },
+          })),
+        },
+      ],
+    }),
+  );
+});
+
+// ─── The tools index ──
+write(
+  "tools",
+  page({
+    title: "Free Developer Tools for APIs — JSON, JWT, HTTP, OpenAPI",
+    description:
+      "Free tools for JSON, JWTs, HTTP headers, OpenAPI and XML — formatters, validators, converters and decoders. Every one runs in your browser; nothing is uploaded.",
+    path: "/tools",
+    body: [
+      "<h1>Free tools for working with APIs.</h1>",
+      "<p>Small, sharp pages for the things you need once an hour: read a broken JSON file, decode a token, work out why a request was blocked. No account, no upload, no install — every tool runs in your browser.</p>",
+      ...populatedCategories().flatMap((category) => [
+        `<h2>${escape(category.label)}</h2>`,
+        `<p>${escape(category.blurb)}</p>`,
+        "<ul>",
+        ...toolsInCategory(category.id).map(
+          (tool) => `<li><a href="/tools/${tool.slug}">${escape(tool.title)}</a> — ${escape(tool.description)}</li>`,
+        ),
+        "</ul>",
+      ]),
+    ].join("\n"),
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: "Free developer tools for APIs",
+      url: `${site}/tools`,
+      hasPart: TOOLS.map((tool) => ({
+        "@type": "SoftwareApplication",
+        name: tool.title,
+        url: `${site}/tools/${tool.slug}`,
+        applicationCategory: "DeveloperApplication",
+      })),
+    },
+  }),
+);
+
 // ─── sitemap.xml and robots.txt ──
 const today = new Date().toISOString().slice(0, 10);
 const urls = [
   { loc: "/", priority: "1.0", changefreq: "weekly", lastmod: today },
   { loc: "/blog", priority: "0.8", changefreq: "weekly", lastmod: posts[0]?.date || today },
   ...posts.map((post) => ({ loc: `/blog/${post.slug}`, priority: "0.7", changefreq: "monthly", lastmod: post.date || today })),
+  { loc: "/tools", priority: "0.9", changefreq: "weekly", lastmod: today },
+  ...TOOLS.map((tool) => ({ loc: `/tools/${tool.slug}`, priority: "0.8", changefreq: "monthly", lastmod: today })),
 ];
 
 writeFileSync(
@@ -241,7 +327,9 @@ Sitemap: ${site}/sitemap.xml
 `,
 );
 
-console.log(`SEO: ${posts.length} post page${posts.length === 1 ? "" : "s"}, the blog index, the landing page, sitemap.xml and robots.txt written to ${dist} for ${site}`);
+console.log(
+  `SEO: ${posts.length} post page${posts.length === 1 ? "" : "s"}, ${TOOLS.length} tool page${TOOLS.length === 1 ? "" : "s"}, the blog and tools indexes, the landing page, sitemap.xml and robots.txt written to ${dist} for ${site}`,
+);
 if (!process.env.VITE_SITE_URL && !args.includes("--site")) {
   console.log("     (VITE_SITE_URL is unset, so canonical links use the default. Set it to the real domain before deploying.)");
 }

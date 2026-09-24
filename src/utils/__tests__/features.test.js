@@ -13,7 +13,7 @@ describe("feature flags", () => {
   });
 
   it("offers no route to a feature that is off", () => {
-    expect(PRODUCTS.map((p) => p.id)).toEqual(["home", "map", "graph"]);
+    expect(PRODUCTS.map((p) => p.id)).toEqual(["home", "map", "graph", "tools"]);
     expect(PRODUCTS.some((p) => p.to === "/soap")).toBe(false);
     expect(productFor("/soap")).toBeNull();
     // The products that are on still resolve, including the alias.
@@ -21,6 +21,9 @@ describe("feature flags", () => {
     expect(productFor("/workspace")?.id).toBe("map");
     expect(productFor("/app")?.id).toBe("map");
     expect(productFor("/home")?.id).toBe("home");
+    // A tool page is still inside Explore Tools, so the sidebar keeps it lit.
+    expect(productFor("/tools")?.id).toBe("tools");
+    expect(productFor("/tools/json-formatter")?.id).toBe("tools");
   });
 
   it("leaves the engine in place, so nothing has to be rebuilt to bring it back", async () => {
