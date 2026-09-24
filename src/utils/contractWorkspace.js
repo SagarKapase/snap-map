@@ -62,6 +62,25 @@ export const listWorkspaces = (userId) =>
 
 export const getWorkspace = (userId, id) => read(userId).find((w) => w.id === id) || null;
 
+/**
+ * Move anything mapped before signing in into the account that just
+ * signed in. Contract Graph needs an account now, so estates left in the
+ * anonymous bucket would otherwise be unreachable — and they are this
+ * browser's own work, already visible to whoever is sitting at it.
+ *
+ * Only the small records move: a payload is keyed by workspace and
+ * service, never by user, so every specification stays where it is.
+ * Returns the workspaces that were claimed.
+ */
+export const claimAnonymousWorkspaces = (userId) => {
+  if (!userId) return [];
+  const orphans = read(null);
+  if (!orphans.length) return [];
+  if (!write(userId, [...orphans, ...read(userId)])) return [];
+  write(null, []);
+  return orphans;
+};
+
 export const createWorkspace = (userId, name) => {
   const list = read(userId);
   const workspace = { id: uid("ws"), name: cleanName(name, `Workspace ${list.length + 1}`), createdAt: now(), updatedAt: now(), services: [] };

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Network, Plus, LogOut, LogIn, X, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Network, Plus, LogOut, LogIn, X, PanelLeftClose, PanelLeftOpen, Lock } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { PRODUCTS, productFor } from "./products";
 import { useAuth } from "../auth/useAuth";
@@ -59,24 +59,27 @@ const AppSidebar = ({ workspaces = [], drawer = false, collapsed = false, onTogg
           {PRODUCTS.map((p) => {
             const Icon = p.icon;
             const active = current?.id === p.id;
+            const locked = p.requiresAccount && !user;
             return (
               <Link
                 key={p.id}
                 to={p.to}
                 onClick={onNavigate}
-                title={p.hint}
-                aria-label={p.label}
+                title={locked ? `${p.hint} — sign in to use it` : p.hint}
+                aria-label={locked ? `${p.label}, sign in required` : p.label}
                 aria-current={active ? "page" : undefined}
                 className={`hm-nav-item${active ? " is-active" : ""}`}
               >
                 <span className="hm-nav-icon"><Icon size={16} /></span>
                 <span className="hm-nav-text">{p.label}</span>
+                {locked && <Lock size={12} className="hm-nav-lock" aria-hidden="true" />}
               </Link>
             );
           })}
         </div>
       </nav>
 
+      {user && (
       <nav className="hm-nav-group" aria-label="Workspaces">
         <div className="hm-nav-label">WORKSPACES</div>
         <div className="hm-nav">
@@ -94,6 +97,7 @@ const AppSidebar = ({ workspaces = [], drawer = false, collapsed = false, onTogg
           </Link>
         </div>
       </nav>
+      )}
 
       <div className="hm-side-foot">
         {user ? (

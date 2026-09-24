@@ -5,7 +5,7 @@ import {
   ZoomIn, ZoomOut, RotateCcw, Search, Play, Share2,
   Check, Link2, Waypoints, Table2, Braces, Save, Activity, Zap, Globe,
   Server, BarChart3, Users, BookOpen, ShieldAlert, Network, GitCompareArrows,
-  Wifi, Plus, Download, Scan, FolderOpen, Crosshair, Github, ShieldCheck,
+  Wifi, Plus, Download, Scan, FolderOpen, Crosshair, ShieldCheck,
   AlertCircle, Target, Upload, Code2, WandSparkles, Lock,
 } from "lucide-react";
 import { GRAPH_STYLES, SAMPLE_DATA } from "./utils/constants";
@@ -170,16 +170,19 @@ const PostmanGraphViewer = () => {
   const { user } = useAuth();
   const [accountPrompt, setAccountPrompt] = useState(null);
   const currentRecentRef = useRef(null);
-  const requireAccount = useCallback((run) => {
+  const requireAccount = useCallback((run, prompt) => {
     if (user) {
       run();
       return;
     }
     const recent = currentRecentRef.current;
-    setAccountPrompt({
-      feature: "Postman companion",
-      next: `/workspace?${recent ? `recent=${encodeURIComponent(recent)}&` : ""}tool=postman`,
-    });
+    setAccountPrompt(
+      prompt || {
+        feature: "Postman companion",
+        reason: "Connecting a Postman account moves collections between your Postman workspaces and Vizroute. It is tied to your Vizroute account so the connection, and what you push, stay yours.",
+        next: `/workspace?${recent ? `recent=${encodeURIComponent(recent)}&` : ""}tool=postman`,
+      },
+    );
   }, [user]);
   const [pushPayload, setPushPayload] = useState(null);
   const [pushLabel, setPushLabel] = useState("");
@@ -890,14 +893,24 @@ const PostmanGraphViewer = () => {
   }, [view]);
 
   /** Hand the loaded document to the multi-service map. */
-  const openContractGraph = useCallback(() => {
-    if (!collection) {
-      navigate("/graph");
-      return;
-    }
-    const name = collection?.info?.title || collection?.info?.name || collection?.name || "";
-    navigate("/graph", { state: { addSpec: collection, name } });
-  }, [collection, navigate]);
+  // Contract Graph needs an account, so a signed-out visitor is told here
+  // rather than losing the document to a redirect: signing in brings them
+  // back to this API, where the same action then works.
+  const openContractGraph = useCallback(() => requireAccount(
+    () => {
+      if (!collection) {
+        navigate("/graph");
+        return;
+      }
+      const name = collection?.info?.title || collection?.info?.name || collection?.name || "";
+      navigate("/graph", { state: { addSpec: collection, name } });
+    },
+    {
+      feature: "Contract Graph",
+      reason: "Contract Graph maps this API against every other one you have and keeps that estate for next time. An account is what it belongs to.",
+      next: `/workspace${currentRecentRef.current ? `?recent=${encodeURIComponent(currentRecentRef.current)}` : ""}`,
+    },
+  ), [collection, navigate, requireAccount]);
 
   // ── Sorted match list (stable order) ──
   const matchList = useMemo(() => {
@@ -981,10 +994,10 @@ const PostmanGraphViewer = () => {
     { id: "mock", group: "Tools", icon: Server, label: "Mock server", keywords: "stub fake", run: () => openTool(setShowMockServer) },
     { id: "load", group: "Tools", icon: BarChart3, label: "Load tester", keywords: "benchmark stress", run: () => openTool(setShowLoadTester) },
     { id: "workspace", group: "Tools", icon: Users, label: "Workspaces", keywords: "team", run: () => openTool(setShowWorkspace) },
-    { id: "autoimport", group: "Tools", icon: Wifi, label: "Auto-import from URL", keywords: "github sync remote", run: () => openTool(setShowAutoImport) },
+    { id: "autoimport", group: "Tools", icon: Wifi, label: "Auto-import from URL", keywords: "url sync remote fetch", run: () => openTool(setShowAutoImport) },
     { id: "diff", group: "Tools", icon: GitCompareArrows, label: "API diff", keywords: "compare versions", run: () => openFullView("diff") },
     { id: "breaking", group: "Tools", icon: ShieldAlert, label: "Breaking changes", keywords: "compatibility", run: () => openFullView("breaking") },
-    { id: "multi", group: "Tools", icon: Network, label: "Add to Contract Graph", hint: "Map this API with the rest of the estate", keywords: "services dependencies multi contract graph estate", run: openContractGraph },
+    { id: "multi", group: "Tools", icon: user ? Network : Lock, label: "Add to Contract Graph", hint: user ? "Map this API with the rest of the estate" : "Sign in required", keywords: "services dependencies multi contract graph estate", run: openContractGraph },
   ], [openPlayground, openBlankRequest, openContractGraph, handleFitView, handleShare, handleCopyEmbed, focusOnNode, selectedNode, openTool, openFullView, openPostmanPush, requireAccount, user]);
 
   const endpointCount = stats.total || nodes.filter((n) => n.type === "request").length;
@@ -1064,7 +1077,7 @@ const PostmanGraphViewer = () => {
       {accountPrompt && (
         <AccountRequired
           feature={accountPrompt.feature}
-          reason="Connecting a Postman account moves collections between your Postman workspaces and Vizroute. It is tied to your Vizroute account so the connection, and what you push, stay yours."
+          reason={accountPrompt.reason}
           next={accountPrompt.next}
           onClose={() => setAccountPrompt(null)}
         />
@@ -1114,7 +1127,7 @@ const PostmanGraphViewer = () => {
           onOpenPalette={() => setShowPalette(true)}
           onOpenCollections={() => openTool(setShowCollections)}
           onOpenDocs={() => openTool(setShowDocGenerator)}
-          onOpenGithubImport={() => openTool(setShowAutoImport)}
+          onOpenUrlImport={() => openTool(setShowAutoImport)}
           onOpenWorkspaceManager={() => openTool(setShowWorkspace)}
           onOpenEnvManager={() => openTool(setShowEnvManager)}
           onResetView={() => { setCenterTab("map"); handleReset(); }}
@@ -1511,16 +1524,6 @@ const PostmanGraphViewer = () => {
   // import screen; the source link and "back to map" sit in the top bar.
   const importActions = (
     <>
-      <a
-        href="https://github.com/SagarKapase/snap-map"
-        target="_blank"
-        rel="noreferrer noopener"
-        title="Vizroute on GitHub"
-        aria-label="Vizroute on GitHub"
-        className="hm-icon-btn"
-      >
-        <Github size={16} />
-      </a>
       {nodes.length > 0 && (
         <button
           type="button"

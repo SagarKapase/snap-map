@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/jpeg" href="/logo.jpg" />
+    <!-- The Vizroute mark: SVG where it is supported, PNG and .ico behind it.
+         public/favicon.svg is the source; docs/brand.md re-exports the rest. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="/site.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,25 +17,25 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Caveat:wght@500&display=swap"
       rel="stylesheet"
     />
-    <title>Vizroute — Turn APIs Into Interactive Maps</title>
+    <title>Vizroute — Turn any API spec into an interactive map</title>
     <meta
       name="description"
-      content="Visualize OpenAPI, Swagger, Postman, JSON and YAML specifications as interactive API maps. Explore endpoints, inspect schemas and send requests — entirely in your browser."
+      content="Drop in an OpenAPI, Swagger, Postman, cURL, HAR or WSDL file and get a map you can read, send requests from, audit and diff. No account, parsed in your browser."
     />
     <meta name="theme-color" content="#080b12" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Vizroute" />
-    <meta property="og:title" content="Vizroute — Turn APIs Into Interactive Maps" />
+    <meta property="og:title" content="Vizroute — Turn any API spec into an interactive map" />
     <meta
       property="og:description"
-      content="Visualize OpenAPI, Swagger, Postman, JSON and YAML specifications as interactive API maps."
+      content="Read OpenAPI, Swagger, Postman, cURL, HAR and WSDL as an interactive API map — in your browser."
     />
     <meta property="og:image" content="/logo.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Vizroute — Turn APIs Into Interactive Maps" />
+    <meta name="twitter:title" content="Vizroute — Turn any API spec into an interactive map" />
     <meta
       name="twitter:description"
-      content="Visualize OpenAPI, Swagger, Postman, JSON and YAML specifications as interactive API maps."
+      content="Read OpenAPI, Swagger, Postman, cURL, HAR and WSDL as an interactive API map — in your browser."
     />
   </head>
   <body>

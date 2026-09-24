@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Globe, RefreshCw, AlertCircle, Check, Link2, Github,
+  Globe, RefreshCw, AlertCircle, Check, Link2,
   Clock, X, Loader2, Wifi, WifiOff, Play, Pause,
 } from "lucide-react";
 import { parseSpecText } from "../utils/readSpec";

@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { signUp, signIn, signOut, getSession, onAuthChange, validateSignUp, validateSignIn, _setAuthProviderForTests, isLocalAuth } from "../auth";
+import {
+  signUp, signIn, signOut, getSession, onAuthChange, validateSignUp, validateSignIn,
+  _setAuthProviderForTests, isLocalAuth, safeNext, oauthRedirectUrl, buildAuthorizeUrl,
+  readOAuthRedirect, hasOAuthRedirect, oauthProviders, signInWithOAuth, completeOAuthRedirect,
+  stashOAuthError, takeOAuthError, _resetOAuthErrorForTests,
+} from "../auth";
 
 // A minimal Storage so the local provider has somewhere to keep accounts.
 const memory = new Map();
@@ -159,5 +164,127 @@ describe("a custom provider", () => {
     await signOut();
     expect(calls).toEqual([["up", good.email], ["in", good.email], ["out"]]);
     expect(isLocalAuth()).toBe(false);
+  });
+});
+
+describe("signing in with Google or GitHub", () => {
+  it("only ever comes back to a path on this site", () => {
+    expect(safeNext("/graph")).toBe("/graph");
+    expect(safeNext("/graph?id=1#map")).toBe("/graph?id=1#map");
+    // An address bar is not to be trusted with where to send someone next.
+    expect(safeNext("//evil.example.com")).toBe("/home");
+    expect(safeNext("https://evil.example.com")).toBe("/home");
+    expect(safeNext("javascript:alert(1)")).toBe("/home");
+    expect(safeNext("")).toBe("/home");
+    expect(safeNext(null, "/login")).toBe("/login");
+  });
+
+  it("returns to the site root, which every host serves", () => {
+    expect(oauthRedirectUrl("https://vizroute.app")).toBe("https://vizroute.app/");
+    expect(oauthRedirectUrl("https://vizroute.app/")).toBe("https://vizroute.app/");
+    expect(oauthRedirectUrl("http://localhost:5173")).toBe("http://localhost:5173/");
+  });
+
+  it("builds an authorize URL the service will accept", () => {
+    const url = new URL(buildAuthorizeUrl("https://p.supabase.co/auth/v1", "github", "https://vizroute.app/"));
+    expect(url.pathname).toBe("/auth/v1/authorize");
+    expect(url.searchParams.get("provider")).toBe("github");
+    expect(url.searchParams.get("redirect_to")).toBe("https://vizroute.app/");
+  });
+
+  it("reads the tokens out of the fragment it comes back with", () => {
+    const found = readOAuthRedirect({
+      hash: "#access_token=abc.def&refresh_token=r1&expires_in=3600&token_type=bearer",
+    });
+    expect(found.accessToken).toBe("abc.def");
+    expect(found.refreshToken).toBe("r1");
+    expect(found.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("says nothing happened on an ordinary page load", () => {
+    expect(readOAuthRedirect({ hash: "", search: "" })).toBeNull();
+    expect(readOAuthRedirect({ hash: "#features" })).toBeNull();
+    expect(readOAuthRedirect({ search: "?next=/graph" })).toBeNull();
+    expect(hasOAuthRedirect({ hash: "#faq", search: "" })).toBe(false);
+    expect(hasOAuthRedirect({ hash: "#access_token=x", search: "" })).toBe(true);
+  });
+
+  it("turns the service's wording into something worth reading", () => {
+    expect(readOAuthRedirect({ hash: "#error=server_error&error_description=Unsupported+provider" }).error).toMatch(
+      /not switched on/i,
+    );
+    expect(readOAuthRedirect({ search: "?error=access_denied" }).error).toMatch(/cancelled/i);
+    expect(readOAuthRedirect({ hash: "#error_description=The+user+denied+the+request" }).error).toMatch(/cancelled/i);
+    // An error in either place is still an error, and never a session.
+    expect(readOAuthRedirect({ hash: "#error=access_denied&access_token=x" }).accessToken).toBeUndefined();
+  });
+
+  it("offers nothing it cannot do when accounts are local to this browser", async () => {
+    _setAuthProviderForTests("local");
+    expect(oauthProviders()).toEqual([]);
+    await expect(signInWithOAuth({ provider: "google" })).rejects.toThrow(/sign-in service/i);
+  });
+
+  it("offers Google and GitHub when a service is connected", async () => {
+    const started = [];
+    _setAuthProviderForTests({
+      name: "fake",
+      oauth: ["google", "github"],
+      signInWithOAuth: async ({ provider, next }) => {
+        started.push([provider, next]);
+        return { redirecting: true };
+      },
+    });
+    expect(oauthProviders().map((p) => p.id)).toEqual(["google", "github"]);
+    expect(oauthProviders().map((p) => p.label)).toEqual(["Google", "GitHub"]);
+    await signInWithOAuth({ provider: "github", next: "/graph" });
+    expect(started).toEqual([["github", "/graph"]]);
+  });
+
+  it("declines to finish a round trip nobody started", async () => {
+    _setAuthProviderForTests("local");
+    expect(await completeOAuthRedirect({ hash: "", search: "" })).toBeNull();
+    expect(await completeOAuthRedirect(null)).toBeNull();
+  });
+
+  it("builds a session from the tokens, and goes where the person was going", async () => {
+    tabMemory.set("vizroute_oauth_return", JSON.stringify({ next: "/graph", remember: true }));
+    _setAuthProviderForTests({
+      name: "fake",
+      oauth: ["google"],
+      completeOAuth: async ({ accessToken }) => ({ userId: "u7", email: "ada@example.com", name: "Ada", accessToken }),
+    });
+    const result = await completeOAuthRedirect({ hash: "#access_token=tok&expires_in=3600", search: "" });
+    expect(result.next).toBe("/graph");
+    expect(result.session.userId).toBe("u7");
+    expect(getSession()?.email).toBe("ada@example.com");
+    // The round trip is over, so what it left behind is cleared.
+    expect(tabMemory.has("vizroute_oauth_return")).toBe(false);
+  });
+
+  it("reports a refusal instead of half a session", async () => {
+    _setAuthProviderForTests({ name: "fake", oauth: ["google"], completeOAuth: async () => { throw new Error("no"); } });
+    const result = await completeOAuthRedirect({ hash: "#access_token=tok", search: "" });
+    expect(result.error).toBe("no");
+    expect(getSession()).toBeNull();
+  });
+});
+
+describe("a message that has to survive a page load", () => {
+  beforeEach(() => _resetOAuthErrorForTests());
+
+  it("is handed to the sign-in page once, and is gone after that", () => {
+    stashOAuthError("That sign-in option is not switched on for this site yet.");
+    expect(takeOAuthError()).toMatch(/not switched on/);
+    // Read twice in one page load — which React does in development — the
+    // answer is the same, and the next load starts clean.
+    expect(takeOAuthError()).toMatch(/not switched on/);
+    expect(tabMemory.has("vizroute_oauth_error")).toBe(false);
+    _resetOAuthErrorForTests();
+    expect(takeOAuthError()).toBe("");
+  });
+
+  it("is empty when nothing went wrong", () => {
+    expect(takeOAuthError()).toBe("");
   });
 });

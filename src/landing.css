@@ -1,0 +1,417 @@
+/* ─── Landing motion ───────────────────────────────────────────────────
+   The choreography for the marketing page: entrances, scroll reveals,
+   pointer light and the small loops that make the page feel alive.
+
+   Everything animates transform, opacity or filter only, so nothing here
+   makes the browser lay the page out again mid-scroll. Every rule is
+   switched off by the global prefers-reduced-motion block in index.css,
+   and the few that need more than "stop moving" say so at the bottom of
+   this file — content must never be left invisible because motion was
+   turned down. */
+
+.lp {
+  --lp-ease: cubic-bezier(0.22, 0.61, 0.24, 1);
+  --lp-rise: 22px;
+}
+
+/* ── Scroll reveal ──
+   `useReveal` sets data-visible="true" once, and these transitions carry
+   the block in. A child can lag behind its parent with --lp-delay. */
+
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, var(--lp-rise), 0);
+  transition:
+    opacity 0.62s var(--lp-ease) var(--lp-delay, 0ms),
+    transform 0.62s var(--lp-ease) var(--lp-delay, 0ms);
+  will-change: transform, opacity;
+}
+
+.reveal[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+  will-change: auto;
+}
+
+/* A grid whose children arrive one after another. */
+.reveal-stagger > * {
+  opacity: 0;
+  transform: translate3d(0, 16px, 0);
+  transition:
+    opacity 0.55s var(--lp-ease),
+    transform 0.55s var(--lp-ease);
+}
+
+.reveal-stagger[data-visible="true"] > * {
+  opacity: 1;
+  transform: none;
+}
+
+.reveal-stagger[data-visible="true"] > :nth-child(1) { transition-delay: 0ms; }
+.reveal-stagger[data-visible="true"] > :nth-child(2) { transition-delay: 70ms; }
+.reveal-stagger[data-visible="true"] > :nth-child(3) { transition-delay: 140ms; }
+.reveal-stagger[data-visible="true"] > :nth-child(4) { transition-delay: 210ms; }
+.reveal-stagger[data-visible="true"] > :nth-child(5) { transition-delay: 280ms; }
+.reveal-stagger[data-visible="true"] > :nth-child(6) { transition-delay: 350ms; }
+
+/* ── Hero entrance ──
+   The hero is above the fold, so it plays on load rather than on scroll:
+   one line after another, then the product panel. */
+
+@keyframes lpRise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.lp-enter > * {
+  animation: lpRise 0.7s var(--lp-ease) both;
+}
+
+.lp-enter > :nth-child(1) { animation-delay: 0.05s; }
+.lp-enter > :nth-child(2) { animation-delay: 0.13s; }
+.lp-enter > :nth-child(3) { animation-delay: 0.21s; }
+.lp-enter > :nth-child(4) { animation-delay: 0.29s; }
+.lp-enter > :nth-child(5) { animation-delay: 0.37s; }
+.lp-enter > :nth-child(6) { animation-delay: 0.45s; }
+
+/* The gradient in the headline drifts, so the one coloured phrase on the
+   page is never quite still. */
+@keyframes lpSheen {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.lp-gradient-text {
+  background: linear-gradient(100deg, #b06bff 0%, #e0a8ff 35%, #7dd3fc 60%, #b06bff 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: lpSheen 9s ease-in-out infinite;
+}
+
+/* ── The aurora behind the hero ──
+   Two large, heavily blurred blobs on their own compositor layer. They
+   move slowly enough to read as light rather than as animation. */
+
+.lp-aurora {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 1100px;
+  pointer-events: none;
+  overflow: hidden;
+  contain: paint;
+}
+
+.lp-aurora::before,
+.lp-aurora::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.5;
+}
+
+.lp-aurora::before {
+  width: 780px;
+  height: 640px;
+  left: 4%;
+  top: 2%;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.5), transparent 68%);
+  animation: lpDriftA 34s ease-in-out infinite alternate;
+}
+
+.lp-aurora::after {
+  width: 720px;
+  height: 600px;
+  right: 2%;
+  top: 12%;
+  background: radial-gradient(circle, rgba(56, 120, 220, 0.42), transparent 68%);
+  animation: lpDriftB 41s ease-in-out infinite alternate;
+}
+
+@keyframes lpDriftA {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(90px, 60px, 0) scale(1.12); }
+}
+
+@keyframes lpDriftB {
+  from { transform: translate3d(0, 0, 0) scale(1.08); }
+  to { transform: translate3d(-110px, 40px, 0) scale(1); }
+}
+
+/* A dot grid, faded out at the edges, to give the dark a surface. */
+.lp-grid {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 820px;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(130, 145, 180, 0.16) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 78%);
+  opacity: 0.5;
+}
+
+/* ── The product panel in the hero ──
+   Leans towards the pointer; the variables come from usePointerParallax. */
+
+.lp-parallax {
+  transform: translate3d(var(--px, 0), var(--py, 0), 0) rotateX(var(--rx, 0)) rotateY(var(--ry, 0));
+  transition: transform 420ms cubic-bezier(0.18, 0.72, 0.24, 1);
+  transform-style: preserve-3d;
+}
+
+/* ── Buttons ── */
+
+.lp-cta {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    transform 180ms var(--lp-ease),
+    box-shadow 240ms var(--lp-ease),
+    filter 180ms var(--lp-ease);
+}
+
+.lp-cta:hover {
+  transform: translateY(-2px);
+}
+
+.lp-cta:active {
+  transform: translateY(0) scale(0.985);
+}
+
+/* A light crosses the button on hover — once, quickly, not a loop. */
+.lp-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(105deg, transparent 32%, rgba(255, 255, 255, 0.42) 50%, transparent 68%);
+  transform: translateX(-120%);
+  transition: transform 720ms var(--lp-ease);
+}
+
+.lp-cta:hover::after {
+  transform: translateX(120%);
+}
+
+.lp-cta .lp-cta-arrow {
+  transition: transform 220ms var(--lp-ease);
+}
+
+.lp-cta:hover .lp-cta-arrow {
+  transform: translateX(3px);
+}
+
+/* The primary button keeps a slow glow so the eye finds it first. */
+@keyframes lpGlow {
+  0%,
+  100% {
+    box-shadow: 0 10px 30px rgba(168, 85, 247, 0.16);
+  }
+  50% {
+    box-shadow: 0 14px 44px rgba(168, 85, 247, 0.34);
+  }
+}
+
+.lp-cta-primary {
+  animation: lpGlow 4.5s ease-in-out infinite;
+}
+
+.lp-cta-primary:hover {
+  animation-play-state: paused;
+  box-shadow: 0 16px 44px rgba(168, 85, 247, 0.36);
+}
+
+/* ── Cards ──
+   A soft light under the cursor, drawn from --mx/--my by useSpotlight. */
+
+.spotlight {
+  position: relative;
+}
+
+.spotlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms var(--lp-ease);
+  background: radial-gradient(
+    380px circle at var(--mx, 50%) var(--my, 0%),
+    rgba(168, 85, 247, 0.16),
+    transparent 62%
+  );
+}
+
+.spotlight:hover::after {
+  opacity: 1;
+}
+
+/* ── The format marquee ──
+   Two identical tracks slide as one, so the loop has no seam. */
+
+.lp-marquee {
+  position: relative;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+.lp-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: lpMarquee 38s linear infinite;
+}
+
+.lp-marquee:hover .lp-marquee-track {
+  animation-play-state: paused;
+}
+
+@keyframes lpMarquee {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+.lp-marquee-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 26px;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-vz-soft);
+}
+
+/* ── The numbers ── */
+
+.lp-stat-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+/* ── The four steps, joined by a line that draws itself ── */
+
+.lp-track {
+  position: relative;
+}
+
+.lp-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.8), rgba(125, 211, 252, 0.5), transparent);
+  transition: transform 1.5s var(--lp-ease) 0.15s;
+}
+
+.lp-track[data-visible="true"]::before {
+  transform: scaleX(1);
+}
+
+/* ── FAQ ──
+   0fr → 1fr opens a panel to its own height with no JavaScript measuring
+   and no layout jump. */
+
+.lp-faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 340ms var(--lp-ease);
+}
+
+.lp-faq-panel > div {
+  overflow: hidden;
+}
+
+.lp-faq[data-open="true"] .lp-faq-panel {
+  grid-template-rows: 1fr;
+}
+
+.lp-faq-chevron {
+  transition: transform 300ms var(--lp-ease);
+}
+
+.lp-faq[data-open="true"] .lp-faq-chevron {
+  transform: rotate(180deg);
+}
+
+/* ── The mobile menu ── */
+
+.lp-sheet {
+  transform: translate3d(0, -12px, 0);
+  opacity: 0;
+  transition:
+    opacity 220ms var(--lp-ease),
+    transform 260ms var(--lp-ease);
+}
+
+.lp-sheet[data-open="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+.lp-sheet[data-open="true"] a,
+.lp-sheet[data-open="true"] button {
+  animation: lpRise 0.4s var(--lp-ease) both;
+}
+
+.lp-sheet[data-open="true"] > * > :nth-child(1) { animation-delay: 0.04s; }
+.lp-sheet[data-open="true"] > * > :nth-child(2) { animation-delay: 0.09s; }
+.lp-sheet[data-open="true"] > * > :nth-child(3) { animation-delay: 0.14s; }
+.lp-sheet[data-open="true"] > * > :nth-child(4) { animation-delay: 0.19s; }
+
+/* ── When motion is turned down ──
+   The global block in index.css collapses every duration to nothing, which
+   would leave anything that starts at opacity 0 invisible. These rules put
+   that content back, and stop the loops that only decorate. */
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal-stagger > *,
+  .lp-enter > * {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .lp-aurora::before,
+  .lp-aurora::after,
+  .lp-marquee-track,
+  .lp-cta-primary,
+  .lp-gradient-text {
+    animation: none !important;
+  }
+
+  .lp-marquee-track {
+    /* Without the slide, the doubled track would run off the edge. */
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .lp-track::before {
+    transform: scaleX(1);
+  }
+
+  .lp-parallax {
+    transform: none;
+  }
+}

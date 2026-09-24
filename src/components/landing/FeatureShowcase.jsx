@@ -1,10 +1,8 @@
 import {
   Waypoints,
   Zap,
-  GitCompareArrows,
-  Network,
-  FolderOpen,
-  Download,
+  ShieldCheck,
+  Share2,
   ArrowRight,
   Lock,
   CreditCard,
@@ -12,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { PreviewNode } from "./WorkspacePreview";
+import { useReveal, useSpotlight } from "../../utils/motion";
 
 const SPEC_SAMPLE = `openapi: 3.1.0
 info:
@@ -44,40 +43,60 @@ paths:
     get:
       tags: [Payments]`;
 
-// The three strongest differentiators get the large treatment.
-const PRIMARY = [
+/**
+ * The toolset, grouped by what a person is doing. Every line is a tool that
+ * exists in the workspace today — the command palette (Ctrl K) opens each
+ * one by the same name.
+ */
+const GROUPS = [
   {
     icon: Waypoints,
-    title: "Interactive API maps",
-    body: "Five layouts — tree, flowchart, radial, mindmap and force directed. Drag nodes, collapse groups, and fit or focus the graph as you explore.",
+    title: "Read it",
+    body: "The shape of the API, four ways to look at it.",
+    tools: [
+      ["API map", "five layouts, drag, collapse, fit"],
+      ["Table view", "every endpoint as sortable rows"],
+      ["Raw spec", "the source, folded and highlighted"],
+      ["Inspector", "auth, parameters, schemas, examples"],
+      ["Search", "Ctrl / jumps to any endpoint"],
+    ],
   },
   {
     icon: Zap,
-    title: "Inspector and playground",
-    body: "Read the auth, parameters and response schema the spec declares, then fire a real request and copy it as cURL — in the same panel.",
+    title: "Try it",
+    body: "Send the request you are looking at, without leaving the map.",
+    tools: [
+      ["Playground", "real requests, copy as cURL"],
+      ["Environments", "variables per environment"],
+      ["Flow builder", "chain requests into a scenario"],
+      ["Mock responses", "sample data from your schemas"],
+      ["Load tester", "throughput and p95 latency"],
+      ["Health monitor", "which endpoints answer"],
+    ],
   },
   {
-    icon: GitCompareArrows,
-    title: "Diff and breaking changes",
-    body: "Compare two versions of a specification and surface the changes that will break consumers before you ship them.",
-  },
-];
-
-const SECONDARY = [
-  {
-    icon: Network,
-    title: "Multi-service maps",
-    body: "Chart how several specifications depend on one another.",
+    icon: ShieldCheck,
+    title: "Check it",
+    body: "What the specification gets wrong, and what a change would break.",
+    tools: [
+      ["Audit", "lint, security and quality score"],
+      ["Coverage", "spec against a Postman collection"],
+      ["API diff", "two versions, side by side"],
+      ["Breaking changes", "what consumers would feel"],
+    ],
   },
   {
-    icon: FolderOpen,
-    title: "Collections and sharing",
-    body: "Save specs in your browser, or share a map through a compressed link.",
-  },
-  {
-    icon: Download,
-    title: "Export and docs",
-    body: "Export the map as PNG or SVG, the source as JSON, or generate documentation.",
+    icon: Share2,
+    title: "Pass it on",
+    body: "Everything leaves in a form someone else can open.",
+    tools: [
+      ["Export & convert", "OpenAPI 3.1, Swagger 2.0, Postman, .http"],
+      ["Images", "the map as PNG or SVG"],
+      ["Doc generator", "Markdown reference from the spec"],
+      ["Share link", "the whole map inside a URL"],
+      ["Embed", "an iframe for a README or wiki"],
+      ["Collections", "keep specs in this browser"],
+    ],
   },
 ];
 
@@ -89,13 +108,41 @@ const GLANCE_NODES = [
   { label: "Invoices", count: 14, icon: FileText, x: 50, y: 86 },
 ];
 
-const FeatureShowcase = () => (
+/** One group of tools, with a light that follows the pointer across it. */
+const ToolGroup = ({ group }) => {
+  const spotlight = useSpotlight();
+  return (
+    <article
+      {...spotlight}
+      className={`lift-card flex h-full flex-col overflow-hidden rounded-[14px] border border-vz-line bg-gradient-to-b from-vz-panel to-[#0a0f18] p-6 ${spotlight.className || ""}`}
+    >
+      <span className="mb-5 grid h-[42px] w-[42px] place-items-center rounded-[11px] border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2">
+        <group.icon size={18} aria-hidden="true" />
+      </span>
+      <h3 className="mb-2 text-[16px] font-semibold text-vz-text">{group.title}</h3>
+      <p className="mb-5 text-[13px] leading-[1.6] text-vz-soft">{group.body}</p>
+      <ul className="space-y-2.5 border-t border-vz-line-soft pt-4">
+        {group.tools.map(([name, detail]) => (
+          <li key={name} className="min-w-0">
+            <span className="block text-[12.5px] font-semibold text-vz-text">{name}</span>
+            <span className="block text-[11.5px] leading-[1.5] text-vz-dim">{detail}</span>
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+};
+
+const FeatureShowcase = () => {
+  const [introRef] = useReveal();
+  const [toolsRef] = useReveal();
+  return (
   <section
     id="features"
     className="approach-scene mx-auto max-w-[1500px] scroll-mt-24 px-5 py-16 sm:px-8 lg:py-24"
   >
     {/* ── Spec → map ─────────────────────────────── */}
-    <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
+    <div ref={introRef} className="reveal grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
       {/* min-w-0 on both columns keeps the code panel from widening the page */}
       <div className="min-w-0">
         <h2 className="max-w-[520px] text-[clamp(1.9rem,2.6vw,2.6rem)] font-extrabold leading-[1.1] tracking-[-0.028em] text-vz-text">
@@ -122,7 +169,7 @@ const FeatureShowcase = () => (
         </ul>
       </div>
 
-      <div className="approach grid min-w-0 grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
+      <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
         <div className="relative min-w-0 overflow-hidden rounded-[14px] border border-vz-line bg-vz-panel">
           <div className="flex items-center gap-2 border-b border-vz-line-soft px-3 py-2">
             <span className="text-[10px] uppercase tracking-wider text-vz-dim">
@@ -191,47 +238,32 @@ const FeatureShowcase = () => (
       </div>
     </div>
 
-    {/* ── Feature grid ───────────────────────────── */}
-    <div className="approach lift-scene mt-20 grid grid-cols-1 gap-4 md:grid-cols-3">
-      {PRIMARY.map((feature) => (
-        <article
-          key={feature.title}
-          className="lift-card h-full overflow-hidden rounded-[14px] border border-vz-line bg-gradient-to-b from-vz-panel to-[#0a0f18] p-6"
-        >
-          <span className="mb-5 grid h-[42px] w-[42px] place-items-center rounded-[11px] border border-vz-accent/25 bg-vz-accent/10 text-vz-accent-2">
-            <feature.icon size={18} aria-hidden="true" />
-          </span>
-          <h3 className="mb-2.5 text-[16px] font-semibold text-vz-text">
-            {feature.title}
-          </h3>
-          <p className="text-[13.5px] leading-[1.65] text-vz-soft">
-            {feature.body}
-          </p>
-        </article>
-      ))}
-    </div>
+    {/* ── The toolset, by what you are doing ─────── */}
+    <div className="mt-20">
+      <h2 className="max-w-[620px] text-[clamp(1.6rem,2.2vw,2.1rem)] font-extrabold leading-[1.12] tracking-[-0.026em] text-vz-text">
+        Everything that comes with the map.
+      </h2>
+      <p className="mt-4 max-w-[620px] text-[15px] leading-[1.72] text-vz-soft">
+        Twenty-one tools, all in the same tab, all on the specification you
+        just opened. Ctrl K opens any of them by name.
+      </p>
 
-    <div className="approach lift-scene mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-      {SECONDARY.map((feature) => (
-        <article
-          key={feature.title}
-          className="lift-card flex items-start gap-3.5 overflow-hidden rounded-[12px] border border-vz-line-soft bg-vz-panel/50 p-4"
-        >
-          <span className="mt-0.5 grid h-[30px] w-[30px] flex-shrink-0 place-items-center rounded-[9px] border border-vz-line bg-vz-panel-2 text-vz-soft">
-            <feature.icon size={14} aria-hidden="true" />
-          </span>
-          <span>
-            <h3 className="mb-1 text-[13.5px] font-semibold text-vz-text">
-              {feature.title}
-            </h3>
-            <p className="text-[12.5px] leading-[1.6] text-vz-dim">
-              {feature.body}
-            </p>
-          </span>
-        </article>
-      ))}
+      <div ref={toolsRef} className="reveal-stagger lift-scene mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {GROUPS.map((group) => (
+          <ToolGroup key={group.title} group={group} />
+        ))}
+      </div>
+
+      <p className="mt-5 text-[12.5px] leading-[1.6] text-vz-dim">
+        Optional, and yours to switch on: an AI assistant that answers
+        questions about the open spec, drafts missing descriptions and explains
+        a failing response — it runs on an OpenRouter key you paste in, and is
+        the only part of the workspace that talks to anyone but the API you are
+        testing.
+      </p>
     </div>
   </section>
-);
+  );
+};
 
 export default FeatureShowcase;

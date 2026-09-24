@@ -2,7 +2,10 @@ import "./App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import LandingPage from "./pages/LandingPage";
+import BlogIndexPage from "./pages/BlogIndexPage";
+import BlogPostPage from "./pages/BlogPostPage";
 import { AuthProvider } from "./components/auth/AuthContext";
+import AccountGate from "./components/auth/AccountGate";
 import { useAuth } from "./components/auth/useAuth";
 
 // The landing page is the entry route, so it ships in the main chunk.
@@ -16,6 +19,10 @@ const ContractGraphPage = lazy(() => import("./pages/ContractGraphPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const SignupPage = lazy(() => import("./pages/SignupPage"));
+import { SOAP_WORKBENCH } from "./features";
+
+// Off for now (src/features.js): the import is skipped, so its chunk is not built either.
+const SoapWorkbenchPage = SOAP_WORKBENCH ? lazy(() => import("./pages/SoapWorkbenchPage")) : null;
 
 const Loader = () => (
   <div className="flex h-screen w-full items-center justify-center bg-vz-bg">
@@ -43,9 +50,29 @@ function App() {
         <Routes>
           <Route path="/" element={<RootGate />} />
           <Route path="/landing" element={<LandingPage />} />
+          <Route path="/blog" element={<BlogIndexPage />} />
+          <Route path="/blog/:slug" element={<BlogPostPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
           <Route path="/home" element={<HomePage />} />
-          <Route path="/graph" element={<ContractGraphPage />} />
+          {/* Contract Graph keeps an estate, so it needs somewhere to keep it: an account. */}
+          <Route
+            path="/graph"
+            element={(
+              <AccountGate
+                feature="Contract Graph"
+                reason="Contract Graph maps every API you have against each other and keeps that estate for next time. An account is what it belongs to."
+                points={[
+                  "Workspaces that are yours, kept between visits and browsers",
+                  "Shared entities, duplicate endpoints and dependencies across services",
+                  "Import and export a whole estate, and share a map with your team",
+                ]}
+              >
+                <ContractGraphPage />
+              </AccountGate>
+            )}
+          />
+          {/* Off for now (src/features.js); the route answers again with VITE_SOAP_WORKBENCH=on. */}
+          <Route path="/soap" element={SOAP_WORKBENCH ? <SoapWorkbenchPage /> : <Navigate to="/home" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/embed" element={<EmbedMap />} />

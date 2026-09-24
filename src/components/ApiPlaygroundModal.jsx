@@ -46,6 +46,7 @@ import {
   toCurl,
   authToNode,
   bodyToNode,
+  explainFetchFailure,
 } from "../utils/playground";
 import JsonView from "./workspace/JsonView";
 import { toJsonText } from "../utils/format";
@@ -469,12 +470,12 @@ const ApiPlaygroundModal = ({
       if (err.name === "TimeoutError")
         setReqError(`No response after ${settings.timeoutMs / 1000}s. Raise the timeout in Settings if the API is slow.`);
       else if (err.name === "AbortError") setReqError("Request cancelled.");
-      else
-        setReqError(
-          err.message.includes("Failed to fetch")
-            ? "Network error — the host may not allow cross-origin requests from the browser."
-            : err.message,
-        );
+      else if (err.message.includes("Failed to fetch")) {
+        // "Failed to fetch" hides the reason; a probe tells "nothing listening" from "CORS refused".
+        setReqError("Network error — checking why…");
+        const { text } = await explainFetchFailure(effectiveUrl);
+        setReqError(text);
+      } else setReqError(err.message);
     } finally {
       if (timeout) clearTimeout(timeout);
       abortRef.current = null;

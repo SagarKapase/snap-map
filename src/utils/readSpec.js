@@ -30,3 +30,27 @@ export const parseSpecText = (text) => {
 
   return null;
 };
+
+/**
+ * Read a document that may be a WSDL as well as JSON or YAML. A WSDL comes
+ * back as the OpenAPI document the SOAP workbench proposes for it, so the
+ * map and the graph treat a SOAP service like any other; `wsdl` on the
+ * result says that happened. Returns `null` for anything unreadable, and
+ * `{ error }` when the text is XML that could not be read as a WSDL — a
+ * person who drops an XSD alone deserves to be told which file it needs.
+ */
+export const readSpecOrWsdl = async (text, name = "") => {
+  const source = String(text ?? "");
+  if (!source.trim()) return null;
+  if (/^\s*(<\?xml|<!DOCTYPE|<!--|<[A-Za-z_:])/i.test(source.slice(0, 2000))) {
+    const { wsdlToOpenApi } = await import("./soap/index.js");
+    try {
+      const { spec, service } = wsdlToOpenApi(source, { name });
+      return { spec, wsdl: true, service, error: "" };
+    } catch (e) {
+      return { spec: null, wsdl: true, service: null, error: e.message };
+    }
+  }
+  const spec = parseSpecText(source);
+  return spec ? { spec, wsdl: false, service: null, error: "" } : null;
+};

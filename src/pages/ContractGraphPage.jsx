@@ -19,13 +19,14 @@ import { EntitiesView, DuplicatesView, ConceptsView, FindingsView, ServicesListV
 import ServiceDetails, { EdgeDetails } from "../components/contractgraph/ServiceDetails";
 import { LAYOUTS } from "../utils/serviceLayout";
 import { buildContractGraph, impactOf, toMermaid, normalizeService } from "../utils/contractGraph";
-import { parseSpecText } from "../utils/readSpec";
+import { readSpecOrWsdl } from "../utils/readSpec";
 import { formatLabel } from "../utils/parsers";
 import {
   listWorkspaces, createWorkspace, deleteWorkspace, renameWorkspace, addService, removeService, replaceService,
-  loadServices, exportWorkspace, importWorkspace, MAX_SERVICES,
+  loadServices, exportWorkspace, importWorkspace, claimAnonymousWorkspaces, MAX_SERVICES,
 } from "../utils/contractWorkspace";
 import { SAMPLE_ESTATE } from "../utils/contractSamples";
+import { SOAP_WORKBENCH } from "../features";
 
 const TABS = [
   { id: "map", label: "Map", icon: Waypoints },
@@ -310,6 +311,17 @@ const ContractGraphPage = () => {
   const notify = (kind, text) => setNotices((n) => [...n.slice(-4), { id: Date.now() + Math.random(), kind, text }]);
   const dismiss = (id) => setNotices((n) => n.filter((x) => x.id !== id));
 
+  // Contract Graph needs an account, so an estate mapped in this browser
+  // before signing in would have nowhere to live. It moves here instead.
+  useEffect(() => {
+    if (!userId) return;
+    const claimed = claimAnonymousWorkspaces(userId);
+    if (!claimed.length) return;
+    const list = refresh();
+    setActiveId((current) => current || list[0]?.id || null);
+    notify("ok", `Moved ${claimed.length} workspace${claimed.length === 1 ? "" : "s"} you mapped before signing in into your account.`);
+  }, [userId, refresh]);
+
   const ensureWorkspace = useCallback(() => {
     if (active) return active;
     const ws = createWorkspace(userId, "My estate");
@@ -351,9 +363,23 @@ const ContractGraphPage = () => {
         return null;
       });
       if (text === null) continue;
-      const spec = parseSpecText(text);
+      // A WSDL arrives as the REST design the SOAP workbench proposes for it.
+      const read = await readSpecOrWsdl(text, file.name.replace(/\.(wsdl|xml)$/i, ""));
+      if (read?.wsdl && read.error) {
+        notify("error", `${file.name}: ${read.error}`);
+        continue;
+      }
+      const spec = read?.spec;
       if (!spec || typeof spec !== "object") {
-        notify("error", `${file.name}: not valid JSON or YAML.`);
+        notify("error", `${file.name}: not valid JSON, YAML or WSDL.`);
+        continue;
+      }
+      if (read.wsdl) {
+        const name = read.service?.name || file.name.replace(/\.(wsdl|xml)$/i, "");
+        if (await addParsed(name, spec, "", ws)) {
+          added += 1;
+          notify("ok", `${name}: WSDL read as a proposed REST design (${read.service.operations.length} operations).${SOAP_WORKBENCH ? " Review it in the SOAP Workbench." : ""}`);
+        }
         continue;
       }
       if (spec.vizroute === "contract-graph-workspace" || spec.vizroute === "contract-graph-estate") {
@@ -384,9 +410,14 @@ const ContractGraphPage = () => {
   };
 
   const addPasted = async () => {
-    const spec = parseSpecText(pasteText);
+    const read = await readSpecOrWsdl(pasteText, pasteName.trim());
+    if (read?.wsdl && read.error) {
+      notify("error", read.error);
+      return;
+    }
+    const spec = read?.spec;
     if (!spec || typeof spec !== "object") {
-      notify("error", "That text is not valid JSON or YAML.");
+      notify("error", "That text is not valid JSON, YAML or WSDL.");
       return;
     }
     const name = pasteName.trim() || spec?.info?.title || spec?.info?.name || "";
@@ -409,8 +440,10 @@ const ContractGraphPage = () => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`The server answered ${res.status}.`);
       const text = await res.text();
-      const spec = parseSpecText(text);
-      if (!spec || typeof spec !== "object") throw new Error("The response is not JSON or YAML.");
+      const read = await readSpecOrWsdl(text, url.split("?")[0].split("/").pop());
+      if (read?.wsdl && read.error) throw new Error(read.error);
+      const spec = read?.spec;
+      if (!spec || typeof spec !== "object") throw new Error("The response is not JSON, YAML or WSDL.");
       const name = spec?.info?.title || spec?.info?.name || url.split("/").pop();
       if (await addParsed(name, spec, url)) {
         setUrlText("");
@@ -499,9 +532,14 @@ const ContractGraphPage = () => {
       return null;
     });
     if (text === null) return;
-    const spec = parseSpecText(text);
+    const read = await readSpecOrWsdl(text, file.name.replace(/\.(wsdl|xml)$/i, ""));
+    if (read?.wsdl && read.error) {
+      notify("error", `${file.name}: ${read.error}`);
+      return;
+    }
+    const spec = read?.spec;
     if (!spec || typeof spec !== "object") {
-      notify("error", `${file.name}: not valid JSON or YAML.`);
+      notify("error", `${file.name}: not valid JSON, YAML or WSDL.`);
       return;
     }
     await replaceWith(target, spec, "");
@@ -514,8 +552,10 @@ const ContractGraphPage = () => {
     try {
       const res = await fetch(svc.sourceUrl);
       if (!res.ok) throw new Error(`The server answered ${res.status}.`);
-      const spec = parseSpecText(await res.text());
-      if (!spec || typeof spec !== "object") throw new Error("The response is not JSON or YAML.");
+      const read = await readSpecOrWsdl(await res.text(), svc.name);
+      if (read?.wsdl && read.error) throw new Error(read.error);
+      const spec = read?.spec;
+      if (!spec || typeof spec !== "object") throw new Error("The response is not JSON, YAML or WSDL.");
       await replaceWith(serviceId, spec, svc.sourceUrl);
     } catch (e) {
       notify("error", `${svc.name}: ${/Failed to fetch|NetworkError/.test(e.message) ? "the browser could not fetch that URL (blocked by CORS, or offline)." : e.message}`);
@@ -816,7 +856,7 @@ const ContractGraphPage = () => {
               <button type="button" onClick={() => fileInputRef.current?.click()} className={`cg-drop ${dragOver ? "over" : ""}`}>
                 <Upload size={16} />
                 Drop spec files here, or click
-                <small>OpenAPI, Swagger, Postman · JSON or YAML · many at once</small>
+                <small>OpenAPI, Swagger, Postman, WSDL · JSON, YAML or XML · many at once</small>
               </button>
               <input ref={fileInputRef} type="file" multiple accept=".json,.yaml,.yml,.wsdl,.xml,application/json" className="sr-only" aria-label="Add specification files" onChange={(e) => { addFiles(e.target.files || []); e.target.value = ""; }} />
               <input ref={importInputRef} type="file" accept=".json" className="sr-only" aria-label="Import workspace file" onChange={(e) => { addFiles(e.target.files || []); e.target.value = ""; }} />
