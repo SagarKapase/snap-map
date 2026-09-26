@@ -30,6 +30,33 @@ export const TOOL_CATEGORIES = [
 
 export const TOOLS = [jsonFormatter, jsonDiff, jsonPathTester, jsonFlatten, jsonSizeProfiler, ndjsonViewer];
 
+/**
+ * Tools with a plan but no page yet, in the order docs/explore-tools.md builds
+ * them. They live here rather than in the index page so there is one list of
+ * what this area is, and so nothing can accidentally give one of them a route:
+ * a planned tool has no slug, because it has nowhere to go.
+ *
+ * A name moves out of this list and into a `meta.js` as it is built.
+ */
+export const PLANNED = [
+  { name: "JWT decoder & verifier", category: "auth" },
+  { name: "CORS preflight simulator", category: "auth" },
+  { name: "HMAC signature calculator", category: "auth" },
+  { name: "PKCE generator", category: "auth" },
+  { name: "HTTP status reference", category: "http" },
+  { name: "HTTP header analyser", category: "http" },
+  { name: "Cache-Control explainer", category: "http" },
+  { name: "OpenAPI validator", category: "spec" },
+  { name: "cURL to code", category: "spec" },
+  { name: "OpenAPI ↔ Postman", category: "spec" },
+  { name: "JSON to TypeScript", category: "json" },
+  { name: "JSON to JSON Schema", category: "json" },
+  { name: "XML & XPath", category: "xml" },
+  { name: "WSDL viewer", category: "xml" },
+  { name: "Base64 encoder / decoder", category: "encode" },
+  { name: "Timestamp converter", category: "encode" },
+];
+
 export const toolBySlug = (slug) => TOOLS.find((tool) => tool.slug === slug) || null;
 
 export const toolsInCategory = (id) => TOOLS.filter((tool) => tool.category === id);
@@ -58,6 +85,23 @@ export const searchTools = (query, tools = TOOLS) => {
   if (!terms.length) return null;
   return tools.filter((tool) => {
     const haystack = [tool.title, tool.description, ...(tool.keywords || [])].join(" ").toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  });
+};
+
+/**
+ * Planned tools matching what somebody typed. The same words, over the same
+ * fields, as the search over built tools — so a search for "jwt" that finds
+ * nothing can still answer honestly that it is on the way.
+ */
+export const searchPlanned = (query, planned = PLANNED) => {
+  const terms = String(query || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!terms.length) return planned;
+  return planned.filter((entry) => {
+    const haystack = `${entry.name} ${entry.category}`.toLowerCase();
     return terms.every((term) => haystack.includes(term));
   });
 };

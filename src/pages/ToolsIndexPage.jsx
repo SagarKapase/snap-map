@@ -1,9 +1,26 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Braces, GitCompare, KeyRound, ListTree, Rows3, Scale, SearchCode, Search, ShieldCheck, Wrench } from "lucide-react";
+import {
+  ArrowRight,
+  Braces,
+  Boxes,
+  GitCompare,
+  KeyRound,
+  ListTree,
+  Lock,
+  Rows3,
+  Scale,
+  Search,
+  SearchCode,
+  ShieldCheck,
+  Sparkles,
+  Wrench,
+  Zap,
+} from "lucide-react";
 import LandingNav from "../components/landing/LandingNav";
 import LandingFooter from "../components/landing/LandingFooter";
-import { populatedCategories, toolsInCategory, searchTools } from "../tools/registry";
+import EditorPreview from "../components/tools/EditorPreview";
+import { populatedCategories, toolsInCategory, searchTools, searchPlanned, PLANNED, TOOLS } from "../tools/registry";
 import { useDocumentHead, SITE_URL } from "../utils/seo";
 import "../tools.css";
 
@@ -18,23 +35,13 @@ const ICONS = {
   rows: Rows3,
 };
 
-/**
- * What is coming, named honestly. An index with one card on it looks broken;
- * an index that says what is being built looks like a plan. These are the
- * phases from docs/explore-tools.md, and each name moves up into a real card
- * as it is built.
- */
-const COMING = [
-  "JWT decoder & verifier",
-  "CORS preflight simulator",
-  "HMAC signature calculator",
-  "HTTP status reference",
-  "OpenAPI validator",
-  "cURL to code",
-  "JSON to TypeScript",
-  "XML & XPath",
-  "WSDL viewer",
-  "Base64 & URL encoders",
+/** The queries people actually arrive with. */
+const POPULAR = ["json", "jwt", "cors", "http", "diff", "ndjson", "validator", "openapi"];
+
+const TRUST = [
+  { icon: ShieldCheck, tone: "green", text: "Everything runs in your browser" },
+  { icon: Lock, tone: "accent", text: "Your data never leaves your device" },
+  { icon: Zap, tone: "orange", text: "Fast, and free, and no account" },
 ];
 
 const PAGE_JSON_LD = {
@@ -50,12 +57,15 @@ const ToolCard = ({ tool }) => {
   const Icon = ICONS[tool.icon] || Wrench;
   return (
     <Link to={`/tools/${tool.slug}`} className="tl-card">
-      <span className="tl-card-icon" aria-hidden="true">
-        <Icon size={17} />
+      <span className={`tl-card-icon is-${tool.tone || "accent"}`} aria-hidden="true">
+        <Icon size={16} />
       </span>
-      <span className="min-w-0">
+      <span className="tl-card-body">
         <span className="tl-card-title">{tool.title}</span>
-        <span className="tl-card-text">{tool.description}</span>
+        <span className="tl-card-text">{tool.card || tool.description}</span>
+      </span>
+      <span className="tl-card-go" aria-hidden="true">
+        <ArrowRight size={13} />
       </span>
     </Link>
   );
@@ -63,6 +73,7 @@ const ToolCard = ({ tool }) => {
 
 const ToolsIndexPage = () => {
   const [query, setQuery] = useState("");
+  const searchRef = useRef(null);
 
   useDocumentHead({
     title: "Free developer tools for APIs",
@@ -72,98 +83,164 @@ const ToolsIndexPage = () => {
     jsonLd: PAGE_JSON_LD,
   });
 
-  // Matched against the name, the summary and the words people search for,
-  // so "beautify" finds the formatter even though the page never says it.
+  // One search for the page. `searchTools` is the registry's own, matching
+  // every word typed in any order against names, summaries and keywords.
   const matches = useMemo(() => searchTools(query), [query]);
-
+  const planned = useMemo(() => searchPlanned(query), [query]);
   const groups = populatedCategories();
+
+  const pick = (tag) => {
+    setQuery(tag);
+    searchRef.current?.focus();
+  };
 
   return (
     <div className="tl relative min-h-screen bg-vz-bg text-vz-text">
       <LandingNav />
 
-      <main className="mx-auto max-w-[1180px] px-5 pb-16 pt-10 sm:px-8">
-        <header className="max-w-[720px]">
-          <h1 className="text-[clamp(2rem,3.4vw,2.9rem)] font-extrabold leading-[1.08] tracking-[-0.03em] text-vz-text">
-            Free tools for working with APIs.
-          </h1>
-          <p className="mt-5 text-[15.5px] leading-[1.72] text-vz-soft">
-            Small, sharp pages for the things you need once an hour: read a broken JSON file, decode a token,
-            work out why a request was blocked. No account, no upload, no install.
-          </p>
-          <p className="tl-promise">
-            <ShieldCheck size={13} aria-hidden="true" className="text-vz-green" />
-            Everything runs in your browser. What you paste stays in the tab.
-          </p>
-        </header>
+      <main>
+        {/* ── Hero ── */}
+        <section className="tl-hero" aria-labelledby="tools-heading">
+          <div className="tl-hero-copy">
+            <p className="tl-eyebrow">
+              <Sparkles size={12} aria-hidden="true" />
+              100% free <span aria-hidden="true">·</span> No account <span aria-hidden="true">·</span> Runs in your
+              browser
+            </p>
 
-        <div className="relative mt-10 max-w-[440px]">
-          <label htmlFor="tool-search" className="sr-only">
-            Search the tools
-          </label>
-          <input
-            id="tool-search"
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search — json, jwt, cors…"
-            className="tl-index-search"
-            style={{ paddingLeft: 40 }}
-          />
-          <Search
-            size={16}
-            aria-hidden="true"
-            style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--color-vz-dim)" }}
-          />
-        </div>
+            <h1 id="tools-heading" className="tl-hero-title">
+              Free tools for
+              <br />
+              <span className="tl-hero-gradient">working with APIs.</span>
+            </h1>
 
-        <div className="mt-10">
-          {matches ? (
-            matches.length ? (
-              <section className="tl-group" aria-label={`${matches.length} tools matching ${query}`}>
+            <p className="tl-hero-lede">
+              Small, sharp pages for the things you need once an hour: read a broken JSON file, decode a token, work
+              out why a request was blocked. No account, no upload, no install.
+            </p>
+
+            <ul className="tl-trust">
+              {TRUST.map((item) => (
+                <li key={item.text}>
+                  <span className={`tl-trust-icon is-${item.tone}`} aria-hidden="true">
+                    <item.icon size={13} />
+                  </span>
+                  {item.text}
+                </li>
+              ))}
+            </ul>
+
+            <form className="tl-search" role="search" onSubmit={(e) => e.preventDefault()}>
+              <label htmlFor="tool-search" className="sr-only">
+                Search the tools
+              </label>
+              <Search size={16} aria-hidden="true" className="tl-search-icon" />
+              <input
+                id="tool-search"
+                ref={searchRef}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search tools — json, jwt, cors, formatter…"
+                autoComplete="off"
+                aria-describedby="tool-search-count"
+              />
+              <button type="submit" className="tl-search-go" aria-label="Search">
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            </form>
+
+            <div className="tl-popular">
+              <span className="tl-dim">Popular:</span>
+              {POPULAR.map((tag) => (
+                <button key={tag} type="button" className="tl-chip" onClick={() => pick(tag)}>
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="tl-hero-visual">
+            <EditorPreview />
+          </div>
+        </section>
+
+        {/* ── The directory ── */}
+        <section className="tl-directory" aria-label="All tools">
+          <div className="tl-directory-inner">
+            <p id="tool-search-count" className="sr-only" aria-live="polite">
+              {query
+                ? `${matches.length} ${matches.length === 1 ? "tool" : "tools"} match ${query}`
+                : `${TOOLS.length} tools available`}
+            </p>
+
+            {query ? (
+              <section className="tl-group">
                 <div className="tl-group-head">
                   <h2>
                     {matches.length} {matches.length === 1 ? "tool" : "tools"}
                   </h2>
+                  <p>matching “{query}”</p>
+                  <button type="button" className="tl-view-all" onClick={() => setQuery("")}>
+                    Show all tools
+                    <ArrowRight size={13} aria-hidden="true" />
+                  </button>
                 </div>
-                <div className="tl-grid">
-                  {matches.map((tool) => (
-                    <ToolCard key={tool.slug} tool={tool} />
-                  ))}
-                </div>
+                {matches.length > 0 ? (
+                  <div className="tl-grid">
+                    {matches.map((tool) => (
+                      <ToolCard key={tool.slug} tool={tool} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="tl-empty">
+                    Nothing built yet matches that
+                    {planned.length > 0 ? " — though it may be one of the ones below." : "."}
+                  </p>
+                )}
               </section>
             ) : (
-              <p className="tl-empty">
-                Nothing matches “{query}” yet. It may be one of the ones still being built, below.
-              </p>
-            )
-          ) : (
-            groups.map((group) => (
-              <section key={group.id} className="tl-group" aria-labelledby={`group-${group.id}`}>
-                <div className="tl-group-head">
-                  <h2 id={`group-${group.id}`}>{group.label}</h2>
-                  <p>{group.blurb}</p>
-                </div>
-                <div className="tl-grid">
-                  {toolsInCategory(group.id).map((tool) => (
-                    <ToolCard key={tool.slug} tool={tool} />
-                  ))}
-                </div>
-              </section>
-            ))
-          )}
-        </div>
+              groups.map((group) => (
+                <section key={group.id} className="tl-group" aria-labelledby={`group-${group.id}`}>
+                  <div className="tl-group-head">
+                    <h2 id={`group-${group.id}`}>{group.label} tools</h2>
+                    <p>{group.blurb}</p>
+                    <span className="tl-group-count">
+                      {toolsInCategory(group.id).length} {toolsInCategory(group.id).length === 1 ? "tool" : "tools"}
+                    </span>
+                  </div>
+                  <div className="tl-grid">
+                    {toolsInCategory(group.id).map((tool) => (
+                      <ToolCard key={tool.slug} tool={tool} />
+                    ))}
+                  </div>
+                </section>
+              ))
+            )}
 
-        <section className="tl-soon" aria-labelledby="coming-heading">
-          <h2 id="coming-heading">Being built</h2>
-          <p>
-            These are next, in roughly this order. Each one is a page of its own, working the same way: paste
-            something, get an answer, keep your data.
-          </p>
-          <div className="tl-soon-list">
-            {COMING.map((name) => (
-              <span key={name}>{name}</span>
-            ))}
+            {/* ── What is coming, named but not linked ── */}
+            {planned.length > 0 && (
+              <section className="tl-planned" aria-labelledby="planned-heading">
+                <div className="tl-planned-copy">
+                  <span className="tl-planned-icon" aria-hidden="true">
+                    <Boxes size={17} />
+                  </span>
+                  <div>
+                    <h2 id="planned-heading">More API &amp; dev tools</h2>
+                    <p>
+                      {query
+                        ? "Not built yet, but planned — these match what you searched for."
+                        : "These are next, in roughly this order. Each gets a page of its own, working the same way: paste something, get an answer, keep your data."}
+                    </p>
+                  </div>
+                </div>
+                <ul className="tl-planned-list">
+                  {planned.map((entry) => (
+                    <li key={entry.name}>{entry.name}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
         </section>
       </main>

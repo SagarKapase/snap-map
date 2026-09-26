@@ -82,7 +82,6 @@ const JsonSizeTool = () => {
             value={text}
             onChange={setText}
             placeholder="Paste a response, or drop a .json file."
-            hint="Nothing is uploaded — it is measured in your browser."
           />
           {parsed && !parsed.ok && (
             <div className="tl-notes">

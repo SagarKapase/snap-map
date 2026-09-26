@@ -4,6 +4,8 @@ export default {
   seoTitle: "NDJSON Viewer — read JSON Lines, one record at a time",
   description:
     "Read a JSON Lines file record by record. One bad line does not stop the rest, and you can filter with a word or a JSONPath. Nothing is uploaded.",
+  card: "Read JSON Lines record by record; one bad line stops nothing.",
+  tone: "accent",
   category: "json",
   icon: "rows",
   keywords: [

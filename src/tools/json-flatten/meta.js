@@ -4,6 +4,8 @@ export default {
   seoTitle: "JSON Flatten & Unflatten — dotted keys, and back",
   description:
     "Turn nested JSON into one level of dotted keys and back again, losslessly. Export as CSV or environment lines. Runs in your browser, nothing uploaded.",
+  card: "Dotted keys and back, losslessly. CSV and .env export.",
+  tone: "green",
   category: "json",
   icon: "list-tree",
   keywords: [

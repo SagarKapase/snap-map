@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeftRight } from "lucide-react";
 import { CopyButton, DownloadButton, ErrorLine, PasteArea, ResultPanel } from "../../components/tools/inputs";
+import { Select } from "../../components/tools/Select";
 import { parseJson } from "../../utils/tools/json";
 import { flattenJson, unflattenJson, toCsv, toEnvLines, ARRAY_STYLES } from "../../utils/tools/flatten";
 
@@ -92,47 +93,10 @@ const JsonFlattenTool = () => {
           {direction === "flatten" ? "Nested → flat" : "Flat → nested"}
         </button>
         <span className="tl-controls-sep" aria-hidden="true" />
-        <span className="tl-dim">Separator</span>
-        {DELIMITERS.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => setDelimiter(option.id)}
-            aria-pressed={delimiter === option.id}
-            className={`tl-btn${delimiter === option.id ? " is-on" : ""}`}
-          >
-            {option.label}
-          </button>
-        ))}
-        <span className="tl-controls-sep" aria-hidden="true" />
-        <span className="tl-dim">Indices</span>
-        {ARRAY_STYLES.map((style) => (
-          <button
-            key={style.id}
-            type="button"
-            title={style.hint}
-            onClick={() => setArrays(style.id)}
-            aria-pressed={arrays === style.id}
-            className={`tl-btn${arrays === style.id ? " is-on" : ""}`}
-          >
-            {style.label}
-          </button>
-        ))}
+        <Select label="Separator" value={delimiter} options={DELIMITERS} onChange={setDelimiter} width={78} />
+        <Select label="Indices" value={arrays} options={ARRAY_STYLES} onChange={setArrays} width={86} />
         {direction === "flatten" && (
-          <>
-            <span className="tl-controls-sep" aria-hidden="true" />
-            {OUTPUTS.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setOutput(option.id)}
-                aria-pressed={output === option.id}
-                className={`tl-btn${output === option.id ? " is-on" : ""}`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </>
+          <Select label="As" value={output} options={OUTPUTS} onChange={setOutput} width={102} />
         )}
       </div>
 

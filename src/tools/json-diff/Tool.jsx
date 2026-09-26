@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Minus, MoveRight, Plus, PencilLine } from "lucide-react";
 import { ErrorLine, PasteArea } from "../../components/tools/inputs";
+import { Select } from "../../components/tools/Select";
 import { parseJson } from "../../utils/tools/json";
 import { diffJson, describeDiff, ARRAY_STRATEGIES } from "../../utils/tools/jsonDiff";
 import { detectFormat, formatLabel } from "../../utils/parsers";
@@ -147,19 +148,7 @@ const JsonDiffTool = () => {
       </div>
 
       <div className="tl-controls">
-        <span className="tl-dim">Arrays:</span>
-        {ARRAY_STRATEGIES.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            title={option.hint}
-            onClick={() => setStrategy(option.id)}
-            aria-pressed={strategy === option.id}
-            className={`tl-btn${strategy === option.id ? " is-on" : ""}`}
-          >
-            {option.label}
-          </button>
-        ))}
+        <Select label="Arrays" value={strategy} options={ARRAY_STRATEGIES} onChange={setStrategy} width={128} />
         {strategy === "key" && (
           <>
             <span className="tl-controls-sep" aria-hidden="true" />

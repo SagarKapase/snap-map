@@ -4,6 +4,8 @@ export default {
   seoTitle: "JSONPath Tester — run a path, see where it matched",
   description:
     "Write a JSONPath and watch it match, with the exact path of every result. Filters, slices, unions and recursive descent, all in your browser.",
+  card: "Run a path and see exactly where each result came from.",
+  tone: "red",
   category: "json",
   icon: "search-code",
   keywords: [
