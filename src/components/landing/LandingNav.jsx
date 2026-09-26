@@ -11,6 +11,7 @@ import { POSTS } from "../../utils/blog";
 const LINKS = [
   { label: "Features", href: "/#features" },
   { label: "Use Cases", href: "/#use-cases" },
+  { label: "Explore Tools", to: "/tools" },
   { label: "Questions", href: "/#faq" },
   { label: "Contract Graph", to: "/graph" },
   ...(POSTS.length > 0 ? [{ label: "Blog", to: "/blog" }] : []),

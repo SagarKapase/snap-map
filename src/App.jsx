@@ -18,6 +18,9 @@ const EmbedGraph = lazy(() => import("./pages/EmbedGraph"));
 const ContractGraphPage = lazy(() => import("./pages/ContractGraphPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
+// Explore Tools: an index and one page per tool, each tool its own chunk.
+const ToolsIndexPage = lazy(() => import("./pages/ToolsIndexPage"));
+const ToolPage = lazy(() => import("./pages/ToolPage"));
 const SignupPage = lazy(() => import("./pages/SignupPage"));
 import { SOAP_WORKBENCH } from "./features";
 
@@ -50,6 +53,8 @@ function App() {
         <Routes>
           <Route path="/" element={<RootGate />} />
           <Route path="/landing" element={<LandingPage />} />
+          <Route path="/tools" element={<ToolsIndexPage />} />
+          <Route path="/tools/:slug" element={<ToolPage />} />
           <Route path="/blog" element={<BlogIndexPage />} />
           <Route path="/blog/:slug" element={<BlogPostPage />} />
           <Route path="/workspace" element={<PostmanGraphViewer />} />
