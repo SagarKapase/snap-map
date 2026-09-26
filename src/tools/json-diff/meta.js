@@ -4,6 +4,8 @@ export default {
   seoTitle: "JSON Diff — compare two documents, not two files",
   description:
     "Compare two JSON documents structurally. Key order and formatting are ignored, arrays can be matched by position, by id or as a set. Nothing is uploaded.",
+  card: "Compare two documents structurally, key order ignored.",
+  tone: "blue",
   category: "json",
   icon: "git-compare",
   keywords: [

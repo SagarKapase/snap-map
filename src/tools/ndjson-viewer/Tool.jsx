@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, ArrowLeftRight } from "lucide-react";
 import { CopyButton, DownloadButton, PasteArea } from "../../components/tools/inputs";
-import { formatJson, formatBytes } from "../../utils/tools/json";
+import { formatJson } from "../../utils/tools/json";
 import { parseNdjson, filterRecords, toJsonArray, fromJsonArray, describeNdjson } from "../../utils/tools/ndjson";
 
 const SAMPLE = [
@@ -75,7 +75,7 @@ const NdjsonTool = () => {
             onChange={setText}
             accept=".ndjson,.jsonl,.json,.log,.txt,application/json,text/plain"
             placeholder={'Paste or drop a .ndjson or .jsonl file.\n\n{"id":1}\n{"id":2}'}
-            hint={read.stats.lines ? `${formatBytes(read.stats.bytes)} across ${read.stats.lines} records` : "One complete JSON document per line."}
+            hint={read.stats.lines ? `${read.stats.lines} records` : "One complete JSON document per line."}
           />
 
           {read.keys.length > 0 && (
@@ -108,6 +108,7 @@ const NdjsonTool = () => {
             </div>
           </div>
 
+          <div className="tl-pane-body">
           <ol className="tl-records">
             {filtered.records.length === 0 && (
               <li className="tl-dim" style={{ padding: "14px 16px" }}>
@@ -138,6 +139,10 @@ const NdjsonTool = () => {
               </li>
             )}
           </ol>
+          </div>
+          <div className="tl-pane-foot">
+            <span>{query ? `${filtered.records.length} shown of ${read.records.length}` : describeNdjson(read)}</span>
+          </div>
         </div>
       </div>
     </>

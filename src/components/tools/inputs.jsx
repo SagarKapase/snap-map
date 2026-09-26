@@ -1,14 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, Eraser, FileWarning, Upload } from "lucide-react";
+import CodeEditor from "./CodeEditor";
 
 /**
  * The parts every Explore Tool is built from.
  *
- * Forty-five pages share these, so anything that starts being copied between
- * tools belongs here instead. They are deliberately plain: a text box, a
- * result, a copy button and an error line that points at a place in the
- * text — the same four things nearly every one of these tools needs.
+ * A pane here is one panel: its title bar, its contents and its status line
+ * share a border, the way an editor does. The alternative — a label floating
+ * above a rounded box — reads as a form field, and these are not forms.
+ *
+ * Nothing can be dragged bigger or smaller. The panel is the size it is and
+ * long content scrolls inside it, which is the behaviour that survives
+ * somebody pasting eight thousand lines into it.
  */
+
+/** Bytes as something a person reads. */
+const sizeOf = (text) => {
+  const n = new TextEncoder().encode(text || "").length;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+};
 
 /** Copy some text, and say so for a moment. */
 export const CopyButton = ({ text, label = "Copy", className = "" }) => {
@@ -72,10 +84,10 @@ export const PasteArea = ({
   actions = null,
   hint = "",
   accept = ".json,.txt,application/json,text/plain",
-  spellCheck = false,
 }) => {
   const [over, setOver] = useState(false);
   const [tooBig, setTooBig] = useState("");
+  const [caret, setCaret] = useState({ line: 1, column: 1 });
   const fileRef = useRef(null);
 
   const take = async (file) => {
@@ -109,7 +121,7 @@ export const PasteArea = ({
       </div>
 
       <div
-        className={`tl-drop${over ? " is-over" : ""}`}
+        className={`tl-pane-body${over ? " is-over" : ""}`}
         onDragOver={(e) => {
           e.preventDefault();
           setOver(true);
@@ -121,16 +133,13 @@ export const PasteArea = ({
           take(e.dataTransfer.files?.[0]);
         }}
       >
-        <textarea
+        <CodeEditor
           id={id}
-          ref={textareaRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           placeholder={placeholder}
-          spellCheck={spellCheck}
-          autoCapitalize="off"
-          autoCorrect="off"
-          className="tl-textarea"
+          textareaRef={textareaRef}
+          onCaretChange={setCaret}
         />
         {over && <div className="tl-drop-note">Drop the file to read it</div>}
       </div>
@@ -146,29 +155,56 @@ export const PasteArea = ({
         }}
       />
 
-      {tooBig ? (
-        <p className="tl-pane-foot tl-warn">
-          <FileWarning size={13} aria-hidden="true" />
-          {tooBig}
-        </p>
-      ) : hint ? (
-        <p className="tl-pane-foot">{hint}</p>
-      ) : null}
+      <div className="tl-pane-foot">
+        {tooBig ? (
+          <span className="tl-foot-warn">
+            <FileWarning size={12} aria-hidden="true" />
+            {tooBig}
+          </span>
+        ) : (
+          <>
+            <span className="tl-foot-caret">
+              Ln {caret.line}, Col {caret.column}
+            </span>
+            <span>
+              {String(value || "").split("\n").length} lines · {sizeOf(value)}
+            </span>
+            {hint && <span className="tl-foot-hint">{hint}</span>}
+          </>
+        )}
+      </div>
     </div>
   );
 };
 
-/** The read-only side. */
-export const ResultPanel = ({ label, value, actions = null, foot = "", empty = "Nothing yet." }) => (
+/**
+ * The read-only side.
+ *
+ * Give it `value` for plain text, or `children` when the result has a shape
+ * of its own — a tree, a table, coloured code. Either way it is the same
+ * box, so a tool can offer several views of one answer without the panel
+ * around them moving.
+ */
+export const ResultPanel = ({ label, value, actions = null, foot = "", empty = "Nothing yet.", children }) => (
   <div className="tl-pane">
     <div className="tl-pane-head">
       <span className="tl-pane-label">{label}</span>
       <div className="tl-pane-actions">{actions}</div>
     </div>
-    <pre className="tl-result" tabIndex={0} aria-label={label}>
-      {value || <span className="tl-dim">{empty}</span>}
-    </pre>
-    {foot && <p className="tl-pane-foot">{foot}</p>}
+    <div className="tl-pane-body">
+      {children ? (
+        <div className="tl-result is-view" tabIndex={0} aria-label={label}>
+          {children}
+        </div>
+      ) : (
+        <pre className="tl-result" tabIndex={0} aria-label={label}>
+          {value || <span className="tl-dim">{empty}</span>}
+        </pre>
+      )}
+    </div>
+    <div className="tl-pane-foot">
+      <span>{foot || "\u00a0"}</span>
+    </div>
   </div>
 );
 

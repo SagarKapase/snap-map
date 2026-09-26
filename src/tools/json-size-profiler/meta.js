@@ -4,6 +4,8 @@ export default {
   seoTitle: "JSON Size Profiler — find what your payload weighs",
   description:
     "See which keys and arrays account for the bytes in a JSON payload, how much the field names alone cost, and what it weighs gzipped.",
+  card: "Find which keys and arrays account for the bytes.",
+  tone: "orange",
   category: "json",
   icon: "scale",
   keywords: [

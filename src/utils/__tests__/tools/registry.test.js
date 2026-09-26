@@ -9,6 +9,8 @@ import {
   toolTitle,
   toolSummary,
   searchTools,
+  searchPlanned,
+  PLANNED,
 } from "../../../tools/registry";
 
 /**
@@ -144,5 +146,61 @@ describe("finding a tool", () => {
     expect(searchTools("")).toBeNull();
     expect(searchTools("   ")).toBeNull();
     expect(searchTools(null)).toBeNull();
+  });
+});
+
+describe("tools with a plan and no page", () => {
+  it("names every one once", () => {
+    const names = PLANNED.map((entry) => entry.name);
+    expect(names.length).toBeGreaterThan(5);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("gives none of them a route", () => {
+    // A planned tool has no slug because it has nowhere to go. This is what
+    // stops one being linked, or prerendered as a page that is not there.
+    PLANNED.forEach((entry) => {
+      expect(entry.slug).toBeUndefined();
+      expect(toolBySlug(entry.name)).toBeNull();
+    });
+  });
+
+  it("does not name something that is already built", () => {
+    const built = TOOLS.map((tool) => tool.title.toLowerCase());
+    PLANNED.forEach((entry) => expect(built).not.toContain(entry.name.toLowerCase()));
+  });
+
+  it("puts each in a group the page knows about", () => {
+    const ids = TOOL_CATEGORIES.map((category) => category.id);
+    PLANNED.forEach((entry) => expect(ids).toContain(entry.category));
+  });
+
+  it("is searched with the same words as the built ones", () => {
+    expect(searchPlanned("jwt").map((entry) => entry.name)).toEqual(["JWT decoder & verifier"]);
+    expect(searchPlanned("cors").length).toBe(1);
+    // A search that finds nothing built can still answer honestly.
+    expect(searchTools("cors")).toHaveLength(0);
+    expect(searchPlanned("http").length).toBeGreaterThan(1);
+    expect(searchPlanned("auth").length).toBeGreaterThan(2);
+  });
+
+  it("hands back everything when nothing was typed", () => {
+    expect(searchPlanned("")).toHaveLength(PLANNED.length);
+    expect(searchPlanned(null)).toHaveLength(PLANNED.length);
+  });
+});
+
+describe("what a directory card shows", () => {
+  it.each(TOOLS.map((tool) => [tool.slug, tool]))("%s has one scannable line", (slug, tool) => {
+    // The long description is the search-result snippet and has its own job.
+    // A card needs something a person can read at a glance, in one or two
+    // lines, or six of them stop being comparable.
+    expect(tool.card.length).toBeGreaterThan(20);
+    expect(tool.card.length).toBeLessThanOrEqual(70);
+    expect(tool.card.length).toBeLessThan(tool.description.length);
+  });
+
+  it.each(TOOLS.map((tool) => [tool.slug, tool]))("%s has a tone the page can paint", (slug, tool) => {
+    expect(["accent", "blue", "green", "orange", "red"]).toContain(tool.tone);
   });
 });

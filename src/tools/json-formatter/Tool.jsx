@@ -1,16 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, ArrowRight, Wand2 } from "lucide-react";
-import {
-  CopyButton,
-  DownloadButton,
-  ErrorLine,
-  PasteArea,
-  ResultPanel,
-  SampleMenu,
-} from "../../components/tools/inputs";
+import { CopyButton, DownloadButton, ErrorLine, PasteArea, ResultPanel } from "../../components/tools/inputs";
+import { Select } from "../../components/tools/Select";
+import CodeView from "../../components/tools/CodeView";
+import JsonTree from "../../components/tools/JsonTree";
+import JsonTable from "../../components/tools/JsonTable";
 import { goToPlace } from "../../utils/tools/caret";
-import { parseJson, formatJson, describeStats, formatBytes } from "../../utils/tools/json";
+import { parseJson, formatJson, describeStats } from "../../utils/tools/json";
 import { detectFormat, formatLabel } from "../../utils/parsers";
 
 const SAMPLES = [
@@ -46,6 +43,17 @@ const INDENTS = [
 ];
 
 /**
+ * Three ways to read the same answer. Each one does work the others do not,
+ * which is the whole test for whether an option deserves to be in a menu:
+ * code is the document, tree is its shape, table is its records.
+ */
+const VIEWS = [
+  { id: "code", label: "Code", hint: "The formatted document" },
+  { id: "tree", label: "Tree", hint: "Fold it to see its shape" },
+  { id: "table", label: "Table", hint: "Records as rows" },
+];
+
+/**
  * The JSON formatter.
  *
  * Everything on the page is derived from the text in the box — there is no
@@ -56,6 +64,7 @@ const INDENTS = [
 const JsonFormatterTool = () => {
   const [text, setText] = useState("");
   const [indent, setIndent] = useState("2");
+  const [view, setView] = useState("code");
   const [sortKeys, setSortKeys] = useState(false);
   const [strict, setStrict] = useState(false);
   const inputRef = useRef(null);
@@ -83,21 +92,15 @@ const JsonFormatterTool = () => {
 
   return (
     <>
-      <SampleMenu samples={SAMPLES} onPick={setText} />
-
       <div className="tl-controls">
-        {INDENTS.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => setIndent(option.id)}
-            aria-pressed={indent === option.id}
-            className={`tl-btn${indent === option.id ? " is-on" : ""}`}
-          >
-            {option.label}
+        <span className="tl-dim">Try:</span>
+        {SAMPLES.map((sample) => (
+          <button key={sample.label} type="button" onClick={() => setText(sample.text)} className="tl-chip">
+            {sample.label}
           </button>
         ))}
         <span className="tl-controls-sep" aria-hidden="true" />
+        <Select label="Indent" value={indent} options={INDENTS} onChange={setIndent} width={104} />
         <button
           type="button"
           onClick={() => setSortKeys((v) => !v)}
@@ -126,7 +129,6 @@ const JsonFormatterTool = () => {
             onChange={setText}
             textareaRef={inputRef}
             placeholder={'Paste JSON here, or drop a .json file.\n\n{\n  "hello": "world"\n}'}
-            hint={result?.stats ? `${formatBytes(result.stats.bytes)} · ${result.stats.lines} lines` : "Nothing is uploaded — this runs in your browser."}
           />
 
           {error && (
@@ -168,16 +170,27 @@ const JsonFormatterTool = () => {
 
         <ResultPanel
           label="Formatted"
-          value={output}
-          empty={text.trim() ? "Fix the problem on the left and it appears here." : "Paste something on the left."}
           foot={result?.ok ? describeStats(result.stats) : ""}
           actions={
             <>
+              <Select value={view} options={VIEWS} onChange={setView} align="right" width={86} />
               <CopyButton text={output} />
               <DownloadButton text={output} filename="formatted.json" />
             </>
           }
-        />
+        >
+          {!result?.ok ? (
+            <p className="jt-empty">
+              {text.trim() ? "Fix the problem on the left and it appears here." : "Paste something on the left."}
+            </p>
+          ) : view === "tree" ? (
+            <JsonTree node={result.ast} />
+          ) : view === "table" ? (
+            <JsonTable value={result.value} />
+          ) : (
+            <CodeView text={output} />
+          )}
+        </ResultPanel>
       </div>
 
       {known && (

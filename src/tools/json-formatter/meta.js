@@ -9,6 +9,8 @@ export default {
   seoTitle: "JSON Formatter & Validator — with line-precise errors",
   description:
     "Format, minify and validate JSON in your browser. Line-precise errors, duplicate-key warnings, and big numbers kept exactly as written. Nothing is uploaded.",
+  card: "Format, minify and validate, with line-precise errors.",
+  tone: "accent",
   category: "json",
   icon: "braces",
   keywords: [

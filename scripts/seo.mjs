@@ -39,7 +39,7 @@ import {
   faqJsonLd,
 } from "../src/content/home.js";
 import { FAQS } from "../src/content/faqs.js";
-import { TOOLS, populatedCategories, toolsInCategory } from "../src/tools/registry.js";
+import { TOOLS, PLANNED, populatedCategories, toolsInCategory } from "../src/tools/registry.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -214,7 +214,6 @@ TOOLS.forEach((tool) => {
       path: `/tools/${tool.slug}`,
       body: [
         `<h1>${escape(tool.title)}</h1>`,
-        `<p>${escape(tool.description)}</p>`,
         ...tool.intro.map((paragraph) => `<p>${escape(paragraph)}</p>`),
         "<h2>Questions</h2>",
         ...tool.faqs.flatMap((faq) => [`<h3>${escape(faq.q)}</h3>`, `<p>${escape(faq.a)}</p>`]),
@@ -255,9 +254,10 @@ write(
     path: "/tools",
     body: [
       "<h1>Free tools for working with APIs.</h1>",
-      "<p>Small, sharp pages for the things you need once an hour: read a broken JSON file, decode a token, work out why a request was blocked. No account, no upload, no install — every tool runs in your browser.</p>",
+      "<p>Small, sharp pages for the things you need once an hour: read a broken JSON file, decode a token, work out why a request was blocked. No account, no upload, no install.</p>",
+      "<ul><li>Everything runs in your browser</li><li>Your data never leaves your device</li><li>Fast, and free, and no account</li></ul>",
       ...populatedCategories().flatMap((category) => [
-        `<h2>${escape(category.label)}</h2>`,
+        `<h2>${escape(category.label)} tools</h2>`,
         `<p>${escape(category.blurb)}</p>`,
         "<ul>",
         ...toolsInCategory(category.id).map(
@@ -265,6 +265,9 @@ write(
         ),
         "</ul>",
       ]),
+      "<h2>More API &amp; dev tools</h2>",
+      "<p>These are next, in roughly this order. Each gets a page of its own, working the same way: paste something, get an answer, keep your data.</p>",
+      `<p>${PLANNED.map((entry) => escape(entry.name)).join(", ")}.</p>`,
     ].join("\n"),
     jsonLd: {
       "@context": "https://schema.org",
